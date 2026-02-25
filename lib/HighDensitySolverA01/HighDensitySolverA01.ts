@@ -6,9 +6,123 @@ import {
   applyAffineTransformToPoint,
 } from "../gridToAffineTransform"
 
-type ConnectionName = string
-type CellKey = string
+// --- Interned connection ID ---
+type ConnId = number
 
+// --- Persistent ripped-trace linked list ---
+interface RippedNode {
+  id: ConnId
+  prev: RippedNode | null
+}
+
+function rippedContains(r: RippedNode | null, id: ConnId): boolean {
+  for (let cur = r; cur; cur = cur.prev) if (cur.id === id) return true
+  return false
+}
+
+// --- A* search node (stored in a pool) ---
+interface SearchNode {
+  z: number
+  row: number
+  col: number
+  g: number
+  f: number
+  parentIdx: number // -1 = root
+  ripped: RippedNode | null
+}
+
+// --- Connection segment ---
+interface ConnectionSeg {
+  connId: ConnId
+  startZ: number
+  startRow: number
+  startCol: number
+  endZ: number
+  endRow: number
+  endCol: number
+}
+
+// --- Internal solved route (cell-based) ---
+interface SolvedRouteInternal {
+  connId: ConnId
+  cells: Array<{ z: number; row: number; col: number }>
+  viaCells: Array<{ row: number; col: number }>
+}
+
+// --- Min-heap for A* open set ---
+class MinHeap {
+  private f: number[] = []
+  private seq: number[] = []
+  private id: number[] = []
+  private n = 0
+
+  push(f: number, seq: number, id: number) {
+    let i = this.n++
+    this.f[i] = f
+    this.seq[i] = seq
+    this.id[i] = id
+    while (i > 0) {
+      const p = (i - 1) >> 1
+      if (this.less(p, i)) break
+      this.swap(i, p)
+      i = p
+    }
+  }
+
+  pop(): number {
+    const out = this.id[0]!
+    this.n--
+    if (this.n > 0) {
+      this.f[0] = this.f[this.n]!
+      this.seq[0] = this.seq[this.n]!
+      this.id[0] = this.id[this.n]!
+      this.siftDown(0)
+    }
+    return out
+  }
+
+  get size() {
+    return this.n
+  }
+
+  clear() {
+    this.n = 0
+  }
+
+  private siftDown(i: number) {
+    while (true) {
+      const l = i * 2 + 1
+      const r = l + 1
+      if (l >= this.n) return
+      let m = l
+      if (r < this.n && !this.less(l, r)) m = r
+      if (this.less(i, m)) return
+      this.swap(i, m)
+      i = m
+    }
+  }
+
+  private less(i: number, j: number) {
+    const fi = this.f[i]!
+    const fj = this.f[j]!
+    if (fi !== fj) return fi < fj
+    return this.seq[i]! < this.seq[j]!
+  }
+
+  private swap(i: number, j: number) {
+    const tmpF = this.f[i]!
+    this.f[i] = this.f[j]!
+    this.f[j] = tmpF
+    const tmpS = this.seq[i]!
+    this.seq[i] = this.seq[j]!
+    this.seq[j] = tmpS
+    const tmpI = this.id[i]!
+    this.id[i] = this.id[j]!
+    this.id[j] = tmpI
+  }
+}
+
+// --- Types ---
 interface HyperParameters {
   shuffleSeed: number
   ripCost: number
@@ -37,27 +151,9 @@ interface HighDensitySolverA01Props {
   }) => number
 }
 
-interface GridCell {
-  row: number
-  col: number
-  z: number
-  x: number
-  y: number
-}
-
-interface CandidateCell {
-  cell: GridCell
-  g: number
-  f: number
-  parent: CandidateCell | null
-  rippedTraces: Set<ConnectionName>
-}
-
-interface Connection {
-  connectionName: ConnectionName
-  start: GridCell
-  end: GridCell
-}
+// Static direction offsets for 8-connected neighbor expansion
+const DIRS_DR = [-1, -1, -1, 0, 0, 1, 1, 1] as const
+const DIRS_DC = [-1, 0, 1, -1, 1, -1, 0, 1] as const
 
 export class HighDensitySolverA01 extends BaseSolver {
   nodeWithPortPoints: NodeWithPortPoints
@@ -78,28 +174,67 @@ export class HighDensitySolverA01 extends BaseSolver {
   gridOrigin!: { x: number; y: number }
   gridToBoundsTransform!: AffineTransform
 
-  // Z-layer mapping: actual z value <-> layer index
+  // Z-layer mapping
   availableZ!: number[]
   zToLayer!: Map<number, number>
   layerToZ!: Map<number, number>
 
-  // Penalty map: [row][col] -> additional traversal cost
-  penaltyMap!: number[][]
+  // --- Interned connections ---
+  private connNameToId!: Map<string, ConnId>
+  private connIdToName!: string[]
 
-  // Used cells: [z][row][col] -> connectionName or null
-  usedCells!: (ConnectionName | null)[][][]
+  // --- Flat arrays ---
+  private planeSize!: number // rows * cols
+  private usedCellsFlat!: Int32Array // layers * planeSize; -1 = empty
+  private penalty2d!: Float64Array // planeSize
+  private visitedStamp!: Uint32Array // layers * planeSize
+  private stamp = 0
 
-  // Track which cells belong to each connection for fast rip
-  connectionCellKeys!: Map<ConnectionName, Set<CellKey>>
+  // --- Precomputed via footprint offsets ---
+  private viaOffsetsDr!: Int32Array
+  private viaOffsetsDc!: Int32Array
+  private viaOffsetsLen!: number
 
-  // Connection queues
-  unsolvedConnections!: Connection[]
-  solvedConnectionsMap!: Map<ConnectionName, HighDensityIntraNodeRoute>
+  // --- Per-connection used-cell tracking ---
+  private usedIndicesByConn!: number[][] // connId -> [flatCellIdx, ...]
 
-  // Current A* state for the active connection
-  activeConnection: Connection | null = null
-  openSet!: CandidateCell[]
-  closedSet!: Set<CellKey>
+  // --- Connection queues ---
+  private unsolvedSegs!: ConnectionSeg[]
+  private solvedRoutes!: Map<ConnId, SolvedRouteInternal>
+
+  // --- A* state ---
+  private activeConnSeg: ConnectionSeg | null = null
+  private activeConnId: ConnId = -1
+  private nodePool!: SearchNode[]
+  private heap!: MinHeap
+  private seqCounter = 0
+
+  // --- Reusable scratch for via occupant scan ---
+  private _viaOccs: ConnId[] = []
+
+  // --- Reusable scratch for computeMoveCostAndRips ---
+  private _moveCost = 0
+  private _moveRipped: RippedNode | null = null
+
+  // --- Test/debug compatibility getters ---
+  get unsolvedConnections() {
+    return this.unsolvedSegs
+  }
+  get solvedConnectionsMap() {
+    return this.solvedRoutes
+  }
+  get activeConnection() {
+    if (!this.activeConnSeg) return null
+    const s = this.activeConnSeg
+    return {
+      connectionName: this.connIdToName[s.connId] ?? "",
+      start: { row: s.startRow, col: s.startCol, z: s.startZ, x: 0, y: 0 },
+      end: { row: s.endRow, col: s.endCol, z: s.endZ, x: 0, y: 0 },
+    }
+  }
+  get openSet() {
+    return { length: this.heap?.size ?? 0 }
+  }
 
   constructor(props: HighDensitySolverA01Props) {
     super()
@@ -126,13 +261,13 @@ export class HighDensitySolverA01 extends BaseSolver {
   override _setup(): void {
     const { nodeWithPortPoints, cellSizeMm } = this
     const { width, height, center } = nodeWithPortPoints
-    // Derive available z layers from port points if not provided
+
+    // Z layers
     this.availableZ =
       nodeWithPortPoints.availableZ ??
       [...new Set(nodeWithPortPoints.portPoints.map((pp) => pp.z))].sort(
         (a, b) => a - b,
       )
-
     this.zToLayer = new Map()
     this.layerToZ = new Map()
     for (let i = 0; i < this.availableZ.length; i++) {
@@ -144,11 +279,12 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.rows = Math.floor(height / cellSizeMm)
     this.cols = Math.floor(width / cellSizeMm)
     this.layers = this.availableZ.length
+    this.planeSize = this.rows * this.cols
+    const totalCells = this.layers * this.planeSize
     this.gridOrigin = {
       x: center.x - width / 2,
       y: center.y - height / 2,
     }
-
     this.gridToBoundsTransform = computeGridToAffineTransform({
       originX: this.gridOrigin.x,
       originY: this.gridOrigin.y,
@@ -159,135 +295,555 @@ export class HighDensitySolverA01 extends BaseSolver {
       height,
     })
 
-    // Initialize penalty map
-    this.penaltyMap = Array.from({ length: this.rows }, (_, row) =>
-      Array.from({ length: this.cols }, (_, col) => {
-        if (!this.initialPenaltyFn) return 0
-        const x = this.gridOrigin.x + (col + 0.5) * cellSizeMm
-        const y = this.gridOrigin.y + (row + 0.5) * cellSizeMm
-        const px = (col + 0.5) / this.cols
-        const py = (row + 0.5) / this.rows
-        return this.initialPenaltyFn({ x, y, px, py, row, col })
-      }),
-    )
+    // Intern connections
+    this.connNameToId = new Map()
+    this.connIdToName = []
 
-    // Initialize used cells: [z][row][col]
-    this.usedCells = Array.from({ length: this.layers }, () =>
-      Array.from({ length: this.rows }, () =>
-        Array<ConnectionName | null>(this.cols).fill(null),
-      ),
-    )
+    // Flat penalty map (Float64Array is zero-initialized)
+    this.penalty2d = new Float64Array(this.planeSize)
+    if (this.initialPenaltyFn) {
+      for (let row = 0; row < this.rows; row++) {
+        const rowBase = row * this.cols
+        for (let col = 0; col < this.cols; col++) {
+          const x = this.gridOrigin.x + (col + 0.5) * cellSizeMm
+          const y = this.gridOrigin.y + (row + 0.5) * cellSizeMm
+          const px = (col + 0.5) / this.cols
+          const py = (row + 0.5) / this.rows
+          this.penalty2d[rowBase + col] = this.initialPenaltyFn({
+            x,
+            y,
+            px,
+            py,
+            row,
+            col,
+          })
+        }
+      }
+    }
 
-    // Build connections from port points
-    this.unsolvedConnections = this.buildConnectionsFromPortPoints()
-    this.solvedConnectionsMap = new Map()
-    this.connectionCellKeys = new Map()
+    // Flat used cells (Int32Array, -1 = empty)
+    this.usedCellsFlat = new Int32Array(totalCells).fill(-1)
 
-    // Shuffle based on seed
+    // Visited stamp array (Uint32Array is zero-initialized)
+    this.visitedStamp = new Uint32Array(totalCells)
+    this.stamp = 0
+
+    // Precompute via footprint offsets
+    const viaRadiusCells = Math.ceil(this.viaDiameter / 2 / cellSizeMm)
+    const r2 = viaRadiusCells * viaRadiusCells
+    const drList: number[] = []
+    const dcList: number[] = []
+    for (let dr = -viaRadiusCells; dr <= viaRadiusCells; dr++) {
+      for (let dc = -viaRadiusCells; dc <= viaRadiusCells; dc++) {
+        if (dr * dr + dc * dc <= r2) {
+          drList.push(dr)
+          dcList.push(dc)
+        }
+      }
+    }
+    this.viaOffsetsLen = drList.length
+    this.viaOffsetsDr = new Int32Array(drList)
+    this.viaOffsetsDc = new Int32Array(dcList)
+
+    // Build and shuffle connections
+    this.unsolvedSegs = this.buildConnectionSegs()
+    this.solvedRoutes = new Map()
+    this.usedIndicesByConn = []
     this.shuffleConnections()
 
-    // Reset A* state
-    this.activeConnection = null
-    this.openSet = []
-    this.closedSet = new Set()
+    // A* state
+    this.activeConnSeg = null
+    this.activeConnId = -1
+    this.nodePool = []
+    this.heap = new MinHeap()
+    this.seqCounter = 0
   }
 
   override _step(): void {
-    // 1. If no active connection, dequeue the next unsolved one
-    if (!this.activeConnection) {
-      if (this.unsolvedConnections.length === 0) {
+    // 1. If no active connection, dequeue next
+    if (!this.activeConnSeg) {
+      if (this.unsolvedSegs.length === 0) {
         this.solved = true
         return
       }
+      const next = this.unsolvedSegs.shift()!
+      this.activeConnSeg = next
+      this.activeConnId = next.connId
 
-      const next = this.unsolvedConnections.shift()
-      if (!next) {
-        this.solved = true
-        return
-      }
+      // Reset A* state for this connection
+      this.nodePool = []
+      this.heap.clear()
+      this.seqCounter = 0
+      this.nextStamp()
 
-      this.activeConnection = next
-      this.openSet = [
-        {
-          cell: this.activeConnection.start,
-          g: 0,
-          f: this.computeH(
-            this.activeConnection.start,
-            this.activeConnection.end,
-          ),
-          parent: null,
-          rippedTraces: new Set(),
-        },
-      ]
-      this.closedSet = new Set()
+      // Push start node
+      const h = this.computeH(
+        next.startRow,
+        next.startCol,
+        next.endRow,
+        next.endCol,
+      )
+      this.nodePool.push({
+        z: next.startZ,
+        row: next.startRow,
+        col: next.startCol,
+        g: 0,
+        f: h,
+        parentIdx: -1,
+        ripped: null,
+      })
+      this.heap.push(h, this.seqCounter++, 0)
       return
     }
 
-    // 2. If open set is empty, this connection failed
-    if (this.openSet.length === 0) {
-      this.error = `No path found for ${this.activeConnection.connectionName}`
+    // 2. Open set empty → fail
+    if (this.heap.size === 0) {
+      this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
       this.failed = true
       return
     }
 
-    // 3. Dequeue best candidate (lowest f) via O(n) min-extraction
-    let bestIdx = 0
-    for (let i = 1; i < this.openSet.length; i++) {
-      if (this.openSet[i]!.f < this.openSet[bestIdx]!.f) bestIdx = i
-    }
-    const current = this.openSet[bestIdx]!
-    // Swap with last and pop for O(1) removal
-    this.openSet[bestIdx] = this.openSet[this.openSet.length - 1]!
-    this.openSet.pop()
+    // 3. Pop best node (O(log n))
+    const nodeIdx = this.heap.pop()
+    const node = this.nodePool[nodeIdx]!
+    const { z, row, col, g, ripped } = node
 
-    const { cell } = current
-    const cellKey = this.getCellKey(cell)
+    // 4. Skip if already visited (stamp check)
+    const cellIdx = (z * this.rows + row) * this.cols + col
+    if (this.visitedStamp[cellIdx] === this.stamp) return
+    this.visitedStamp[cellIdx] = this.stamp
 
-    // Skip if already visited
-    if (this.closedSet.has(cellKey)) return
-    this.closedSet.add(cellKey)
-
-    // 4. Check end condition
-    if (
-      cell.row === this.activeConnection.end.row &&
-      cell.col === this.activeConnection.end.col &&
-      cell.z === this.activeConnection.end.z
-    ) {
-      this.finalizeRoute(current)
-      this.activeConnection = null
+    // 5. Check end condition
+    const seg = this.activeConnSeg
+    if (z === seg.endZ && row === seg.endRow && col === seg.endCol) {
+      this.finalizeRoute(nodeIdx)
+      this.activeConnSeg = null
+      this.activeConnId = -1
       return
     }
 
-    // 5. Expand neighbors (8 directions + via)
-    for (const neighbor of this.getNeighbors(cell)) {
-      if (this.closedSet.has(this.getCellKey(neighbor))) continue
+    // 6. Expand neighbors inline (no array allocation)
+    const endRow = seg.endRow
+    const endCol = seg.endCol
+    const activeConn = this.activeConnId
+    const rows = this.rows
+    const cols = this.cols
+    const cellSizeMm = this.cellSizeMm
+    const visited = this.visitedStamp
+    const stamp = this.stamp
 
-      const g = current.g + this.computeG(cell, neighbor, current.rippedTraces)
-      const f = g + this.computeH(neighbor, this.activeConnection.end)
+    // 6a. 8-directional lateral moves
+    for (let d = 0; d < 8; d++) {
+      const nr = row + DIRS_DR[d]
+      const nc = col + DIRS_DC[d]
+      if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue
 
-      const rippedTraces = new Set(current.rippedTraces)
-      if (neighbor.z !== cell.z) {
-        // Via transition: track all connections in via footprint
-        const footprintOccupants = this.getViaFootprintOccupants(neighbor)
-        for (const occupant of footprintOccupants) {
-          if (occupant !== this.activeConnection.connectionName) {
-            rippedTraces.add(occupant)
+      const nIdx = (z * rows + nr) * cols + nc
+      if (visited[nIdx] === stamp) continue
+
+      this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
+      const g2 = g + this._moveCost
+      const f2 = g2 + this.computeH(nr, nc, endRow, endCol)
+
+      const newNodeIdx = this.nodePool.length
+      this.nodePool.push({
+        z,
+        row: nr,
+        col: nc,
+        g: g2,
+        f: f2,
+        parentIdx: nodeIdx,
+        ripped: this._moveRipped,
+      })
+      this.heap.push(f2, this.seqCounter++, newNodeIdx)
+    }
+
+    // 6b. Via moves (to other layers at same position)
+    const canVia =
+      this.viaMinDistFromBorder <= 0 ||
+      Math.min(
+        col * cellSizeMm,
+        (cols - 1 - col) * cellSizeMm,
+        row * cellSizeMm,
+        (rows - 1 - row) * cellSizeMm,
+      ) >= this.viaMinDistFromBorder
+
+    if (canVia) {
+      for (let nz = 0; nz < this.layers; nz++) {
+        if (nz === z) continue
+
+        const nIdx = (nz * rows + row) * cols + col
+        if (visited[nIdx] === stamp) continue
+
+        this.computeMoveCostAndRips(
+          activeConn,
+          z,
+          row,
+          col,
+          nz,
+          row,
+          col,
+          ripped,
+        )
+        const g2 = g + this._moveCost
+        const f2 = g2 + this.computeH(row, col, endRow, endCol)
+
+        const newNodeIdx = this.nodePool.length
+        this.nodePool.push({
+          z: nz,
+          row,
+          col,
+          g: g2,
+          f: f2,
+          parentIdx: nodeIdx,
+          ripped: this._moveRipped,
+        })
+        this.heap.push(f2, this.seqCounter++, newNodeIdx)
+      }
+    }
+  }
+
+  // --- Merged cost + rip computation (writes to _moveCost/_moveRipped) ---
+  private computeMoveCostAndRips(
+    activeConn: ConnId,
+    fromZ: number,
+    fromRow: number,
+    fromCol: number,
+    toZ: number,
+    toRow: number,
+    toCol: number,
+    ripped: RippedNode | null,
+  ): void {
+    let cost = 0
+    let r = ripped
+    const cols = this.cols
+
+    if (fromZ !== toZ) {
+      // Via transition
+      cost += this.hyperParameters.viaBaseCost
+      cost += this.penalty2d[toRow * cols + toCol]!
+
+      // Via footprint occupants (reusable scratch array)
+      this.fillViaOccupants(toRow, toCol, activeConn)
+      const occs = this._viaOccs
+      for (let i = 0; i < occs.length; i++) {
+        const occ = occs[i]!
+        if (!rippedContains(r, occ)) {
+          cost += this.hyperParameters.ripCost
+          r = { id: occ, prev: r }
+        }
+        cost += this.hyperParameters.ripViaPenalty
+      }
+    } else {
+      // Lateral movement
+      const dr = fromRow > toRow ? fromRow - toRow : toRow - fromRow
+      const dc = fromCol > toCol ? fromCol - toCol : toCol - fromCol
+      cost += (dr + dc > 1 ? Math.SQRT2 : 1) * this.cellSizeMm
+      cost += this.penalty2d[toRow * cols + toCol]!
+
+      const flatIdx = (toZ * this.rows + toRow) * cols + toCol
+      const occ = this.usedCellsFlat[flatIdx]!
+      if (occ !== -1 && occ !== activeConn) {
+        if (!rippedContains(r, occ)) {
+          cost += this.hyperParameters.ripCost
+          r = { id: occ, prev: r }
+        }
+        cost += this.hyperParameters.ripTracePenalty
+      }
+    }
+
+    this._moveCost = cost
+    this._moveRipped = r
+  }
+
+  // --- Via footprint unique occupants (fills _viaOccs scratch array) ---
+  private fillViaOccupants(
+    row: number,
+    col: number,
+    activeConn: ConnId,
+  ): void {
+    const occs = this._viaOccs
+    occs.length = 0
+    const rows = this.rows
+    const cols = this.cols
+    const offDr = this.viaOffsetsDr
+    const offDc = this.viaOffsetsDc
+    const offLen = this.viaOffsetsLen
+    const used = this.usedCellsFlat
+
+    for (let z = 0; z < this.layers; z++) {
+      const zBase = z * this.planeSize
+      for (let i = 0; i < offLen; i++) {
+        const r = row + offDr[i]!
+        const c = col + offDc[i]!
+        if (r < 0 || c < 0 || r >= rows || c >= cols) continue
+        const occ = used[zBase + r * cols + c]!
+        if (occ === -1 || occ === activeConn) continue
+        // Small unique check (typically very few occupants)
+        let seen = false
+        for (let j = 0; j < occs.length; j++) {
+          if (occs[j] === occ) {
+            seen = true
+            break
           }
         }
-      } else {
-        const occupant =
-          this.usedCells[neighbor.z]?.[neighbor.row]?.[neighbor.col]
-        if (occupant && occupant !== this.activeConnection.connectionName) {
-          rippedTraces.add(occupant)
+        if (!seen) occs.push(occ)
+      }
+    }
+  }
+
+  // --- Visited stamp management ---
+  private nextStamp(): void {
+    this.stamp = (this.stamp + 1) >>> 0
+    if (this.stamp === 0) {
+      this.visitedStamp.fill(0)
+      this.stamp = 1
+    }
+  }
+
+  // --- Heuristic: Manhattan distance * cellSizeMm ---
+  private computeH(
+    fromRow: number,
+    fromCol: number,
+    toRow: number,
+    toCol: number,
+  ): number {
+    return (
+      (Math.abs(fromRow - toRow) + Math.abs(fromCol - toCol)) * this.cellSizeMm
+    )
+  }
+
+  // --- Connection interning ---
+  private internConn(name: string): ConnId {
+    const existing = this.connNameToId.get(name)
+    if (existing !== undefined) return existing
+    const id = this.connIdToName.length
+    this.connIdToName.push(name)
+    this.connNameToId.set(name, id)
+    return id
+  }
+
+  // --- Build connection segments from port points ---
+  private buildConnectionSegs(): ConnectionSeg[] {
+    const byName = new Map<
+      string,
+      Array<{ x: number; y: number; z: number }>
+    >()
+    for (const pp of this.nodeWithPortPoints.portPoints) {
+      const name = pp.connectionName
+      if (!byName.has(name)) byName.set(name, [])
+      byName.get(name)!.push(pp)
+    }
+
+    const segs: ConnectionSeg[] = []
+    for (const [name, pts] of byName) {
+      if (pts.length < 2) continue
+      const connId = this.internConn(name)
+      for (let i = 0; i < pts.length - 1; i++) {
+        const s = this.pointToCell(pts[i]!)
+        const e = this.pointToCell(pts[i + 1]!)
+        segs.push({
+          connId,
+          startZ: s.z,
+          startRow: s.row,
+          startCol: s.col,
+          endZ: e.z,
+          endRow: e.row,
+          endCol: e.col,
+        })
+      }
+    }
+    return segs
+  }
+
+  private pointToCell(pt: {
+    x: number
+    y: number
+    z: number
+  }): { z: number; row: number; col: number } {
+    const col = Math.max(
+      0,
+      Math.min(
+        this.cols - 1,
+        Math.round((pt.x - this.gridOrigin.x) / this.cellSizeMm - 0.5),
+      ),
+    )
+    const row = Math.max(
+      0,
+      Math.min(
+        this.rows - 1,
+        Math.round((pt.y - this.gridOrigin.y) / this.cellSizeMm - 0.5),
+      ),
+    )
+    const z = this.zToLayer.get(pt.z) ?? 0
+    return { z, row, col }
+  }
+
+  private shuffleConnections(): void {
+    const arr = this.unsolvedSegs
+    let s = this.hyperParameters.shuffleSeed
+    const rng = () => {
+      s = (s * 1664525 + 1013904223) & 0xffffffff
+      return (s >>> 0) / 0xffffffff
+    }
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1))
+      const tmp = arr[i]!
+      arr[i] = arr[j]!
+      arr[j] = tmp
+    }
+  }
+
+  // --- Finalize a found route ---
+  private finalizeRoute(goalNodeIdx: number): void {
+    // Reconstruct path from parent chain (cell-based)
+    const cells: Array<{ z: number; row: number; col: number }> = []
+    let idx = goalNodeIdx
+    while (idx >= 0) {
+      const n = this.nodePool[idx]!
+      cells.push({ z: n.z, row: n.row, col: n.col })
+      idx = n.parentIdx
+    }
+    cells.reverse()
+
+    // Detect vias (z-level changes)
+    const viaCells: Array<{ row: number; col: number }> = []
+    for (let i = 1; i < cells.length; i++) {
+      if (cells[i]!.z !== cells[i - 1]!.z) {
+        viaCells.push({ row: cells[i]!.row, col: cells[i]!.col })
+      }
+    }
+
+    const connId = this.activeConnId
+
+    // Collect ripped traces from goal node's persistent list
+    const goalNode = this.nodePool[goalNodeIdx]!
+    const rippedIds: ConnId[] = []
+    for (let cur = goalNode.ripped; cur; cur = cur.prev) {
+      rippedIds.push(cur.id)
+    }
+
+    // Rip displaced traces
+    for (let i = 0; i < rippedIds.length; i++) {
+      this.ripTrace(rippedIds[i]!)
+    }
+
+    // Mark cells as used (with margin)
+    const marginCells = Math.ceil(this.traceMargin / this.cellSizeMm)
+    const indices: number[] = []
+    const rows = this.rows
+    const cols = this.cols
+    const used = this.usedCellsFlat
+
+    for (let ci = 0; ci < cells.length; ci++) {
+      const cell = cells[ci]!
+      for (let dr = -marginCells; dr <= marginCells; dr++) {
+        for (let dc = -marginCells; dc <= marginCells; dc++) {
+          const r = cell.row + dr
+          const c = cell.col + dc
+          if (r < 0 || r >= rows || c < 0 || c >= cols) continue
+          const flatIdx = (cell.z * rows + r) * cols + c
+          const existing = used[flatIdx]!
+          if (existing !== -1 && existing !== connId) continue
+          used[flatIdx] = connId
+          indices.push(flatIdx)
         }
       }
+    }
 
-      this.openSet.push({
-        cell: neighbor,
-        g,
-        f,
-        parent: current,
-        rippedTraces,
+    // Mark via footprint cells
+    const displacedByVias: ConnId[] = []
+    const offDr = this.viaOffsetsDr
+    const offDc = this.viaOffsetsDc
+    const offLen = this.viaOffsetsLen
+
+    for (let vi = 0; vi < viaCells.length; vi++) {
+      const via = viaCells[vi]!
+      for (let z = 0; z < this.layers; z++) {
+        const zBase = z * this.planeSize
+        for (let oi = 0; oi < offLen; oi++) {
+          const r = via.row + offDr[oi]!
+          const c = via.col + offDc[oi]!
+          if (r < 0 || r >= rows || c < 0 || c >= cols) continue
+          const flatIdx = zBase + r * cols + c
+          const existing = used[flatIdx]!
+          if (existing !== -1 && existing !== connId) {
+            // Track displaced (small unique check)
+            let seen = false
+            for (let k = 0; k < displacedByVias.length; k++) {
+              if (displacedByVias[k] === existing) {
+                seen = true
+                break
+              }
+            }
+            if (!seen) displacedByVias.push(existing)
+          }
+          used[flatIdx] = connId
+          indices.push(flatIdx)
+        }
+      }
+    }
+
+    // Store used indices for this connection
+    while (this.usedIndicesByConn.length <= connId) {
+      this.usedIndicesByConn.push([])
+    }
+    this.usedIndicesByConn[connId] = indices
+
+    // Store solved route (cell-based)
+    this.solvedRoutes.set(connId, { connId, cells, viaCells })
+
+    // Rip connections displaced by via footprints
+    for (let i = 0; i < displacedByVias.length; i++) {
+      this.ripTrace(displacedByVias[i]!)
+    }
+  }
+
+  // --- Rip a trace ---
+  private ripTrace(connId: ConnId): void {
+    const route = this.solvedRoutes.get(connId)
+
+    // Add rip penalties to penalty map along the ripped route
+    if (route) {
+      const cols = this.cols
+      for (let i = 0; i < route.cells.length; i++) {
+        const cell = route.cells[i]!
+        this.penalty2d[cell.row * cols + cell.col] +=
+          this.hyperParameters.ripTracePenalty
+      }
+      for (let i = 0; i < route.viaCells.length; i++) {
+        const via = route.viaCells[i]!
+        this.penalty2d[via.row * cols + via.col] +=
+          this.hyperParameters.ripViaPenalty
+      }
+    }
+
+    // Clear used cells using tracked indices
+    const indices = this.usedIndicesByConn[connId]
+    if (indices) {
+      const used = this.usedCellsFlat
+      for (let i = 0; i < indices.length; i++) {
+        const flatIdx = indices[i]!
+        if (used[flatIdx] === connId) {
+          used[flatIdx] = -1
+        }
+      }
+      this.usedIndicesByConn[connId] = []
+    }
+
+    // Move from solved back to unsolved
+    if (route) {
+      this.solvedRoutes.delete(connId)
+      const first = route.cells[0]!
+      const last = route.cells[route.cells.length - 1]!
+      this.unsolvedSegs.push({
+        connId,
+        startZ: first.z,
+        startRow: first.row,
+        startCol: first.col,
+        endZ: last.z,
+        endRow: last.row,
+        endCol: last.col,
       })
     }
   }
@@ -329,20 +885,18 @@ export class HighDensitySolverA01 extends BaseSolver {
       stroke: "gray",
     })
 
-    // Draw penalty map as transparent rects
     const vt = this.gridToBoundsTransform
-    if (this.showPenaltyMap && this.penaltyMap) {
+
+    // Draw penalty map as transparent rects
+    if (this.showPenaltyMap && this.penalty2d) {
       let maxPenalty = 0
-      for (let row = 0; row < this.rows; row++) {
-        for (let col = 0; col < this.cols; col++) {
-          const p = this.penaltyMap[row]?.[col] ?? 0
-          if (p > maxPenalty) maxPenalty = p
-        }
+      for (let i = 0; i < this.penalty2d.length; i++) {
+        if (this.penalty2d[i]! > maxPenalty) maxPenalty = this.penalty2d[i]!
       }
       if (maxPenalty > 0) {
         for (let row = 0; row < this.rows; row++) {
           for (let col = 0; col < this.cols; col++) {
-            const p = this.penaltyMap[row]?.[col] ?? 0
+            const p = this.penalty2d[row * this.cols + col]!
             if (p <= 0) continue
             const alpha = Math.min(0.6, (p / maxPenalty) * 0.6)
             const tc = applyAffineTransformToPoint(vt, {
@@ -361,12 +915,13 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
 
     // Draw used cells as transparent blue rects
-    if (this.showUsedCellMap && this.usedCells) {
+    if (this.showUsedCellMap && this.usedCellsFlat) {
       for (let z = 0; z < this.layers; z++) {
         for (let row = 0; row < this.rows; row++) {
           for (let col = 0; col < this.cols; col++) {
-            const occupant = this.usedCells[z]?.[row]?.[col]
-            if (!occupant) continue
+            const occ =
+              this.usedCellsFlat[(z * this.rows + row) * this.cols + col]!
+            if (occ === -1) continue
             const tc = applyAffineTransformToPoint(vt, {
               x: this.gridOrigin.x + (col + 0.5) * this.cellSizeMm,
               y: this.gridOrigin.y + (row + 0.5) * this.cellSizeMm,
@@ -392,8 +947,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       })
     }
 
-    // Draw solved routes (with grid-to-bounds transform applied),
-    // splitting segments by z-layer for correct coloring
+    // Draw solved routes, splitting segments by z-layer for coloring
     const TRACE_COLORS = [
       "rgba(255,0,0,0.75)",
       "rgba(0,0,255,0.75)",
@@ -404,13 +958,11 @@ export class HighDensitySolverA01 extends BaseSolver {
     for (const route of transformedRoutes) {
       if (route.route.length < 2) continue
 
-      // Split the route into segments of contiguous z values
       let segStart = 0
       for (let i = 1; i < route.route.length; i++) {
         const prev = route.route[i - 1]!
         const curr = route.route[i]!
         if (curr.z !== prev.z) {
-          // Emit segment for the previous z
           if (i - segStart >= 2) {
             lines.push({
               points: route.route
@@ -423,7 +975,6 @@ export class HighDensitySolverA01 extends BaseSolver {
           segStart = i
         }
       }
-      // Emit final segment
       if (route.route.length - segStart >= 2) {
         const lastZ = route.route[segStart]!.z
         lines.push({
@@ -448,21 +999,28 @@ export class HighDensitySolverA01 extends BaseSolver {
       }
     }
 
-    // Draw active A* exploration
-    if (this.activeConnection && this.closedSet) {
-      for (const key of this.closedSet) {
-        const parts = key.split(",")
-        const row = Number(parts[1])
-        const col = Number(parts[2])
-        const tc = applyAffineTransformToPoint(vt, {
-          x: this.gridOrigin.x + (col + 0.5) * this.cellSizeMm,
-          y: this.gridOrigin.y + (row + 0.5) * this.cellSizeMm,
-        })
-        points.push({
-          x: tc.x,
-          y: tc.y,
-          color: "rgba(0,0,255,0.2)",
-        })
+    // Draw active A* exploration (scan visitedStamp for current stamp)
+    if (this.activeConnSeg && this.visitedStamp) {
+      const currentStamp = this.stamp
+      for (let z = 0; z < this.layers; z++) {
+        for (let row = 0; row < this.rows; row++) {
+          for (let col = 0; col < this.cols; col++) {
+            if (
+              this.visitedStamp[(z * this.rows + row) * this.cols + col] !==
+              currentStamp
+            )
+              continue
+            const tc = applyAffineTransformToPoint(vt, {
+              x: this.gridOrigin.x + (col + 0.5) * this.cellSizeMm,
+              y: this.gridOrigin.y + (row + 0.5) * this.cellSizeMm,
+            })
+            points.push({
+              x: tc.x,
+              y: tc.y,
+              color: "rgba(0,0,255,0.2)",
+            })
+          }
+        }
       }
     }
 
@@ -472,392 +1030,36 @@ export class HighDensitySolverA01 extends BaseSolver {
       circles,
       rects,
       coordinateSystem: "cartesian" as const,
-      title: `HighDensityA01 [${this.solvedConnectionsMap?.size ?? 0} solved, ${this.unsolvedConnections?.length ?? 0} remaining]`,
-    }
-  }
-
-  // --- Internal helpers ---
-
-  buildConnectionsFromPortPoints(): Connection[] {
-    const byName = new Map<ConnectionName, NodeWithPortPoints["portPoints"]>()
-    for (const pp of this.nodeWithPortPoints.portPoints) {
-      const name = pp.connectionName
-      if (!byName.has(name)) byName.set(name, [])
-      byName.get(name)!.push(pp)
-    }
-
-    const connections: Connection[] = []
-    for (const [name, pts] of byName) {
-      if (pts.length < 2) continue
-      for (let i = 0; i < pts.length - 1; i++) {
-        const start = pts[i]!
-        const end = pts[i + 1]!
-        connections.push({
-          connectionName: name,
-          start: this.pointToGridCell(start),
-          end: this.pointToGridCell(end),
-        })
-      }
-    }
-    return connections
-  }
-
-  pointToGridCell(pt: { x: number; y: number; z: number }): GridCell {
-    const col = Math.round((pt.x - this.gridOrigin.x) / this.cellSizeMm - 0.5)
-    const row = Math.round((pt.y - this.gridOrigin.y) / this.cellSizeMm - 0.5)
-    const layerIndex = this.zToLayer.get(pt.z) ?? 0
-    return {
-      row: Math.max(0, Math.min(this.rows - 1, row)),
-      col: Math.max(0, Math.min(this.cols - 1, col)),
-      z: layerIndex,
-      x: this.gridOrigin.x + (col + 0.5) * this.cellSizeMm,
-      y: this.gridOrigin.y + (row + 0.5) * this.cellSizeMm,
-    }
-  }
-
-  shuffleConnections(): void {
-    const seed = this.hyperParameters.shuffleSeed
-    let s = seed
-    const rng = () => {
-      s = (s * 1664525 + 1013904223) & 0xffffffff
-      return (s >>> 0) / 0xffffffff
-    }
-    for (let i = this.unsolvedConnections.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1))
-      const a = this.unsolvedConnections[i]!
-      const b = this.unsolvedConnections[j]!
-      this.unsolvedConnections[i] = b
-      this.unsolvedConnections[j] = a
-    }
-  }
-
-  getCellKey(cell: GridCell): CellKey {
-    return `${cell.z},${cell.row},${cell.col}`
-  }
-
-  computeH(a: GridCell, b: GridCell): number {
-    return (Math.abs(a.row - b.row) + Math.abs(a.col - b.col)) * this.cellSizeMm
-  }
-
-  computeG(
-    from: GridCell,
-    to: GridCell,
-    rippedTraces: Set<ConnectionName>,
-  ): number {
-    let cost = 0
-
-    if (from.z !== to.z) {
-      // Via transition
-      cost += this.hyperParameters.viaBaseCost
-    } else {
-      // Lateral movement (diagonal = sqrt(2), orthogonal = 1)
-      const dr = Math.abs(from.row - to.row)
-      const dc = Math.abs(from.col - to.col)
-      cost += (dr + dc > 1 ? Math.SQRT2 : 1) * this.cellSizeMm
-    }
-
-    // Penalty map
-    cost += this.penaltyMap[to.row]?.[to.col] ?? 0
-
-    // Rip cost for occupied cells
-    if (from.z !== to.z) {
-      // Via transition: account for full via footprint on all layers
-      const footprintOccupants = this.getViaFootprintOccupants(to)
-      for (const occupant of footprintOccupants) {
-        if (occupant === this.activeConnection?.connectionName) continue
-        if (!rippedTraces.has(occupant)) {
-          cost += this.hyperParameters.ripCost
-        }
-        cost += this.hyperParameters.ripViaPenalty
-      }
-    } else {
-      const occupant = this.usedCells[to.z]?.[to.row]?.[to.col]
-      if (occupant && occupant !== this.activeConnection?.connectionName) {
-        if (!rippedTraces.has(occupant)) {
-          cost += this.hyperParameters.ripCost
-        }
-        cost += this.hyperParameters.ripTracePenalty
-      }
-    }
-
-    return cost
-  }
-
-  getNeighbors(cell: GridCell): GridCell[] {
-    const neighbors: GridCell[] = []
-    const dirs = [
-      [-1, -1],
-      [-1, 0],
-      [-1, 1],
-      [0, -1],
-      [0, 1],
-      [1, -1],
-      [1, 0],
-      [1, 1],
-    ]
-
-    for (const dir of dirs) {
-      const dr = dir[0]!
-      const dc = dir[1]!
-      const row = cell.row + dr
-      const col = cell.col + dc
-      if (row < 0 || row >= this.rows || col < 0 || col >= this.cols) continue
-      neighbors.push({
-        row,
-        col,
-        z: cell.z,
-        x: this.gridOrigin.x + (col + 0.5) * this.cellSizeMm,
-        y: this.gridOrigin.y + (row + 0.5) * this.cellSizeMm,
-      })
-    }
-
-    // Via: move to other layers at same position (if far enough from border)
-    if (this.viaMinDistFromBorder > 0) {
-      const distToEdge = Math.min(
-        cell.col * this.cellSizeMm,
-        (this.cols - 1 - cell.col) * this.cellSizeMm,
-        cell.row * this.cellSizeMm,
-        (this.rows - 1 - cell.row) * this.cellSizeMm,
-      )
-      if (distToEdge >= this.viaMinDistFromBorder) {
-        for (let z = 0; z < this.layers; z++) {
-          if (z === cell.z) continue
-          neighbors.push({ ...cell, z })
-        }
-      }
-    } else {
-      for (let z = 0; z < this.layers; z++) {
-        if (z === cell.z) continue
-        neighbors.push({ ...cell, z })
-      }
-    }
-
-    return neighbors
-  }
-
-  /** Get unique connection names occupying cells in the via footprint at a position */
-  getViaFootprintOccupants(cell: GridCell): Set<ConnectionName> {
-    const occupants = new Set<ConnectionName>()
-    const viaRadiusCells = Math.ceil(this.viaDiameter / 2 / this.cellSizeMm)
-    for (let z = 0; z < this.layers; z++) {
-      for (let dr = -viaRadiusCells; dr <= viaRadiusCells; dr++) {
-        for (let dc = -viaRadiusCells; dc <= viaRadiusCells; dc++) {
-          if (dr * dr + dc * dc > viaRadiusCells * viaRadiusCells) continue
-          const r = cell.row + dr
-          const c = cell.col + dc
-          if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue
-          const occupant = this.usedCells[z]?.[r]?.[c]
-          if (occupant) occupants.add(occupant)
-        }
-      }
-    }
-    return occupants
-  }
-
-  finalizeRoute(candidate: CandidateCell): void {
-    // Reconstruct path from candidate chain
-    const routePoints: Array<{ x: number; y: number; z: number }> = []
-    const vias: Array<{ x: number; y: number }> = []
-    let node: CandidateCell | null = candidate
-
-    while (node) {
-      routePoints.unshift({
-        x: node.cell.x,
-        y: node.cell.y,
-        z: node.cell.z,
-      })
-      node = node.parent
-    }
-
-    // Detect vias (z-level changes)
-    for (let i = 1; i < routePoints.length; i++) {
-      const curr = routePoints[i]!
-      const prev = routePoints[i - 1]!
-      if (curr.z !== prev.z) {
-        vias.push({ x: curr.x, y: curr.y })
-      }
-    }
-
-    const connName = this.activeConnection!.connectionName
-
-    // Rip any traces we displaced
-    for (const rippedName of candidate.rippedTraces) {
-      this.ripTrace(rippedName)
-    }
-
-    // Track cells owned by this connection
-    const cellKeys = new Set<CellKey>()
-
-    // Mark cells as used (including margin cells around the trace).
-    // Only claim free cells or our own cells for margins — never overwrite
-    // another trace's cells, as that would silently invalidate their route.
-    const marginCells = Math.ceil(this.traceMargin / this.cellSizeMm)
-    for (const pt of routePoints) {
-      const centerRow = Math.round(
-        (pt.y - this.gridOrigin.y) / this.cellSizeMm - 0.5,
-      )
-      const centerCol = Math.round(
-        (pt.x - this.gridOrigin.x) / this.cellSizeMm - 0.5,
-      )
-      for (let dr = -marginCells; dr <= marginCells; dr++) {
-        for (let dc = -marginCells; dc <= marginCells; dc++) {
-          const r = centerRow + dr
-          const c = centerCol + dc
-          if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue
-          const layer = this.usedCells[pt.z]
-          if (layer) {
-            const rowArr = layer[r]
-            if (rowArr) {
-              const existing = rowArr[c]
-              if (existing !== null && existing !== connName) continue
-              rowArr[c] = connName
-              cellKeys.add(`${pt.z},${r},${c}`)
-            }
-          }
-        }
-      }
-    }
-
-    // Mark via footprint cells (vias occupy more cells based on viaDiameter)
-    // Also detect any connections displaced by the via footprint that A* may
-    // not have tracked (safety net for footprint-vs-trace overlaps)
-    const viaRadiusCells = Math.ceil(this.viaDiameter / 2 / this.cellSizeMm)
-    const displacedByVias = new Set<ConnectionName>()
-    for (const via of vias) {
-      const viaRow = Math.round(
-        (via.y - this.gridOrigin.y) / this.cellSizeMm - 0.5,
-      )
-      const viaCol = Math.round(
-        (via.x - this.gridOrigin.x) / this.cellSizeMm - 0.5,
-      )
-      for (let z = 0; z < this.layers; z++) {
-        for (let dr = -viaRadiusCells; dr <= viaRadiusCells; dr++) {
-          for (let dc = -viaRadiusCells; dc <= viaRadiusCells; dc++) {
-            const r = viaRow + dr
-            const c = viaCol + dc
-            if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue
-            if (dr * dr + dc * dc <= viaRadiusCells * viaRadiusCells) {
-              const layer = this.usedCells[z]
-              if (layer) {
-                const rowArr = layer[r]
-                if (rowArr) {
-                  const existing = rowArr[c]
-                  if (existing && existing !== connName) {
-                    displacedByVias.add(existing)
-                  }
-                  rowArr[c] = connName
-                  cellKeys.add(`${z},${r},${c}`)
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Store tracked cells for this connection
-    this.connectionCellKeys.set(connName, cellKeys)
-
-    // Rip any connections displaced by via footprints
-    for (const displaced of displacedByVias) {
-      this.ripTrace(displaced)
-    }
-
-    // Store solved route with raw grid coordinates and real z values.
-    // The grid-to-bounds transform is applied later in getOutput().
-    this.solvedConnectionsMap.set(connName, {
-      connectionName: connName,
-      traceThickness: this.traceThickness,
-      viaDiameter: this.viaDiameter,
-      route: routePoints.map((pt) => ({
-        x: pt.x,
-        y: pt.y,
-        z: this.layerToZ.get(pt.z) ?? pt.z,
-      })),
-      vias,
-    })
-  }
-
-  ripTrace(connectionName: ConnectionName): void {
-    const route = this.solvedConnectionsMap.get(connectionName)
-
-    // Add rip penalties to the penalty map along the ripped route
-    if (route) {
-      for (const pt of route.route) {
-        const row = Math.round(
-          (pt.y - this.gridOrigin.y) / this.cellSizeMm - 0.5,
-        )
-        const col = Math.round(
-          (pt.x - this.gridOrigin.x) / this.cellSizeMm - 0.5,
-        )
-        if (row >= 0 && row < this.rows && col >= 0 && col < this.cols) {
-          const rowArr = this.penaltyMap[row]
-          if (rowArr) {
-            rowArr[col] =
-              (rowArr[col] ?? 0) + this.hyperParameters.ripTracePenalty
-          }
-        }
-      }
-      for (const via of route.vias) {
-        const row = Math.round(
-          (via.y - this.gridOrigin.y) / this.cellSizeMm - 0.5,
-        )
-        const col = Math.round(
-          (via.x - this.gridOrigin.x) / this.cellSizeMm - 0.5,
-        )
-        if (row >= 0 && row < this.rows && col >= 0 && col < this.cols) {
-          const rowArr = this.penaltyMap[row]
-          if (rowArr) {
-            rowArr[col] =
-              (rowArr[col] ?? 0) + this.hyperParameters.ripViaPenalty
-          }
-        }
-      }
-    }
-
-    // Remove from usedCells using tracked cell keys (O(cells) instead of full grid scan)
-    const trackedCells = this.connectionCellKeys.get(connectionName)
-    if (trackedCells) {
-      for (const key of trackedCells) {
-        const parts = key.split(",")
-        const z = Number(parts[0])
-        const r = Number(parts[1])
-        const c = Number(parts[2])
-        const layer = this.usedCells[z]
-        if (layer) {
-          const rowArr = layer[r]
-          if (rowArr && rowArr[c] === connectionName) {
-            rowArr[c] = null
-          }
-        }
-      }
-      this.connectionCellKeys.delete(connectionName)
-    }
-
-    // Move from solved back to unsolved
-    if (route) {
-      this.solvedConnectionsMap.delete(connectionName)
-      const start = route.route[0]
-      const end = route.route[route.route.length - 1]
-      if (start && end) {
-        this.unsolvedConnections.push({
-          connectionName,
-          start: this.pointToGridCell(start),
-          end: this.pointToGridCell(end),
-        })
-      }
+      title: `HighDensityA01 [${this.solvedRoutes?.size ?? 0} solved, ${this.unsolvedSegs?.length ?? 0} remaining]`,
     }
   }
 
   override getOutput(): HighDensityIntraNodeRoute[] {
     const t = this.gridToBoundsTransform
-    return Array.from(this.solvedConnectionsMap.values()).map((route) => ({
-      ...route,
-      route: route.route.map((pt) => {
-        const tp = applyAffineTransformToPoint(t, pt)
-        return { x: tp.x, y: tp.y, z: pt.z }
-      }),
-      vias: route.vias.map((v) => applyAffineTransformToPoint(t, v)),
-    }))
+    const result: HighDensityIntraNodeRoute[] = []
+
+    for (const [connId, route] of this.solvedRoutes) {
+      const connName = this.connIdToName[connId]!
+      result.push({
+        connectionName: connName,
+        traceThickness: this.traceThickness,
+        viaDiameter: this.viaDiameter,
+        route: route.cells.map((cell) => {
+          const rawX =
+            this.gridOrigin.x + (cell.col + 0.5) * this.cellSizeMm
+          const rawY =
+            this.gridOrigin.y + (cell.row + 0.5) * this.cellSizeMm
+          const tp = applyAffineTransformToPoint(t, { x: rawX, y: rawY })
+          return { x: tp.x, y: tp.y, z: this.layerToZ.get(cell.z) ?? cell.z }
+        }),
+        vias: route.viaCells.map((via) => {
+          const rawX = this.gridOrigin.x + (via.col + 0.5) * this.cellSizeMm
+          const rawY = this.gridOrigin.y + (via.row + 0.5) * this.cellSizeMm
+          return applyAffineTransformToPoint(t, { x: rawX, y: rawY })
+        }),
+      })
+    }
+
+    return result
   }
 }
