@@ -182,6 +182,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   // --- Interned connections ---
   private connNameToId!: Map<string, ConnId>
   private connIdToName!: string[]
+  private connIdToRootId!: ConnId[] // connId → rootConnId (for same-net MST segment grouping)
 
   // --- Flat arrays ---
   private planeSize!: number // rows * cols
@@ -254,7 +255,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       viaBaseCost: 0.1,
       ...props.hyperParameters,
     }
-    this.MAX_ITERATIONS = 1e6
+    this.MAX_ITERATIONS = 5e6
     this.initialPenaltyFn = props.initialPenaltyFn
   }
 
@@ -345,7 +346,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.viaOffsetsDr = new Int32Array(drList)
     this.viaOffsetsDc = new Int32Array(dcList)
 
-    // Build and shuffle connections
+    // Build and order connections
     this.unsolvedSegs = this.buildConnectionSegs()
     this.solvedRoutes = new Map()
     this.usedIndicesByConn = []
@@ -380,8 +381,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       const h = this.computeH(
         next.startRow,
         next.startCol,
+        next.startZ,
         next.endRow,
         next.endCol,
+        next.endZ,
       )
       this.nodePool.push({
         z: next.startZ,
@@ -425,6 +428,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     // 6. Expand neighbors inline (no array allocation)
     const endRow = seg.endRow
     const endCol = seg.endCol
+    const endZ = seg.endZ
     const activeConn = this.activeConnId
     const rows = this.rows
     const cols = this.cols
@@ -443,7 +447,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
       const g2 = g + this._moveCost
-      const f2 = g2 + this.computeH(nr, nc, endRow, endCol)
+      const f2 = g2 + this.computeH(nr, nc, z, endRow, endCol, endZ)
 
       const newNodeIdx = this.nodePool.length
       this.nodePool.push({
@@ -486,7 +490,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           ripped,
         )
         const g2 = g + this._moveCost
-        const f2 = g2 + this.computeH(row, col, endRow, endCol)
+        const f2 = g2 + this.computeH(row, col, nz, endRow, endCol, endZ)
 
         const newNodeIdx = this.nodePool.length
         this.nodePool.push({
@@ -543,7 +547,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       const flatIdx = (toZ * this.rows + toRow) * cols + toCol
       const occ = this.usedCellsFlat[flatIdx]!
-      if (occ !== -1 && occ !== activeConn) {
+      if (occ !== -1 && occ !== activeConn && !this.isSameNet(occ, activeConn)) {
         if (!rippedContains(r, occ)) {
           cost += this.hyperParameters.ripCost
           r = { id: occ, prev: r }
@@ -578,7 +582,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         const c = col + offDc[i]!
         if (r < 0 || c < 0 || r >= rows || c >= cols) continue
         const occ = used[zBase + r * cols + c]!
-        if (occ === -1 || occ === activeConn) continue
+        if (occ === -1 || occ === activeConn || this.isSameNet(occ, activeConn)) continue
         // Small unique check (typically very few occupants)
         let seen = false
         for (let j = 0; j < occs.length; j++) {
@@ -601,16 +605,21 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
-  // --- Heuristic: Manhattan distance * cellSizeMm ---
+  // --- Heuristic: Manhattan distance * cellSizeMm + via cost ---
   private computeH(
     fromRow: number,
     fromCol: number,
+    fromZ: number,
     toRow: number,
     toCol: number,
+    toZ: number,
   ): number {
-    return (
+    let h =
       (Math.abs(fromRow - toRow) + Math.abs(fromCol - toCol)) * this.cellSizeMm
-    )
+    if (fromZ !== toZ) {
+      h += this.hyperParameters.viaBaseCost
+    }
+    return h
   }
 
   // --- Connection interning ---
@@ -623,22 +632,39 @@ export class HighDensitySolverA01 extends BaseSolver {
     return id
   }
 
+  // --- Root-net check: same physical net (MST segments of same root) ---
+  private isSameNet(a: ConnId, b: ConnId): boolean {
+    return this.connIdToRootId[a] === this.connIdToRootId[b]
+  }
+
   // --- Build connection segments from port points ---
   private buildConnectionSegs(): ConnectionSeg[] {
     const byName = new Map<
       string,
       Array<{ x: number; y: number; z: number }>
     >()
+    const nameToRoot = new Map<string, string>()
     for (const pp of this.nodeWithPortPoints.portPoints) {
       const name = pp.connectionName
       if (!byName.has(name)) byName.set(name, [])
       byName.get(name)!.push(pp)
+      if (pp.rootConnectionName) {
+        nameToRoot.set(name, pp.rootConnectionName)
+      }
     }
 
+    this.connIdToRootId = []
     const segs: ConnectionSeg[] = []
     for (const [name, pts] of byName) {
       if (pts.length < 2) continue
       const connId = this.internConn(name)
+      // Intern root connection name for same-net grouping
+      const rootName = nameToRoot.get(name) ?? name
+      const rootId = this.internConn(rootName)
+      while (this.connIdToRootId.length <= connId) {
+        this.connIdToRootId.push(-1)
+      }
+      this.connIdToRootId[connId] = rootId
       for (let i = 0; i < pts.length - 1; i++) {
         const s = this.pointToCell(pts[i]!)
         const e = this.pointToCell(pts[i + 1]!)
@@ -652,6 +678,11 @@ export class HighDensitySolverA01 extends BaseSolver {
           endCol: e.col,
         })
       }
+    }
+    // Ensure all interned IDs (including root-only IDs) have rootId entries
+    while (this.connIdToRootId.length < this.connIdToName.length) {
+      const id = this.connIdToRootId.length
+      this.connIdToRootId.push(id) // root IDs map to themselves
     }
     return segs
   }
@@ -744,7 +775,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           if (r < 0 || r >= rows || c < 0 || c >= cols) continue
           const flatIdx = (cell.z * rows + r) * cols + c
           const existing = used[flatIdx]!
-          if (existing !== -1 && existing !== connId) continue
+          if (existing !== -1 && existing !== connId && !this.isSameNet(existing, connId)) continue
           used[flatIdx] = connId
           indices.push(flatIdx)
         }
@@ -767,7 +798,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           if (r < 0 || r >= rows || c < 0 || c >= cols) continue
           const flatIdx = zBase + r * cols + c
           const existing = used[flatIdx]!
-          if (existing !== -1 && existing !== connId) {
+          if (existing !== -1 && existing !== connId && !this.isSameNet(existing, connId)) {
             // Track displaced (small unique check)
             let seen = false
             for (let k = 0; k < displacedByVias.length; k++) {
@@ -778,8 +809,10 @@ export class HighDensitySolverA01 extends BaseSolver {
             }
             if (!seen) displacedByVias.push(existing)
           }
-          used[flatIdx] = connId
-          indices.push(flatIdx)
+          if (existing === -1 || existing === connId || this.isSameNet(existing, connId)) {
+            used[flatIdx] = connId
+            indices.push(flatIdx)
+          }
         }
       }
     }
@@ -1038,15 +1071,115 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   override getOutput(): HighDensityIntraNodeRoute[] {
     const t = this.gridToBoundsTransform
-    const result: HighDensityIntraNodeRoute[] = []
 
+    // Build name → rootName mapping from port points
+    const nameToRoot = new Map<string, string>()
+    for (const pp of this.nodeWithPortPoints.portPoints) {
+      if (pp.rootConnectionName) {
+        nameToRoot.set(pp.connectionName, pp.rootConnectionName)
+      }
+    }
+
+    // Build individual cell-based routes grouped by rootConnectionName
+    type CellRoute = {
+      cells: Array<{ z: number; row: number; col: number }>
+      viaCells: Array<{ row: number; col: number }>
+    }
+    const groups = new Map<string, CellRoute[]>()
     for (const [connId, route] of this.solvedRoutes) {
       const connName = this.connIdToName[connId]!
+      const rootName = nameToRoot.get(connName) ?? connName
+      if (!groups.has(rootName)) groups.set(rootName, [])
+      groups.get(rootName)!.push(route)
+    }
+
+    // Helper: check cell equality
+    const cellEq = (
+      a: { z: number; row: number; col: number },
+      b: { z: number; row: number; col: number },
+    ) => a.z === b.z && a.row === b.row && a.col === b.col
+
+    const result: HighDensityIntraNodeRoute[] = []
+
+    for (const [rootName, routes] of groups) {
+      let mergedCells: Array<{ z: number; row: number; col: number }>
+      let mergedViaCells: Array<{ row: number; col: number }>
+
+      if (routes.length === 1) {
+        mergedCells = routes[0]!.cells
+        mergedViaCells = routes[0]!.viaCells
+      } else {
+        // Merge route segments by chaining at shared endpoints
+        const remaining = routes.map((r) => ({
+          cells: [...r.cells],
+          viaCells: [...r.viaCells],
+        }))
+        let chain = remaining.shift()!
+        mergedCells = chain.cells
+        mergedViaCells = [...chain.viaCells]
+
+        let retries = remaining.length * 2
+        while (remaining.length > 0 && retries-- > 0) {
+          let found = false
+          for (let i = 0; i < remaining.length; i++) {
+            const seg = remaining[i]!
+            const mFirst = mergedCells[0]!
+            const mLast = mergedCells[mergedCells.length - 1]!
+            const sFirst = seg.cells[0]!
+            const sLast = seg.cells[seg.cells.length - 1]!
+
+            if (cellEq(mLast, sFirst)) {
+              mergedCells = mergedCells.concat(seg.cells.slice(1))
+              mergedViaCells = mergedViaCells.concat(seg.viaCells)
+              remaining.splice(i, 1)
+              found = true
+              break
+            } else if (cellEq(mLast, sLast)) {
+              mergedCells = mergedCells.concat([...seg.cells].reverse().slice(1))
+              mergedViaCells = mergedViaCells.concat(seg.viaCells)
+              remaining.splice(i, 1)
+              found = true
+              break
+            } else if (cellEq(mFirst, sLast)) {
+              mergedCells = seg.cells.concat(mergedCells.slice(1))
+              mergedViaCells = seg.viaCells.concat(mergedViaCells)
+              remaining.splice(i, 1)
+              found = true
+              break
+            } else if (cellEq(mFirst, sFirst)) {
+              mergedCells = [...seg.cells].reverse().concat(mergedCells.slice(1))
+              mergedViaCells = seg.viaCells.concat(mergedViaCells)
+              remaining.splice(i, 1)
+              found = true
+              break
+            }
+          }
+          if (!found) {
+            // Can't chain - just concatenate with gap
+            const seg = remaining.shift()!
+            mergedCells = mergedCells.concat(seg.cells)
+            mergedViaCells = mergedViaCells.concat(seg.viaCells)
+          }
+        }
+
+        // Recompute vias from merged cells (z-transitions)
+        mergedViaCells = []
+        for (let i = 1; i < mergedCells.length; i++) {
+          if (mergedCells[i]!.z !== mergedCells[i - 1]!.z) {
+            mergedViaCells.push({
+              row: mergedCells[i]!.row,
+              col: mergedCells[i]!.col,
+            })
+          }
+        }
+      }
+
       result.push({
-        connectionName: connName,
+        connectionName: rootName,
+        rootConnectionName: rootName,
         traceThickness: this.traceThickness,
         viaDiameter: this.viaDiameter,
-        route: route.cells.map((cell) => {
+        route: mergedCells.map((cell) => {
           const rawX =
             this.gridOrigin.x + (cell.col + 0.5) * this.cellSizeMm
           const rawY =
@@ -1054,7 +1187,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           const tp = applyAffineTransformToPoint(t, { x: rawX, y: rawY })
           return { x: tp.x, y: tp.y, z: this.layerToZ.get(cell.z) ?? cell.z }
         }),
-        vias: route.viaCells.map((via) => {
+        vias: mergedViaCells.map((via) => {
           const rawX = this.gridOrigin.x + (via.col + 0.5) * this.cellSizeMm
           const rawY = this.gridOrigin.y + (via.row + 0.5) * this.cellSizeMm
           return applyAffineTransformToPoint(t, { x: rawX, y: rawY })
