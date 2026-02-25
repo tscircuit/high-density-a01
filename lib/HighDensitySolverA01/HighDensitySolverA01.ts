@@ -434,8 +434,8 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // 6a. 8-directional lateral moves
     for (let d = 0; d < 8; d++) {
-      const nr = row + DIRS_DR[d]
-      const nc = col + DIRS_DC[d]
+      const nr = row + DIRS_DR[d]!
+      const nc = col + DIRS_DC[d]!
       if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue
 
       const nIdx = (z * rows + nr) * cols + nc
@@ -808,12 +808,14 @@ export class HighDensitySolverA01 extends BaseSolver {
       const cols = this.cols
       for (let i = 0; i < route.cells.length; i++) {
         const cell = route.cells[i]!
-        this.penalty2d[cell.row * cols + cell.col] +=
+        const cellIdx = cell.row * cols + cell.col
+        this.penalty2d[cellIdx] = this.penalty2d[cellIdx]! +
           this.hyperParameters.ripTracePenalty
       }
       for (let i = 0; i < route.viaCells.length; i++) {
         const via = route.viaCells[i]!
-        this.penalty2d[via.row * cols + via.col] +=
+        const viaIdx = via.row * cols + via.col
+        this.penalty2d[viaIdx] = this.penalty2d[viaIdx]! +
           this.hyperParameters.ripViaPenalty
       }
     }

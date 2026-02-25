@@ -1,4 +1,6 @@
-import { test, expect } from "bun:test"
+import { test, expect, setDefaultTimeout } from "bun:test"
+
+setDefaultTimeout(120_000)
 import "bun-match-svg"
 import "graphics-debug/matcher"
 import {
@@ -24,7 +26,7 @@ async function createSolver() {
   return solver
 }
 
-test("wasm sample001 solve", { timeout: 120_000 }, async () => {
+test("wasm sample001 solve", async () => {
   const solver = await createSolver()
 
   console.log(
@@ -46,7 +48,6 @@ test("wasm sample001 solve", { timeout: 120_000 }, async () => {
 
 test(
   "wasm sample001 no same-layer intersections",
-  { timeout: 120_000 },
   async () => {
     const solver = await createSolver()
     const routes = solver.getOutput()

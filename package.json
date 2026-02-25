@@ -16,7 +16,9 @@
   "scripts": {
     "start": "cosmos",
     "build:site": "cosmos-export",
-    "build": "tsup lib/index.ts lib/wasm.ts --dts --format esm && cp wasm/pkg/highdensity_solver_a01_wasm_bg.wasm dist/"
+    "build": "tsup lib/index.ts lib/wasm.ts --dts --format esm && cp wasm/pkg/highdensity_solver_a01_wasm_bg.wasm dist/",
+    "format": "biome format -w .",
+    "format:check": "biome format ."
   },
   "files": [
     "dist"

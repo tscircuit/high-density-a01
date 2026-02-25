@@ -1,4 +1,6 @@
-import { test, expect } from "bun:test"
+import { test, expect, setDefaultTimeout } from "bun:test"
+
+setDefaultTimeout(120_000)
 import "bun-match-svg"
 import "graphics-debug/matcher"
 import { HighDensitySolverA01 } from "../../../lib/HighDensitySolverA01/HighDensitySolverA01"
@@ -16,7 +18,7 @@ function createSolver() {
   return solver
 }
 
-test("sample001 solve", { timeout: 120_000 }, async () => {
+test("sample001 solve", async () => {
   const solver = createSolver()
 
   console.log(
@@ -38,7 +40,7 @@ test("sample001 solve", { timeout: 120_000 }, async () => {
   await expect(graphics).toMatchGraphicsSvg(import.meta.path)
 })
 
-test("sample001 no same-layer intersections", { timeout: 120_000 }, () => {
+test("sample001 no same-layer intersections", () => {
   const solver = createSolver()
   const routes = solver.getOutput()
 
