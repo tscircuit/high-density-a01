@@ -661,7 +661,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Track cells owned by this connection
     const cellKeys = new Set<CellKey>()
 
-    // Mark cells as used (including margin cells around the trace)
+    // Mark cells as used (including margin cells around the trace).
+    // Only claim free cells or our own cells for margins — never overwrite
+    // another trace's cells, as that would silently invalidate their route.
     const marginCells = Math.ceil(this.traceMargin / this.cellSizeMm)
     for (const pt of routePoints) {
       const centerRow = Math.round(
@@ -679,6 +681,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           if (layer) {
             const rowArr = layer[r]
             if (rowArr) {
+              const existing = rowArr[c]
+              if (existing !== null && existing !== connName) continue
               rowArr[c] = connName
               cellKeys.add(`${pt.z},${r},${c}`)
             }

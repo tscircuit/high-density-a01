@@ -3,31 +3,21 @@ import "bun-match-svg"
 import "graphics-debug/matcher"
 import { HighDensitySolverA01 } from "../../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import sample001 from "./sample001.json"
+import { findSameLayerIntersections, validateNoIntersections } from "../../fixtures/validateNoIntersections"
 
-test("sample001 solve", { timeout: 120_000 }, async () => {
-  const borderMargin = 2 // mm
-  const { width, height } = sample001
+function createSolver() {
   const solver = new HighDensitySolverA01({
     nodeWithPortPoints: sample001,
     cellSizeMm: 0.5,
     viaDiameter: 0.3,
-    // showPenaltyMap: true,
-    // showUsedCellMap: true,
-    // initialPenaltyFn: ({ px, py }) => {
-    //   const distToEdge = Math.min(
-    //     px * width,
-    //     (1 - px) * width,
-    //     py * height,
-    //     (1 - py) * height,
-    //   )
-    //   if (distToEdge >= borderMargin) return 0
-    //   const t = 1 - distToEdge / borderMargin
-    //   return t * t * 2
-    // },
   })
-
-  solver.MAX_ITERATIONS = 500_000
+  solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
+  return solver
+}
+
+test("sample001 solve", { timeout: 120_000 }, async () => {
+  const solver = createSolver()
 
   console.log(
     `solved=${solver.solved} failed=${solver.failed} iterations=${solver.iterations} error=${solver.error}`,
@@ -46,4 +36,21 @@ test("sample001 solve", { timeout: 120_000 }, async () => {
   const graphics = solver.visualize()
 
   await expect(graphics).toMatchGraphicsSvg(import.meta.path)
+})
+
+test("sample001 no same-layer intersections", { timeout: 120_000 }, () => {
+  const solver = createSolver()
+  const routes = solver.getOutput()
+
+  const intersections = findSameLayerIntersections(routes)
+  if (intersections.length > 0) {
+    console.log("Found intersections:")
+    for (const ix of intersections) {
+      console.log(
+        `  ${ix.trace1} x ${ix.trace2} on z=${ix.z} at (${ix.point.x.toFixed(3)}, ${ix.point.y.toFixed(3)})`,
+      )
+    }
+  }
+
+  validateNoIntersections(routes)
 })
