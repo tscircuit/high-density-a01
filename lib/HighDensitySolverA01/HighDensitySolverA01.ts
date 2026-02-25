@@ -195,6 +195,12 @@ export class HighDensitySolverA01 extends BaseSolver {
   private viaOffsetsDc!: Int32Array
   private viaOffsetsLen!: number
 
+  // --- Via zone boundaries (cell coordinates) ---
+  private minViaRow!: number
+  private maxViaRow!: number
+  private minViaCol!: number
+  private maxViaCol!: number
+
   // --- Per-connection used-cell tracking ---
   private usedIndicesByConn!: number[][] // connId -> [flatCellIdx, ...]
 
@@ -205,12 +211,20 @@ export class HighDensitySolverA01 extends BaseSolver {
   // --- A* state ---
   private activeConnSeg: ConnectionSeg | null = null
   private activeConnId: ConnId = -1
+  private crossLayerSearch = false
   private nodePool!: SearchNode[]
   private heap!: MinHeap
   private seqCounter = 0
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
+
+  // --- Convergence state ---
+  private ripCount!: number[]
+  private totalRipEvents = 0
+  private searchIterations = 0
+  private consecutiveSkips = 0
+  private penaltyCap!: number
 
   // --- Reusable scratch for computeMoveCostAndRips ---
   private _moveCost = 0
@@ -254,7 +268,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       viaBaseCost: 0.1,
       ...props.hyperParameters,
     }
-    this.MAX_ITERATIONS = 1e6
+    this.MAX_ITERATIONS = 100e6
     this.initialPenaltyFn = props.initialPenaltyFn
   }
 
@@ -345,10 +359,27 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.viaOffsetsDr = new Int32Array(drList)
     this.viaOffsetsDc = new Int32Array(dcList)
 
+    // Precompute via zone boundaries
+    if (this.viaMinDistFromBorder > 0) {
+      const borderCells = Math.ceil(this.viaMinDistFromBorder / cellSizeMm)
+      this.minViaRow = borderCells
+      this.maxViaRow = this.rows - 1 - borderCells
+      this.minViaCol = borderCells
+      this.maxViaCol = this.cols - 1 - borderCells
+    } else {
+      this.minViaRow = 0
+      this.maxViaRow = this.rows - 1
+      this.minViaCol = 0
+      this.maxViaCol = this.cols - 1
+    }
+
     // Build and shuffle connections
     this.unsolvedSegs = this.buildConnectionSegs()
     this.solvedRoutes = new Map()
     this.usedIndicesByConn = []
+    this.ripCount = []
+    this.consecutiveSkips = 0
+    this.penaltyCap = this.hyperParameters.ripCost * 0.5
     this.shuffleConnections()
 
     // A* state
@@ -369,17 +400,21 @@ export class HighDensitySolverA01 extends BaseSolver {
       const next = this.unsolvedSegs.shift()!
       this.activeConnSeg = next
       this.activeConnId = next.connId
+      this.crossLayerSearch = next.startZ !== next.endZ
 
       // Reset A* state for this connection
       this.nodePool = []
       this.heap.clear()
       this.seqCounter = 0
+      this.searchIterations = 0
       this.nextStamp()
 
       // Push start node
       const h = this.computeH(
+        next.startZ,
         next.startRow,
         next.startCol,
+        next.endZ,
         next.endRow,
         next.endCol,
       )
@@ -396,7 +431,35 @@ export class HighDensitySolverA01 extends BaseSolver {
       return
     }
 
-    // 2. Open set empty → fail
+    // 2. Per-search budget check
+    this.searchIterations++
+    const connRips = this.ripCount[this.activeConnId] ?? 0
+    const baseBudget = this.planeSize * this.layers * 50
+    const budget = Math.min(
+      baseBudget * (1 + connRips * 0.5),
+      this.planeSize * this.layers * 500,
+    )
+    if (this.searchIterations > budget) {
+      // Global penalty decay on budget-skip: gradually makes penalized zones
+      // accessible to stuck connections without affecting non-skipping searches
+      const pen = this.penalty2d
+      for (let i = 0; i < pen.length; i++) {
+        pen[i] = pen[i]! * 0.9
+      }
+      this.unsolvedSegs.push(this.activeConnSeg!)
+      this.activeConnSeg = null
+      this.activeConnId = -1
+      this.heap.clear()
+      this.nodePool = []
+      this.consecutiveSkips++
+      if (this.consecutiveSkips >= this.unsolvedSegs.length * 3) {
+        this.error = `Convergence failure: ${this.unsolvedSegs.length} connections stuck`
+        this.failed = true
+      }
+      return
+    }
+
+    // 3. Open set empty → fail
     if (this.heap.size === 0) {
       this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
       this.failed = true
@@ -423,6 +486,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
 
     // 6. Expand neighbors inline (no array allocation)
+    const endZ = seg.endZ
     const endRow = seg.endRow
     const endCol = seg.endCol
     const activeConn = this.activeConnId
@@ -443,7 +507,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
       const g2 = g + this._moveCost
-      const f2 = g2 + this.computeH(nr, nc, endRow, endCol)
+      const f2 = g2 + this.computeH(z, nr, nc, endZ, endRow, endCol)
 
       const newNodeIdx = this.nodePool.length
       this.nodePool.push({
@@ -486,7 +550,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           ripped,
         )
         const g2 = g + this._moveCost
-        const f2 = g2 + this.computeH(row, col, endRow, endCol)
+        const f2 = g2 + this.computeH(nz, row, col, endZ, endRow, endCol)
 
         const newNodeIdx = this.nodePool.length
         this.nodePool.push({
@@ -521,7 +585,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     if (fromZ !== toZ) {
       // Via transition
       cost += this.hyperParameters.viaBaseCost
-      cost += this.penalty2d[toRow * cols + toCol]!
+      cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
 
       // Via footprint occupants (reusable scratch array)
       this.fillViaOccupants(toRow, toCol, activeConn)
@@ -539,7 +603,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       const dr = fromRow > toRow ? fromRow - toRow : toRow - fromRow
       const dc = fromCol > toCol ? fromCol - toCol : toCol - fromCol
       cost += (dr + dc > 1 ? Math.SQRT2 : 1) * this.cellSizeMm
-      cost += this.penalty2d[toRow * cols + toCol]!
+      cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
 
       const flatIdx = (toZ * this.rows + toRow) * cols + toCol
       const occ = this.usedCellsFlat[flatIdx]!
@@ -557,11 +621,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // --- Via footprint unique occupants (fills _viaOccs scratch array) ---
-  private fillViaOccupants(
-    row: number,
-    col: number,
-    activeConn: ConnId,
-  ): void {
+  private fillViaOccupants(row: number, col: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
     const rows = this.rows
@@ -601,15 +661,47 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
-  // --- Heuristic: Manhattan distance * cellSizeMm ---
+  // --- Heuristic: Manhattan + via-zone awareness for cross-layer ---
   private computeH(
-    fromRow: number,
-    fromCol: number,
+    z: number,
+    row: number,
+    col: number,
+    toZ: number,
     toRow: number,
     toCol: number,
   ): number {
+    const dr = Math.abs(row - toRow)
+    const dc = Math.abs(col - toCol)
+    const manhattan = dr + dc
+
+    if (z === toZ) return manhattan * this.cellSizeMm
+
+    // On wrong layer — add viaBaseCost as minimum layer-switch cost
+    if (!this.crossLayerSearch) {
+      return manhattan * this.cellSizeMm + this.hyperParameters.viaBaseCost
+    }
+
+    // Cross-layer search on wrong layer: via-zone-aware estimate.
+    // Clamp each endpoint to the via zone to estimate via detour.
+    const vr1 = Math.max(this.minViaRow, Math.min(this.maxViaRow, row))
+    const vc1 = Math.max(this.minViaCol, Math.min(this.maxViaCol, col))
+    const vr2 = Math.max(this.minViaRow, Math.min(this.maxViaRow, toRow))
+    const vc2 = Math.max(this.minViaCol, Math.min(this.maxViaCol, toCol))
+
+    const via1 =
+      Math.abs(row - vr1) +
+      Math.abs(col - vc1) +
+      Math.abs(vr1 - toRow) +
+      Math.abs(vc1 - toCol)
+    const via2 =
+      Math.abs(row - vr2) +
+      Math.abs(col - vc2) +
+      Math.abs(vr2 - toRow) +
+      Math.abs(vc2 - toCol)
+
     return (
-      (Math.abs(fromRow - toRow) + Math.abs(fromCol - toCol)) * this.cellSizeMm
+      Math.max(Math.min(via1, via2), manhattan) * this.cellSizeMm +
+      this.hyperParameters.viaBaseCost
     )
   }
 
@@ -625,10 +717,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Build connection segments from port points ---
   private buildConnectionSegs(): ConnectionSeg[] {
-    const byName = new Map<
-      string,
-      Array<{ x: number; y: number; z: number }>
-    >()
+    const byName = new Map<string, Array<{ x: number; y: number; z: number }>>()
     for (const pp of this.nodeWithPortPoints.portPoints) {
       const name = pp.connectionName
       if (!byName.has(name)) byName.set(name, [])
@@ -656,11 +745,11 @@ export class HighDensitySolverA01 extends BaseSolver {
     return segs
   }
 
-  private pointToCell(pt: {
-    x: number
-    y: number
+  private pointToCell(pt: { x: number; y: number; z: number }): {
     z: number
-  }): { z: number; row: number; col: number } {
+    row: number
+    col: number
+  } {
     const col = Math.max(
       0,
       Math.min(
@@ -696,6 +785,8 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Finalize a found route ---
   private finalizeRoute(goalNodeIdx: number): void {
+    this.consecutiveSkips = Math.max(0, this.consecutiveSkips - 1)
+
     // Reconstruct path from parent chain (cell-based)
     const cells: Array<{ z: number; row: number; col: number }> = []
     let idx = goalNodeIdx
@@ -797,10 +888,33 @@ export class HighDensitySolverA01 extends BaseSolver {
     for (let i = 0; i < displacedByVias.length; i++) {
       this.ripTrace(displacedByVias[i]!)
     }
+
+    // Penalty decay to prevent death spiral
+    if (rippedIds.length > 0 || displacedByVias.length > 0) {
+      const pen = this.penalty2d
+      const cap = this.penaltyCap
+      if (this.totalRipEvents > 50) {
+        // High-contention mode: global decay to help stuck connections converge
+        for (let i = 0; i < pen.length; i++) {
+          pen[i] = pen[i]! * 0.99
+        }
+      } else {
+        // Normal mode: targeted decay only for above-cap cells
+        for (let i = 0; i < pen.length; i++) {
+          if (pen[i]! > cap) {
+            pen[i] = pen[i]! * 0.5
+          }
+        }
+      }
+    }
   }
 
   // --- Rip a trace ---
   private ripTrace(connId: ConnId): void {
+    while (this.ripCount.length <= connId) this.ripCount.push(0)
+    this.ripCount[connId]!++
+    this.totalRipEvents++
+
     const route = this.solvedRoutes.get(connId)
 
     // Add rip penalties to penalty map along the ripped route
@@ -809,14 +923,14 @@ export class HighDensitySolverA01 extends BaseSolver {
       for (let i = 0; i < route.cells.length; i++) {
         const cell = route.cells[i]!
         const cellIdx = cell.row * cols + cell.col
-        this.penalty2d[cellIdx] = this.penalty2d[cellIdx]! +
-          this.hyperParameters.ripTracePenalty
+        this.penalty2d[cellIdx] =
+          this.penalty2d[cellIdx]! + this.hyperParameters.ripTracePenalty
       }
       for (let i = 0; i < route.viaCells.length; i++) {
         const via = route.viaCells[i]!
         const viaIdx = via.row * cols + via.col
-        this.penalty2d[viaIdx] = this.penalty2d[viaIdx]! +
-          this.hyperParameters.ripViaPenalty
+        this.penalty2d[viaIdx] =
+          this.penalty2d[viaIdx]! + this.hyperParameters.ripViaPenalty
       }
     }
 
@@ -980,9 +1094,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       if (route.route.length - segStart >= 2) {
         const lastZ = route.route[segStart]!.z
         lines.push({
-          points: route.route
-            .slice(segStart)
-            .map((p) => ({ x: p.x, y: p.y })),
+          points: route.route.slice(segStart).map((p) => ({ x: p.x, y: p.y })),
           strokeColor: TRACE_COLORS[lastZ] ?? "rgba(128,128,128,0.75)",
           strokeWidth: this.traceThickness,
         })
@@ -1047,10 +1159,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         traceThickness: this.traceThickness,
         viaDiameter: this.viaDiameter,
         route: route.cells.map((cell) => {
-          const rawX =
-            this.gridOrigin.x + (cell.col + 0.5) * this.cellSizeMm
-          const rawY =
-            this.gridOrigin.y + (cell.row + 0.5) * this.cellSizeMm
+          const rawX = this.gridOrigin.x + (cell.col + 0.5) * this.cellSizeMm
+          const rawY = this.gridOrigin.y + (cell.row + 0.5) * this.cellSizeMm
           const tp = applyAffineTransformToPoint(t, { x: rawX, y: rawY })
           return { x: tp.x, y: tp.y, z: this.layerToZ.get(cell.z) ?? cell.z }
         }),

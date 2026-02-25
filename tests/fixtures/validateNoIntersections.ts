@@ -111,6 +111,12 @@ export function findSameLayerIntersections(
 
       for (let j = i + 1; j < routes.length; j++) {
         const route2 = routes[j]!
+
+        // Skip same-net segments (they legitimately share endpoints)
+        const net1 = route1.connectionName.replace(/_mst\d+$/, "")
+        const net2 = route2.connectionName.replace(/_mst\d+$/, "")
+        if (net1 === net2) continue
+
         const pts2 = getPointsOnLayer(route2, z)
         const segs2 = getSegmentsOnLayer(route2, z)
 
