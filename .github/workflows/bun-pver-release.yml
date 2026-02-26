@@ -25,12 +25,6 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org/
       - run: npm install -g pver
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: pver release --no-push-main
