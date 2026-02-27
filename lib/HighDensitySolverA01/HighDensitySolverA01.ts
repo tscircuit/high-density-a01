@@ -200,6 +200,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
+  private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
   // --- Precomputed via footprint offsets ---
@@ -396,11 +397,20 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Build and shuffle connections
     this.unsolvedSegs = this.buildConnectionSegs()
 
+    this.sharedCrossRootPortCells = new Set()
+    const rootByPortFlat = new Map<number, string>()
     for (const pp of this.nodeWithPortPoints.portPoints) {
       const connId = this.connNameToId.get(pp.connectionName)
       if (connId === undefined) continue
       const cell = this.pointToCell(pp)
       const flatIdx = (cell.z * this.rows + cell.row) * this.cols + cell.col
+      const rootNet = this.connIdToRootNet[connId]!
+      const existingRoot = rootByPortFlat.get(flatIdx)
+      if (existingRoot === undefined) {
+        rootByPortFlat.set(flatIdx, rootNet)
+      } else if (existingRoot !== rootNet) {
+        this.sharedCrossRootPortCells.add(flatIdx)
+      }
       const existing = this.portOwnerFlat[flatIdx]!
       if (existing === -1 || existing === connId) {
         this.portOwnerFlat[flatIdx] = connId
@@ -958,6 +968,20 @@ export class HighDensitySolverA01 extends BaseSolver {
       idx = n.parentIdx
     }
     cells.reverse()
+
+    while (cells.length > 1) {
+      const first = cells[0]!
+      const firstFlat =
+        (first.z * this.rows + first.row) * this.cols + first.col
+      if (!this.sharedCrossRootPortCells.has(firstFlat)) break
+      cells.shift()
+    }
+    while (cells.length > 1) {
+      const last = cells[cells.length - 1]!
+      const lastFlat = (last.z * this.rows + last.row) * this.cols + last.col
+      if (!this.sharedCrossRootPortCells.has(lastFlat)) break
+      cells.pop()
+    }
 
     // Detect vias (z-level changes)
     const viaCells: Array<{ row: number; col: number }> = []
