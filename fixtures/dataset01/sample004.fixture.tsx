@@ -8,6 +8,7 @@ export default () => (
     createSolver={() => {
       const solver = new HighDensitySolverA01({
         ...defaultParams,
+        cellSizeMm: 0.2,
         nodeWithPortPoints: sample004.nodeWithPortPoints,
       })
       return solver
