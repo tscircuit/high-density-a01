@@ -30,7 +30,7 @@ test("sample003 solve", () => {
   )
 
   expect(solver.iterations).toBeGreaterThan(0)
-  expect(solver.solved || solver.failed).toBeTrue()
+  expect(solver.solved).toBeTrue()
 
   const graphics = solver.visualize()
   expect(graphics).toBeTruthy()

@@ -1,10 +1,10 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
-import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 import {
   type AffineTransform,
-  computeGridToAffineTransform,
   applyAffineTransformToPoint,
+  computeGridToAffineTransform,
 } from "../gridToAffineTransform"
+import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 
 // --- Interned connection ID ---
 type ConnId = number
@@ -131,6 +131,13 @@ interface HyperParameters {
   viaBaseCost: number
 }
 
+function toRootNetName(
+  connectionName: string,
+  rootConnectionName?: string,
+): string {
+  return rootConnectionName ?? connectionName.replace(/_mst\d+$/, "")
+}
+
 export interface HighDensitySolverA01Props {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
@@ -182,6 +189,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   // --- Interned connections ---
   private connNameToId!: Map<string, ConnId>
   private connIdToName!: string[]
+  private connIdToRootNet!: string[]
+  private overlapFriendlyRootNets!: Set<string>
 
   // --- Flat arrays ---
   private planeSize!: number // rows * cols
@@ -257,7 +266,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.viaDiameter = props.viaDiameter
     this.traceThickness = props.traceThickness ?? 0.1
     this.traceMargin = props.traceMargin ?? 0.15
-    this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 1
+    this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 0.15
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.hyperParameters = {
@@ -312,6 +321,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Intern connections
     this.connNameToId = new Map()
     this.connIdToName = []
+    this.connIdToRootNet = []
+    this.overlapFriendlyRootNets = new Set()
 
     // Flat penalty map (Float64Array is zero-initialized)
     this.penalty2d = new Float64Array(this.planeSize)
@@ -524,13 +535,10 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // 6b. Via moves (to other layers at same position)
     const canVia =
-      this.viaMinDistFromBorder <= 0 ||
-      Math.min(
-        col * cellSizeMm,
-        (cols - 1 - col) * cellSizeMm,
-        row * cellSizeMm,
-        (rows - 1 - row) * cellSizeMm,
-      ) >= this.viaMinDistFromBorder
+      row >= this.minViaRow &&
+      row <= this.maxViaRow &&
+      col >= this.minViaCol &&
+      col <= this.maxViaCol
 
     if (canVia) {
       for (let nz = 0; nz < this.layers; nz++) {
@@ -607,7 +615,12 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       const flatIdx = (toZ * this.rows + toRow) * cols + toCol
       const occ = this.usedCellsFlat[flatIdx]!
-      if (occ !== -1 && occ !== activeConn) {
+      const sameRoot =
+        this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
+      const allowSameRootOverlap =
+        sameRoot &&
+        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+      if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
         if (!rippedContains(r, occ)) {
           cost += this.hyperParameters.ripCost
           r = { id: occ, prev: r }
@@ -639,6 +652,14 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (r < 0 || c < 0 || r >= rows || c >= cols) continue
         const occ = used[zBase + r * cols + c]!
         if (occ === -1 || occ === activeConn) continue
+        const sameRoot =
+          this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
+        if (
+          sameRoot &&
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        ) {
+          continue
+        }
         // Small unique check (typically very few occupants)
         let seen = false
         for (let j = 0; j < occs.length; j++) {
@@ -706,31 +727,62 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // --- Connection interning ---
-  private internConn(name: string): ConnId {
+  private internConn(name: string, rootNetName?: string): ConnId {
     const existing = this.connNameToId.get(name)
     if (existing !== undefined) return existing
     const id = this.connIdToName.length
     this.connIdToName.push(name)
+    this.connIdToRootNet.push(toRootNetName(name, rootNetName))
     this.connNameToId.set(name, id)
     return id
   }
 
   // --- Build connection segments from port points ---
   private buildConnectionSegs(): ConnectionSeg[] {
-    const byName = new Map<string, Array<{ x: number; y: number; z: number }>>()
+    const byName = new Map<
+      string,
+      {
+        points: Array<{ x: number; y: number; z: number }>
+        rootConnectionName?: string
+      }
+    >()
     for (const pp of this.nodeWithPortPoints.portPoints) {
       const name = pp.connectionName
-      if (!byName.has(name)) byName.set(name, [])
-      byName.get(name)!.push(pp)
+      if (!byName.has(name)) {
+        byName.set(name, {
+          points: [],
+          rootConnectionName: pp.rootConnectionName,
+        })
+      }
+      byName.get(name)!.points.push(pp)
     }
 
     const segs: ConnectionSeg[] = []
-    for (const [name, pts] of byName) {
+    const seenSegmentKeys = new Set<string>()
+
+    for (const [name, conn] of byName) {
+      const pts = conn.points
       if (pts.length < 2) continue
-      const connId = this.internConn(name)
+
+      const connId = this.internConn(name, conn.rootConnectionName)
       for (let i = 0; i < pts.length - 1; i++) {
         const s = this.pointToCell(pts[i]!)
         const e = this.pointToCell(pts[i + 1]!)
+
+        const endpointA = `${s.z}:${s.row}:${s.col}`
+        const endpointB = `${e.z}:${e.row}:${e.col}`
+        const orderedEndpoints =
+          endpointA < endpointB
+            ? `${endpointA}|${endpointB}`
+            : `${endpointB}|${endpointA}`
+        const netName = conn.rootConnectionName ?? name
+        const segKey = `${netName}|${orderedEndpoints}`
+        if (seenSegmentKeys.has(segKey)) {
+          this.overlapFriendlyRootNets.add(netName)
+          continue
+        }
+        seenSegmentKeys.add(segKey)
+
         segs.push({
           connId,
           startZ: s.z,
@@ -835,7 +887,14 @@ export class HighDensitySolverA01 extends BaseSolver {
           if (r < 0 || r >= rows || c < 0 || c >= cols) continue
           const flatIdx = (cell.z * rows + r) * cols + c
           const existing = used[flatIdx]!
-          if (existing !== -1 && existing !== connId) continue
+          const sameRoot =
+            this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
+          const allowSameRootOverlap =
+            sameRoot &&
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+          if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
+            continue
+          }
           used[flatIdx] = connId
           indices.push(flatIdx)
         }
@@ -858,7 +917,12 @@ export class HighDensitySolverA01 extends BaseSolver {
           if (r < 0 || r >= rows || c < 0 || c >= cols) continue
           const flatIdx = zBase + r * cols + c
           const existing = used[flatIdx]!
-          if (existing !== -1 && existing !== connId) {
+          const sameRoot =
+            this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
+          const allowSameRootOverlap =
+            sameRoot &&
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+          if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
             // Track displaced (small unique check)
             let seen = false
             for (let k = 0; k < displacedByVias.length; k++) {
