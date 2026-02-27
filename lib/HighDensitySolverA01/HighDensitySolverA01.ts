@@ -279,7 +279,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       ripTracePenalty: 0.5,
       ripViaPenalty: 0.75,
       viaBaseCost: 0.1,
-      greedyMultiplier: 1.1,
+      greedyMultiplier: 1.5,
       ...props.hyperParameters,
     }
     this.MAX_ITERATIONS = 100e6
