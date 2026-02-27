@@ -87,6 +87,8 @@ pub struct HyperParametersPartial {
     pub rip_via_penalty: Option<f32>,
     #[serde(default)]
     pub via_base_cost: Option<f32>,
+    #[serde(default)]
+    pub greedy_multiplier: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -96,6 +98,7 @@ struct HyperParameters {
     rip_trace_penalty: f32,
     rip_via_penalty: f32,
     via_base_cost: f32,
+    greedy_multiplier: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -343,6 +346,7 @@ impl Solver {
             rip_trace_penalty: None,
             rip_via_penalty: None,
             via_base_cost: None,
+            greedy_multiplier: None,
         });
 
         let hyper = HyperParameters {
@@ -351,6 +355,7 @@ impl Solver {
             rip_trace_penalty: hyper_partial.rip_trace_penalty.unwrap_or(0.5),
             rip_via_penalty: hyper_partial.rip_via_penalty.unwrap_or(0.75),
             via_base_cost: hyper_partial.via_base_cost.unwrap_or(0.1),
+            greedy_multiplier: hyper_partial.greedy_multiplier.unwrap_or(1.1),
         };
 
         Self {
@@ -655,23 +660,20 @@ impl Solver {
         }
 
         let h = self.compute_h(conn.start, conn.end);
-        let f = NotNan::new(h).unwrap_or_else(|_| NotNan::new(0.0).unwrap());
+        let f_val = h * self.hyper.greedy_multiplier;
+        let f = NotNan::new(f_val).unwrap_or_else(|_| NotNan::new(0.0).unwrap());
 
         self.nodes.push(SearchNode {
             cell: conn.start,
             cell_idx: conn.start_idx,
             g: 0.0,
-            f: h,
+            f: f_val,
             parent: None,
             ripped: None,
         });
 
         let seq = self.next_seq();
-        self.open.push(HeapEntry {
-            f,
-            seq,
-            node_id: 0,
-        });
+        self.open.push(HeapEntry { f, seq, node_id: 0 });
     }
 
     fn try_push_neighbor(
@@ -689,7 +691,7 @@ impl Solver {
         let (move_cost, new_ripped) = self.compute_move_cost_and_rips(active, current, neighbor);
         let g = current.g + move_cost;
         let h = self.compute_h(neighbor, active.end);
-        let f_val = g + h;
+        let f_val = g + h * self.hyper.greedy_multiplier;
 
         let f = match NotNan::new(f_val) {
             Ok(v) => v,
@@ -707,11 +709,7 @@ impl Solver {
         });
 
         let seq = self.next_seq();
-        self.open.push(HeapEntry {
-            f,
-            seq,
-            node_id,
-        });
+        self.open.push(HeapEntry { f, seq, node_id });
     }
 
     fn compute_h(&self, a: CellCoord, b: CellCoord) -> f32 {

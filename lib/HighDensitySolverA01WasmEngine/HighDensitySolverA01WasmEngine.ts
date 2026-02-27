@@ -1,17 +1,16 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
-import packageJson from "../../package.json"
 import type { GraphicsObject } from "graphics-debug"
+import packageJson from "../../package.json"
 import init, {
-  initSync,
   HighDensitySolverA01Wasm,
+  initSync,
 } from "../../wasm/pkg/highdensity_solver_a01_wasm"
-
-import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 import {
   type AffineTransform,
-  computeGridToAffineTransform,
   applyAffineTransformToPoint,
+  computeGridToAffineTransform,
 } from "../gridToAffineTransform"
+import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 
 type HyperParameters = {
   shuffleSeed: number
@@ -19,6 +18,7 @@ type HyperParameters = {
   ripTracePenalty: number
   ripViaPenalty: number
   viaBaseCost: number
+  greedyMultiplier: number
 }
 
 export interface HighDensitySolverA01WasmEngineProps {
@@ -178,7 +178,8 @@ export class HighDensitySolverA01WasmEngine extends BaseSolver {
   }
 
   override getOutput(): HighDensityIntraNodeRoute[] {
-    const routes = this.wasm.get_output() as unknown as HighDensityIntraNodeRoute[]
+    const routes =
+      this.wasm.get_output() as unknown as HighDensityIntraNodeRoute[]
     const t = this.gridToBoundsTransform
     for (const route of routes) {
       for (let i = 0; i < route.route.length; i++) {

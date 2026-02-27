@@ -129,6 +129,7 @@ interface HyperParameters {
   ripTracePenalty: number
   ripViaPenalty: number
   viaBaseCost: number
+  greedyMultiplier: number
 }
 
 function toRootNetName(
@@ -278,6 +279,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       ripTracePenalty: 0.5,
       ripViaPenalty: 0.75,
       viaBaseCost: 0.1,
+      greedyMultiplier: 1.1,
       ...props.hyperParameters,
     }
     this.MAX_ITERATIONS = 100e6
@@ -451,16 +453,17 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endRow,
         next.endCol,
       )
+      const f = h * this.hyperParameters.greedyMultiplier
       this.nodePool.push({
         z: next.startZ,
         row: next.startRow,
         col: next.startCol,
         g: 0,
-        f: h,
+        f,
         parentIdx: -1,
         ripped: null,
       })
-      this.heap.push(h, this.seqCounter++, 0)
+      this.heap.push(f, this.seqCounter++, 0)
       return
     }
 
@@ -541,7 +544,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
-      const f2 = g2 + this.computeH(z, nr, nc, endZ, endRow, endCol)
+      const f2 =
+        g2 +
+        this.computeH(z, nr, nc, endZ, endRow, endCol) *
+          this.hyperParameters.greedyMultiplier
 
       const newNodeIdx = this.nodePool.length
       this.nodePool.push({
@@ -582,7 +588,10 @@ export class HighDensitySolverA01 extends BaseSolver {
         )
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
-        const f2 = g2 + this.computeH(nz, row, col, endZ, endRow, endCol)
+        const f2 =
+          g2 +
+          this.computeH(nz, row, col, endZ, endRow, endCol) *
+            this.hyperParameters.greedyMultiplier
 
         const newNodeIdx = this.nodePool.length
         this.nodePool.push({

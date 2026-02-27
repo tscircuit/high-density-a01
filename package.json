@@ -23,7 +23,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
     "@tscircuit/hypergraph": "https://github.com/tscircuit/hypergraph",
-    "@tscircuit/solver-utils": "^0.0.15",
+    "@tscircuit/solver-utils": "^0.0.16",
     "@types/bun": "latest",
     "bun-match-svg": "^0.0.15",
     "graphics-debug": "^0.0.86",
