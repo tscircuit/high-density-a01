@@ -1,7 +1,11 @@
+export {
+  convertDataset02SampleToNodeWithPortPoints,
+  type Dataset02Sample,
+} from "./dataset02/convertDataset02SampleToNodeWithPortPoints"
+export {
+  type AffineTransform,
+  applyAffineTransformToPoint,
+  computeGridToAffineTransform,
+} from "./gridToAffineTransform"
 export { HighDensitySolverA01 } from "./HighDensitySolverA01/HighDensitySolverA01"
 export * from "./types"
-export {
-  computeGridToAffineTransform,
-  applyAffineTransformToPoint,
-  type AffineTransform,
-} from "./gridToAffineTransform"
