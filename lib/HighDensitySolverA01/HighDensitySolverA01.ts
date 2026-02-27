@@ -195,6 +195,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   // --- Flat arrays ---
   private planeSize!: number // rows * cols
   private usedCellsFlat!: Int32Array // layers * planeSize; -1 = empty
+  private portOwnerFlat!: Int32Array // layers * planeSize; -1 = none, -2 = shared
+  private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
   private stamp = 0
@@ -212,6 +214,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Per-connection used-cell tracking ---
   private usedIndicesByConn!: number[][] // connId -> [flatCellIdx, ...]
+  private usedDiagIndicesByConn!: number[][] // connId -> [flatDiagIdx, ...]
 
   // --- Connection queues ---
   private unsolvedSegs!: ConnectionSeg[]
@@ -304,6 +307,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.layers = this.availableZ.length
     this.planeSize = this.rows * this.cols
     const totalCells = this.layers * this.planeSize
+    const totalDiags =
+      this.layers * Math.max(0, this.rows - 1) * Math.max(0, this.cols - 1) * 2
     this.gridOrigin = {
       x: center.x - width / 2,
       y: center.y - height / 2,
@@ -348,6 +353,8 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Flat used cells (Int32Array, -1 = empty)
     this.usedCellsFlat = new Int32Array(totalCells).fill(-1)
+    this.portOwnerFlat = new Int32Array(totalCells).fill(-1)
+    this.usedDiagFlat = new Int32Array(totalDiags).fill(-1)
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
@@ -386,8 +393,23 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Build and shuffle connections
     this.unsolvedSegs = this.buildConnectionSegs()
+
+    for (const pp of this.nodeWithPortPoints.portPoints) {
+      const connId = this.connNameToId.get(pp.connectionName)
+      if (connId === undefined) continue
+      const cell = this.pointToCell(pp)
+      const flatIdx = (cell.z * this.rows + cell.row) * this.cols + cell.col
+      const existing = this.portOwnerFlat[flatIdx]!
+      if (existing === -1 || existing === connId) {
+        this.portOwnerFlat[flatIdx] = connId
+      } else {
+        this.portOwnerFlat[flatIdx] = -2
+      }
+    }
+
     this.solvedRoutes = new Map()
     this.usedIndicesByConn = []
+    this.usedDiagIndicesByConn = []
     this.ripCount = []
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
@@ -517,6 +539,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       if (visited[nIdx] === stamp) continue
 
       this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
+      if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
       const f2 = g2 + this.computeH(z, nr, nc, endZ, endRow, endCol)
 
@@ -557,6 +580,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           col,
           ripped,
         )
+        if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
         const f2 = g2 + this.computeH(nz, row, col, endZ, endRow, endCol)
 
@@ -595,6 +619,30 @@ export class HighDensitySolverA01 extends BaseSolver {
       cost += this.hyperParameters.viaBaseCost
       cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
 
+      const toFlatIdx = (toZ * this.rows + toRow) * cols + toCol
+      const fixedOwner = this.portOwnerFlat[toFlatIdx]!
+      const fixedSameRoot =
+        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
+      const allowFixedOverlap =
+        fixedSameRoot &&
+        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+      const seg = this.activeConnSeg
+      const isSegEnd =
+        !!seg &&
+        toZ === seg.endZ &&
+        toRow === seg.endRow &&
+        toCol === seg.endCol
+      if (
+        fixedOwner >= 0 &&
+        fixedOwner !== activeConn &&
+        !allowFixedOverlap &&
+        !isSegEnd
+      ) {
+        this._moveCost = -1
+        this._moveRipped = r
+        return
+      }
+
       // Via footprint occupants (reusable scratch array)
       this.fillViaOccupants(toRow, toCol, activeConn)
       const occs = this._viaOccs
@@ -614,6 +662,29 @@ export class HighDensitySolverA01 extends BaseSolver {
       cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
 
       const flatIdx = (toZ * this.rows + toRow) * cols + toCol
+      const fixedOwner = this.portOwnerFlat[flatIdx]!
+      const fixedSameRoot =
+        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
+      const allowFixedOverlap =
+        fixedSameRoot &&
+        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+      const seg = this.activeConnSeg
+      const isSegEnd =
+        !!seg &&
+        toZ === seg.endZ &&
+        toRow === seg.endRow &&
+        toCol === seg.endCol
+      if (
+        fixedOwner >= 0 &&
+        fixedOwner !== activeConn &&
+        !allowFixedOverlap &&
+        !isSegEnd
+      ) {
+        this._moveCost = -1
+        this._moveRipped = r
+        return
+      }
+
       const occ = this.usedCellsFlat[flatIdx]!
       const sameRoot =
         this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
@@ -626,6 +697,36 @@ export class HighDensitySolverA01 extends BaseSolver {
           r = { id: occ, prev: r }
         }
         cost += this.hyperParameters.ripTracePenalty
+      }
+
+      // Prevent unmodeled same-layer diagonal X-crossings.
+      // If this move uses one diagonal of a grid square, check the opposite
+      // diagonal occupancy in that same square and treat it like a rip conflict.
+      if (dr === 1 && dc === 1) {
+        const sqRow = fromRow < toRow ? fromRow : toRow
+        const sqCol = fromCol < toCol ? fromCol : toCol
+        const isBackslash =
+          (fromRow < toRow && fromCol < toCol) ||
+          (fromRow > toRow && fromCol > toCol)
+        const diagSlot = isBackslash ? 0 : 1
+        const crossingSlot = diagSlot ^ 1
+        const sqCols = this.cols - 1
+        const diagBase = ((toZ * (this.rows - 1) + sqRow) * sqCols + sqCol) * 2
+        const crossingOcc = this.usedDiagFlat[diagBase + crossingSlot]!
+        const crossingSameRoot =
+          this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[activeConn]
+        const allowCrossingOverlap =
+          crossingSameRoot &&
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        if (
+          crossingOcc !== -1 &&
+          crossingOcc !== activeConn &&
+          !allowCrossingOverlap
+        ) {
+          this._moveCost = -1
+          this._moveRipped = r
+          return
+        }
       }
     }
 
@@ -939,11 +1040,55 @@ export class HighDensitySolverA01 extends BaseSolver {
       }
     }
 
+    // Mark occupied diagonal edges (for diagonal X-crossing prevention)
+    const diagIndices: number[] = []
+    const sqCols = this.cols - 1
+    for (let i = 1; i < cells.length; i++) {
+      const prev = cells[i - 1]!
+      const curr = cells[i]!
+      if (prev.z !== curr.z) continue
+
+      const dr = prev.row > curr.row ? prev.row - curr.row : curr.row - prev.row
+      const dc = prev.col > curr.col ? prev.col - curr.col : curr.col - prev.col
+      if (dr !== 1 || dc !== 1) continue
+
+      const sqRow = prev.row < curr.row ? prev.row : curr.row
+      const sqCol = prev.col < curr.col ? prev.col : curr.col
+      const isBackslash =
+        (prev.row < curr.row && prev.col < curr.col) ||
+        (prev.row > curr.row && prev.col > curr.col)
+      const diagSlot = isBackslash ? 0 : 1
+      const crossingSlot = diagSlot ^ 1
+      const diagBase = ((prev.z * (this.rows - 1) + sqRow) * sqCols + sqCol) * 2
+      const crossingIdx = diagBase + crossingSlot
+      const crossingOcc = this.usedDiagFlat[crossingIdx]!
+      const crossingSameRoot =
+        this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[connId]
+      const allowCrossingOverlap =
+        crossingSameRoot &&
+        this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+      if (
+        crossingOcc !== -1 &&
+        crossingOcc !== connId &&
+        !allowCrossingOverlap
+      ) {
+        continue
+      }
+
+      const diagIdx = diagBase + diagSlot
+      this.usedDiagFlat[diagIdx] = connId
+      diagIndices.push(diagIdx)
+    }
+
     // Store used indices for this connection
     while (this.usedIndicesByConn.length <= connId) {
       this.usedIndicesByConn.push([])
     }
     this.usedIndicesByConn[connId] = indices
+    while (this.usedDiagIndicesByConn.length <= connId) {
+      this.usedDiagIndicesByConn.push([])
+    }
+    this.usedDiagIndicesByConn[connId] = diagIndices
 
     // Store solved route (cell-based)
     this.solvedRoutes.set(connId, { connId, cells, viaCells })
@@ -952,7 +1097,6 @@ export class HighDensitySolverA01 extends BaseSolver {
     for (let i = 0; i < displacedByVias.length; i++) {
       this.ripTrace(displacedByVias[i]!)
     }
-
     // Penalty decay to prevent death spiral
     if (rippedIds.length > 0 || displacedByVias.length > 0) {
       const pen = this.penalty2d
@@ -1009,6 +1153,18 @@ export class HighDensitySolverA01 extends BaseSolver {
         }
       }
       this.usedIndicesByConn[connId] = []
+    }
+
+    const diagIndices = this.usedDiagIndicesByConn[connId]
+    if (diagIndices) {
+      const usedDiag = this.usedDiagFlat
+      for (let i = 0; i < diagIndices.length; i++) {
+        const flatIdx = diagIndices[i]!
+        if (usedDiag[flatIdx] === connId) {
+          usedDiag[flatIdx] = -1
+        }
+      }
+      this.usedDiagIndicesByConn[connId] = []
     }
 
     // Move from solved back to unsolved
