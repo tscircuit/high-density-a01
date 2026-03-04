@@ -143,6 +143,7 @@ export interface HighDensitySolverA01Props {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   viaDiameter: number
+  stepMultiplier?: number
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
@@ -172,6 +173,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   viaMinDistFromBorder: number
   showPenaltyMap: boolean
   showUsedCellMap: boolean
+  stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
 
@@ -274,6 +276,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 0.15
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
+    this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
       ripCost: 10,
@@ -436,6 +439,13 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _step(): void {
+    for (let i = 0; i < this.stepMultiplier; i++) {
+      if (this.solved || this.failed) return
+      this.stepOnce()
+    }
+  }
+
+  private stepOnce(): void {
     // 1. If no active connection, dequeue next
     if (!this.activeConnSeg) {
       if (this.unsolvedSegs.length === 0) {

@@ -25,6 +25,7 @@ export interface HighDensitySolverA01WasmEngineProps {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   viaDiameter: number
+  stepMultiplier?: number
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
@@ -125,10 +126,12 @@ export class HighDensitySolverA01WasmEngine extends BaseSolver {
   private props: HighDensitySolverA01WasmEngineProps
   private wasm!: HighDensitySolverA01Wasm
   private gridToBoundsTransform!: AffineTransform
+  private stepMultiplier: number
 
   constructor(props: HighDensitySolverA01WasmEngineProps) {
     super()
     this.props = props
+    this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.MAX_ITERATIONS = 1e6
   }
 
@@ -169,12 +172,16 @@ export class HighDensitySolverA01WasmEngine extends BaseSolver {
   }
 
   override _step(): void {
-    this.wasm.step()
+    for (let i = 0; i < this.stepMultiplier; i++) {
+      if (this.solved || this.failed) return
 
-    // Keep BaseSolver flags in sync
-    this.solved = this.wasm.is_solved()
-    this.failed = this.wasm.is_failed()
-    this.error = this.wasm.error() ?? null
+      this.wasm.step()
+
+      // Keep BaseSolver flags in sync
+      this.solved = this.wasm.is_solved()
+      this.failed = this.wasm.is_failed()
+      this.error = this.wasm.error() ?? null
+    }
   }
 
   override getOutput(): HighDensityIntraNodeRoute[] {

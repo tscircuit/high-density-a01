@@ -22,6 +22,7 @@ const solver = new HighDensitySolverA01({
   nodeWithPortPoints,
   cellSizeMm: 0.05,
   viaDiameter: 0.3,
+  stepMultiplier: 4, // optional, each solver step runs 4 internal steps
 
   // optional hyperparameters to control algorithm
   // Unit of penalty is ~mm
