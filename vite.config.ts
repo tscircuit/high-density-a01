@@ -7,8 +7,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   define: {
-    "import.meta.env.VITE_TSCIRCUIT_HIGH_DENSITY_A01_WASM_URL":
-      JSON.stringify("/wasm/highdensity_solver_a01_wasm_bg.wasm"),
+    "import.meta.env.VITE_TSCIRCUIT_HIGH_DENSITY_A01_WASM_URL": JSON.stringify(
+      "/wasm/highdensity_solver_a01_wasm_bg.wasm",
+    ),
   },
   plugins: [
     {

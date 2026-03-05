@@ -68,7 +68,10 @@ function getSegmentsOnLayer(
     const a = route.route[i]!
     const b = route.route[i + 1]!
     if (a.z === z && b.z === z) {
-      segments.push([{ x: a.x, y: a.y }, { x: b.x, y: b.y }])
+      segments.push([
+        { x: a.x, y: a.y },
+        { x: b.x, y: b.y },
+      ])
     }
   }
   return segments

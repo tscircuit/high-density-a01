@@ -77,4 +77,3 @@ export type HighDensityIntraNodeRouteWithJumpers = {
   route: Array<{ x: number; y: number; z: number }>
   jumpers: Jumper[]
 }
-
