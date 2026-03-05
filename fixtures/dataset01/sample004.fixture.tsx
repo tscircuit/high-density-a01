@@ -11,6 +11,7 @@ export default () => (
         cellSizeMm: 0.2,
         nodeWithPortPoints: sample004.nodeWithPortPoints,
       })
+      solver.setup()
       return solver
     }}
   />

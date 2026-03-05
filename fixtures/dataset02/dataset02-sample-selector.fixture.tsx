@@ -76,6 +76,7 @@ export default function Dataset02SampleSelectorFixture() {
             nodeWithPortPoints,
           })
           solver.MAX_ITERATIONS = 10_000_000
+          solver.setup()
           return solver
         }}
       />

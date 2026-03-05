@@ -10,6 +10,7 @@ export default () => (
         ...defaultParams,
         nodeWithPortPoints: sample005.nodeWithPortPoints,
       })
+      solver.setup()
       return solver
     }}
   />
