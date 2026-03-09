@@ -309,12 +309,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.layers = this.availableZ.length
     this.planeSize = this.rows * this.cols
     const totalCells = this.layers * this.planeSize
-    if (
-      this.maxCellCount !== undefined &&
-      totalCells > this.maxCellCount
-    ) {
-      this.error =
-        `Cell count ${totalCells} exceeds maxCellCount ${this.maxCellCount}`
+    if (this.maxCellCount !== undefined && totalCells > this.maxCellCount) {
+      this.error = `Cell count ${totalCells} exceeds maxCellCount ${this.maxCellCount}`
       this.failed = true
       return
     }

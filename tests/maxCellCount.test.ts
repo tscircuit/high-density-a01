@@ -7,9 +7,7 @@ test("fails during setup when required cells exceed maxCellCount", () => {
   const cellSizeMm = 0.5
   const rows = Math.floor(sample001.height / cellSizeMm)
   const cols = Math.floor(sample001.width / cellSizeMm)
-  const layers =
-    sample001.availableZ?.length ??
-    new Set(sample001.portPoints.map((pp) => pp.z)).size
+  const layers = new Set(sample001.portPoints.map((pp) => pp.z)).size
   const totalCells = rows * cols * layers
 
   const solver = new HighDensitySolverA01({
