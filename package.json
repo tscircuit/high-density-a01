@@ -29,7 +29,8 @@
     "graphics-debug": "^0.0.86",
     "react-cosmos": "^7.1.1",
     "react-cosmos-plugin-vite": "^7.1.1",
-    "tsup": "^8.5.1"
+    "tsup": "^8.5.1",
+    "high-density-dataset-z04": "https://github.com/tscircuit/high-density-dataset-z04"
   },
   "peerDependencies": {
     "typescript": "^5"
