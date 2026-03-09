@@ -143,6 +143,7 @@ export interface HighDensitySolverA01Props {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   viaDiameter: number
+  maxCellCount?: number
   stepMultiplier?: number
   traceThickness?: number
   traceMargin?: number
@@ -168,6 +169,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   viaDiameter: number
+  maxCellCount?: number
   traceThickness: number
   traceMargin: number
   viaMinDistFromBorder: number
@@ -271,6 +273,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.cellSizeMm = props.cellSizeMm
     this.viaDiameter = props.viaDiameter
+    this.maxCellCount = props.maxCellCount
     this.traceThickness = props.traceThickness ?? 0.1
     this.traceMargin = props.traceMargin ?? 0.15
     this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 0.15
@@ -300,6 +303,24 @@ export class HighDensitySolverA01 extends BaseSolver {
       [...new Set(nodeWithPortPoints.portPoints.map((pp) => pp.z))].sort(
         (a, b) => a - b,
       )
+
+    this.rows = Math.floor(height / cellSizeMm)
+    this.cols = Math.floor(width / cellSizeMm)
+    this.layers = this.availableZ.length
+    this.planeSize = this.rows * this.cols
+    const totalCells = this.layers * this.planeSize
+    if (
+      this.maxCellCount !== undefined &&
+      totalCells > this.maxCellCount
+    ) {
+      this.error =
+        `Cell count ${totalCells} exceeds maxCellCount ${this.maxCellCount}`
+      this.failed = true
+      return
+    }
+    const totalDiags =
+      this.layers * Math.max(0, this.rows - 1) * Math.max(0, this.cols - 1) * 2
+
     this.zToLayer = new Map()
     this.layerToZ = new Map()
     for (let i = 0; i < this.availableZ.length; i++) {
@@ -308,13 +329,6 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.layerToZ.set(i, z)
     }
 
-    this.rows = Math.floor(height / cellSizeMm)
-    this.cols = Math.floor(width / cellSizeMm)
-    this.layers = this.availableZ.length
-    this.planeSize = this.rows * this.cols
-    const totalCells = this.layers * this.planeSize
-    const totalDiags =
-      this.layers * Math.max(0, this.rows - 1) * Math.max(0, this.cols - 1) * 2
     this.gridOrigin = {
       x: center.x - width / 2,
       y: center.y - height / 2,

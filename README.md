@@ -22,6 +22,7 @@ const solver = new HighDensitySolverA01({
   nodeWithPortPoints,
   cellSizeMm: 0.05,
   viaDiameter: 0.3,
+  maxCellCount: 200_000, // optional safety limit; fail during setup if exceeded
   stepMultiplier: 4, // optional, each solver step runs 4 internal steps
 
   // optional hyperparameters to control algorithm
