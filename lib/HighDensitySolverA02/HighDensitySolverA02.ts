@@ -261,6 +261,8 @@ export interface HighDensitySolverA02Props {
   outerGridCellThickness: number
   innerGridCellSize: number
   viaDiameter: number
+  edgePenaltyStrength?: number
+  edgePenaltyFalloff?: number
   maxCellCount?: number
   stepMultiplier?: number
   traceThickness?: number
@@ -287,6 +289,8 @@ export class HighDensitySolverA02 extends BaseSolver {
   outerGridCellThickness: number
   innerGridCellSize: number
   viaDiameter: number
+  edgePenaltyStrength: number
+  edgePenaltyFalloff: number
   maxCellCount?: number
   traceThickness: number
   traceMargin: number
@@ -344,6 +348,7 @@ export class HighDensitySolverA02 extends BaseSolver {
   private searchIterations = 0
   private consecutiveSkips = 0
   private penaltyCap!: number
+  private postSolveRepairPasses = 0
 
   private _moveCost = 0
   private _moveRipped: RippedNode | null = null
@@ -394,6 +399,10 @@ export class HighDensitySolverA02 extends BaseSolver {
     this.outerGridCellThickness = props.outerGridCellThickness
     this.innerGridCellSize = props.innerGridCellSize
     this.viaDiameter = props.viaDiameter
+    this.edgePenaltyStrength = props.edgePenaltyStrength ?? 0.2
+    this.edgePenaltyFalloff =
+      props.edgePenaltyFalloff ??
+      Math.max(this.outerGridCellThickness * 1.5, this.innerGridCellSize * 3)
     this.maxCellCount = props.maxCellCount
     this.traceThickness = props.traceThickness ?? 0.1
     this.traceMargin = props.traceMargin ?? 0.15
@@ -403,11 +412,11 @@ export class HighDensitySolverA02 extends BaseSolver {
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
-      ripCost: 10,
+      ripCost: 1,
       ripTracePenalty: 0.5,
       ripViaPenalty: 0.75,
       viaBaseCost: 0.1,
-      greedyMultiplier: 1.5,
+      greedyMultiplier: 1.2,
       ...props.hyperParameters,
     }
     this.MAX_ITERATIONS = 100e6
@@ -466,11 +475,12 @@ export class HighDensitySolverA02 extends BaseSolver {
     this.overlapFriendlyRootNets = new Set()
 
     this.penalty2d = new Float64Array(this.planeSize)
-    if (this.initialPenaltyFn) {
-      const widthInv = width > 0 ? 1 / width : 0
-      const heightInv = height > 0 ? 1 / height : 0
-      for (const cell of this.cells) {
-        this.penalty2d[cell.id] = this.initialPenaltyFn({
+    const widthInv = width > 0 ? 1 / width : 0
+    const heightInv = height > 0 ? 1 / height : 0
+    for (const cell of this.cells) {
+      let penalty = this.computeBasePenalty(cell)
+      if (this.initialPenaltyFn) {
+        penalty += this.initialPenaltyFn({
           x: cell.centerX,
           y: cell.centerY,
           px: (cell.centerX - this.boundsMinX) * widthInv,
@@ -481,6 +491,7 @@ export class HighDensitySolverA02 extends BaseSolver {
           col: cell.col,
         })
       }
+      this.penalty2d[cell.id] = penalty
     }
 
     this.usedCellsFlat = new Int32Array(totalCells).fill(-1)
@@ -518,6 +529,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     this.ripCount = []
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
+    this.postSolveRepairPasses = 0
     this.shuffleConnections()
 
     this.activeConnSeg = null
@@ -761,6 +773,9 @@ export class HighDensitySolverA02 extends BaseSolver {
   private stepOnce(): void {
     if (!this.activeConnSeg) {
       if (this.unsolvedSegs.length === 0) {
+        if (this.tryPostSolveConflictRepair()) {
+          return
+        }
         this.solved = true
         return
       }
@@ -798,7 +813,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     this.searchIterations++
     const connRips = this.ripCount[this.activeConnId] ?? 0
     if (
-      this.unsolvedSegs.length <= 1 &&
+      this.unsolvedSegs.length <= 2 &&
       this.MAX_ITERATIONS - this.iterations <= 50_000 &&
       this.tryLastConnectionFallback(this.activeConnSeg)
     ) {
@@ -816,7 +831,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     )
     if (this.searchIterations > budget) {
       if (
-        this.unsolvedSegs.length <= 1 &&
+        this.unsolvedSegs.length <= 2 &&
         this.tryLastConnectionFallback(this.activeConnSeg)
       ) {
         this.activeConnSeg = null
@@ -1013,11 +1028,7 @@ export class HighDensitySolverA02 extends BaseSolver {
       }
 
       const occ = this.usedCellsFlat[toFlatIdx]!
-      const sameRoot =
-        this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-      const allowSameRootOverlap =
-        sameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+      const allowSameRootOverlap = this.allowSharedUse(activeConn, occ)
       if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
         if (!rippedContains(r, occ)) {
           cost += this.hyperParameters.ripCost
@@ -1042,17 +1053,21 @@ export class HighDensitySolverA02 extends BaseSolver {
         const occCellId = footprint[i]!
         const occ = this.usedCellsFlat[zBase + occCellId]!
         if (occ === -1 || occ === activeConn) continue
-        const sameRoot =
-          this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-        if (
-          sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-        ) {
+        if (this.allowSharedUse(activeConn, occ)) {
           continue
         }
         pushUnique(occs, occ)
       }
     }
+  }
+
+  private allowSharedUse(activeConn: ConnId, existingConn: ConnId) {
+    const sameRoot =
+      this.connIdToRootNet[existingConn] === this.connIdToRootNet[activeConn]
+    return (
+      sameRoot &&
+      this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+    )
   }
 
   private nextStamp(): void {
@@ -1078,6 +1093,21 @@ export class HighDensitySolverA02 extends BaseSolver {
 
     if (z === toZ) return dist
     return dist + this.hyperParameters.viaBaseCost
+  }
+
+  private computeBasePenalty(cell: CompositeCell) {
+    if (this.edgePenaltyStrength <= 0 || this.edgePenaltyFalloff <= 0) return 0
+
+    const distFromBorder = Math.min(
+      cell.centerX - this.boundsMinX,
+      this.boundsMaxX - cell.centerX,
+      cell.centerY - this.boundsMinY,
+      this.boundsMaxY - cell.centerY,
+    )
+    if (distFromBorder >= this.edgePenaltyFalloff) return 0
+
+    const t = 1 - distFromBorder / this.edgePenaltyFalloff
+    return this.edgePenaltyStrength * t * t
   }
 
   private internConn(name: string, rootNetName?: string): ConnId {
@@ -1236,7 +1266,8 @@ export class HighDensitySolverA02 extends BaseSolver {
     for (let cur = goalNode.ripped; cur; cur = cur.prev) {
       rippedIds.push(cur.id)
     }
-    this.commitRoute(connId, cells, rippedIds, viaCellIds)
+    const deferRipup = this.unsolvedSegs.length <= 1
+    this.commitRoute(connId, cells, rippedIds, viaCellIds, deferRipup)
   }
 
   private commitRoute(
@@ -1244,6 +1275,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     cells: Array<{ z: number; cellId: number }>,
     rippedIds: ConnId[],
     viaCellIds?: number[],
+    deferRipup = false,
   ) {
     const normalizedCells = cells.slice()
 
@@ -1264,8 +1296,10 @@ export class HighDensitySolverA02 extends BaseSolver {
       ? viaCellIds.slice()
       : this.extractViaCellIds(normalizedCells)
 
-    for (let i = 0; i < rippedIds.length; i++) {
-      this.ripTrace(rippedIds[i]!)
+    if (!deferRipup) {
+      for (let i = 0; i < rippedIds.length; i++) {
+        this.ripTrace(rippedIds[i]!)
+      }
     }
 
     const indices: number[] = []
@@ -1276,11 +1310,7 @@ export class HighDensitySolverA02 extends BaseSolver {
         const occCellId = keepouts[j]!
         const flatIdx = routeCell.z * this.planeSize + occCellId
         const existing = this.usedCellsFlat[flatIdx]!
-        const sameRoot =
-          this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
-        const allowSameRootOverlap =
-          sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+        const allowSameRootOverlap = this.allowSharedUse(connId, existing)
         if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
           continue
         }
@@ -1299,11 +1329,7 @@ export class HighDensitySolverA02 extends BaseSolver {
           const occCellId = footprint[j]!
           const flatIdx = zBase + occCellId
           const existing = this.usedCellsFlat[flatIdx]!
-          const sameRoot =
-            this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
-          const allowSameRootOverlap =
-            sameRoot &&
-            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+          const allowSameRootOverlap = this.allowSharedUse(connId, existing)
           if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
             pushUnique(displacedByVias, existing)
           }
@@ -1323,11 +1349,13 @@ export class HighDensitySolverA02 extends BaseSolver {
       viaCellIds: routeViaCellIds,
     })
 
-    for (let i = 0; i < displacedByVias.length; i++) {
-      this.ripTrace(displacedByVias[i]!)
+    if (!deferRipup) {
+      for (let i = 0; i < displacedByVias.length; i++) {
+        this.ripTrace(displacedByVias[i]!)
+      }
     }
 
-    if (rippedIds.length > 0 || displacedByVias.length > 0) {
+    if (!deferRipup && (rippedIds.length > 0 || displacedByVias.length > 0)) {
       const pen = this.penalty2d
       const cap = this.penaltyCap
       if (this.totalRipEvents > 50) {
@@ -1354,24 +1382,66 @@ export class HighDensitySolverA02 extends BaseSolver {
     return viaCellIds
   }
 
+  private collectRouteConflicts(
+    connId: ConnId,
+    cells: Array<{ z: number; cellId: number }>,
+    viaCellIds: number[],
+  ) {
+    const conflicts: number[] = []
+
+    for (let i = 0; i < cells.length; i++) {
+      const routeCell = cells[i]!
+      const existing =
+        this.usedCellsFlat[routeCell.z * this.planeSize + routeCell.cellId]!
+      if (
+        existing !== -1 &&
+        existing !== connId &&
+        !this.allowSharedUse(connId, existing)
+      ) {
+        pushUnique(conflicts, existing)
+      }
+    }
+
+    for (let i = 0; i < viaCellIds.length; i++) {
+      const viaCellId = viaCellIds[i]!
+      const footprint = this.getViaFootprintCells(viaCellId)
+      for (let z = 0; z < this.layers; z++) {
+        const zBase = z * this.planeSize
+        for (let j = 0; j < footprint.length; j++) {
+          const occCellId = footprint[j]!
+          const existing = this.usedCellsFlat[zBase + occCellId]!
+          if (
+            existing !== -1 &&
+            existing !== connId &&
+            !this.allowSharedUse(connId, existing)
+          ) {
+            pushUnique(conflicts, existing)
+          }
+        }
+      }
+    }
+
+    return conflicts
+  }
+
   private getTraceKeepoutCells(cellId: number) {
     const cached = this.traceKeepoutCells[cellId]
     if (cached) return cached
 
     const cell = this.cells[cellId]!
-    const margin = this.traceMargin
+    const traceRadius = this.traceMargin + this.traceThickness / 2
     const candidateIds = this.spatialIndex.search(
-      cell.minX - margin,
-      cell.minY - margin,
-      cell.maxX + margin,
-      cell.maxY + margin,
+      cell.centerX - traceRadius,
+      cell.centerY - traceRadius,
+      cell.centerX + traceRadius,
+      cell.centerY + traceRadius,
     )
     const keepouts: number[] = []
 
     for (let i = 0; i < candidateIds.length; i++) {
       const otherId = candidateIds[i]!
       const other = this.cells[otherId]!
-      if (rectDistanceSq(cell, other) <= margin * margin) {
+      if (circleIntersectsRect(cell.centerX, cell.centerY, traceRadius, other)) {
         keepouts.push(otherId)
       }
     }
@@ -1385,7 +1455,8 @@ export class HighDensitySolverA02 extends BaseSolver {
     if (cached) return cached
 
     const cell = this.cells[cellId]!
-    const viaRadius = this.viaDiameter / 2
+    const viaRadius =
+      this.viaDiameter / 2 + this.traceMargin + this.traceThickness / 2
     const footprintCandidateIds = this.spatialIndex.search(
       cell.centerX - viaRadius,
       cell.centerY - viaRadius,
@@ -1491,9 +1562,86 @@ export class HighDensitySolverA02 extends BaseSolver {
       cur = parent[cur] ?? -1
     }
     cells.reverse()
+    const viaCellIds = this.extractViaCellIds(cells)
 
     this.consecutiveSkips = Math.max(0, this.consecutiveSkips - 1)
-    this.commitRoute(this.activeConnId, cells, [])
+    const deferRipup = this.unsolvedSegs.length <= 1
+    this.commitRoute(this.activeConnId, cells, [], viaCellIds, deferRipup)
+    return true
+  }
+
+  private tryPostSolveConflictRepair() {
+    if (this.solvedRoutes.size === 0 || this.postSolveRepairPasses >= 12) {
+      return false
+    }
+
+    const conflictingConnIds = new Set<ConnId>()
+    const penalizedCellIds = new Set<number>()
+
+    for (const [connId, route] of this.solvedRoutes) {
+      for (let i = 0; i < route.cells.length; i++) {
+        const routeCell = route.cells[i]!
+        const keepouts = this.getTraceKeepoutCells(routeCell.cellId)
+        const zBase = routeCell.z * this.planeSize
+
+        for (let j = 0; j < keepouts.length; j++) {
+          const existing = this.usedCellsFlat[zBase + keepouts[j]!]!
+          if (
+            existing === -1 ||
+            existing === connId ||
+            this.allowSharedUse(connId, existing)
+          ) {
+            continue
+          }
+          conflictingConnIds.add(connId)
+          conflictingConnIds.add(existing)
+          penalizedCellIds.add(routeCell.cellId)
+        }
+      }
+
+      for (let i = 0; i < route.viaCellIds.length; i++) {
+        const viaCellId = route.viaCellIds[i]!
+        const footprint = this.getViaFootprintCells(viaCellId)
+        let hasConflict = false
+
+        for (let z = 0; z < this.layers; z++) {
+          const zBase = z * this.planeSize
+          for (let j = 0; j < footprint.length; j++) {
+            const existing = this.usedCellsFlat[zBase + footprint[j]!]!
+            if (
+              existing === -1 ||
+              existing === connId ||
+              this.allowSharedUse(connId, existing)
+            ) {
+              continue
+            }
+            conflictingConnIds.add(connId)
+            conflictingConnIds.add(existing)
+            hasConflict = true
+          }
+        }
+
+        if (hasConflict) {
+          penalizedCellIds.add(viaCellId)
+        }
+      }
+    }
+
+    if (conflictingConnIds.size === 0) {
+      return false
+    }
+
+    const penaltyBoost = 10 + this.postSolveRepairPasses * 2
+    for (const cellId of penalizedCellIds) {
+      this.penalty2d[cellId] = this.penalty2d[cellId]! + penaltyBoost
+    }
+
+    for (const connId of conflictingConnIds) {
+      this.ripTrace(connId)
+    }
+
+    this.postSolveRepairPasses++
+    this.consecutiveSkips = 0
     return true
   }
 
