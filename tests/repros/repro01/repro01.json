@@ -139,11 +139,6 @@
         "rootConnectionName": "source_net_0"
       }
     ],
-    "availableZ": [
-      0,
-      1,
-      2,
-      3
-    ]
+    "availableZ": [0, 1, 2, 3]
   }
 }
