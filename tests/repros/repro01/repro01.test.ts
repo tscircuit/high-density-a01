@@ -4,11 +4,14 @@ setDefaultTimeout(120_000)
 import "bun-match-svg"
 import "graphics-debug/matcher"
 import { defaultParams } from "../../../lib/default-params"
-import { HighDensitySolverA01 } from "../../../lib/HighDensitySolverA01/HighDensitySolverA01"
+import { HighDensitySolverA02 } from "../../../lib/HighDensitySolverA02/HighDensitySolverA02"
 import repro01 from "./repro01.json"
 
 function createSolver() {
-  const solver = new HighDensitySolverA01({
+  const solver = new HighDensitySolverA02({
+    outerGridCellSize: 0.1,
+    outerGridCellThickness: 10,
+    innerGridCellSize: 0.4,
     ...defaultParams,
     nodeWithPortPoints: repro01.nodeWithPortPoints,
   })
@@ -38,6 +41,4 @@ test("repro01 snapshot", async () => {
 
   await expect(graphics).toMatchGraphicsSvg(import.meta.path)
   expect(solver.iterations).toBeGreaterThan(0)
-  // Repro currently exhausts MAX_ITERATIONS; keep the snapshot until solving is fixed.
-  // expect(solver.solved).toBeTrue()
 })
