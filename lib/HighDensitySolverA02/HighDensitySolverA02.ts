@@ -1,4 +1,5 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import Flatbush from "flatbush"
 import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 
 type ConnId = number
@@ -303,9 +304,10 @@ export class HighDensitySolverA02 extends BaseSolver {
 
   cells!: CompositeCell[]
   cellNeighbors!: NeighborEdge[][]
-  traceKeepoutCells!: number[][]
-  viaFootprintCells!: number[][]
+  traceKeepoutCells!: Array<number[] | undefined>
+  viaFootprintCells!: Array<number[] | undefined>
   viaAllowed!: Uint8Array
+  spatialIndex!: Flatbush
 
   availableZ!: number[]
   zToLayer!: Map<number, number>
@@ -439,16 +441,16 @@ export class HighDensitySolverA02 extends BaseSolver {
     const {
       cells,
       cellNeighbors,
-      traceKeepoutCells,
-      viaFootprintCells,
       viaAllowed,
+      spatialIndex,
     } = this.buildCompositeGrid()
 
     this.cells = cells
     this.cellNeighbors = cellNeighbors
-    this.traceKeepoutCells = traceKeepoutCells
-    this.viaFootprintCells = viaFootprintCells
+    this.traceKeepoutCells = new Array(this.cells.length)
+    this.viaFootprintCells = new Array(this.cells.length)
     this.viaAllowed = viaAllowed
+    this.spatialIndex = spatialIndex
 
     this.planeSize = this.cells.length
     const totalCells = this.layers * this.planeSize
@@ -732,18 +734,12 @@ export class HighDensitySolverA02 extends BaseSolver {
     }
 
     const viaRadius = this.viaDiameter / 2
-    const traceKeepoutCells: number[][] = Array.from(
-      { length: cells.length },
-      () => [],
-    )
-    const viaFootprintCells: number[][] = Array.from(
-      { length: cells.length },
-      () => [],
-    )
     const viaAllowed = new Uint8Array(cells.length)
+    const spatialIndex = new Flatbush(cells.length)
 
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i]!
+      spatialIndex.add(cell.minX, cell.minY, cell.maxX, cell.maxY)
       const minBorderDist = Math.min(
         cell.centerX - this.boundsMinX,
         this.boundsMaxX - cell.centerX,
@@ -751,26 +747,14 @@ export class HighDensitySolverA02 extends BaseSolver {
         this.boundsMaxY - cell.centerY,
       )
       viaAllowed[i] = minBorderDist >= this.viaMinDistFromBorder ? 1 : 0
-
-      for (let j = 0; j < cells.length; j++) {
-        const other = cells[j]!
-        if (rectDistanceSq(cell, other) <= this.traceMargin * this.traceMargin) {
-          traceKeepoutCells[i]!.push(j)
-        }
-        if (
-          circleIntersectsRect(cell.centerX, cell.centerY, viaRadius, other)
-        ) {
-          viaFootprintCells[i]!.push(j)
-        }
-      }
     }
+    spatialIndex.finish()
 
     return {
       cells,
       cellNeighbors,
-      traceKeepoutCells,
-      viaFootprintCells,
       viaAllowed,
+      spatialIndex,
     }
   }
 
@@ -1050,7 +1034,7 @@ export class HighDensitySolverA02 extends BaseSolver {
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
-    const footprint = this.viaFootprintCells[cellId]!
+    const footprint = this.getViaFootprintCells(cellId)
 
     for (let z = 0; z < this.layers; z++) {
       const zBase = z * this.planeSize
@@ -1165,12 +1149,18 @@ export class HighDensitySolverA02 extends BaseSolver {
   }
 
   private pointToCell(pt: { x: number; y: number; z: number }) {
-    let bestCell = this.cells[0]!
+    const candidateIds = this.spatialIndex.neighbors(pt.x, pt.y, 32)
+    const cellsToSearch =
+      candidateIds.length > 0
+        ? candidateIds.map((cellId) => this.cells[cellId]!)
+        : this.cells
+
+    let bestCell = cellsToSearch[0] ?? this.cells[0]!
     let bestDistanceSq = Number.POSITIVE_INFINITY
     let bestArea = Number.POSITIVE_INFINITY
 
-    for (let i = 0; i < this.cells.length; i++) {
-      const cell = this.cells[i]!
+    for (let i = 0; i < cellsToSearch.length; i++) {
+      const cell = cellsToSearch[i]!
       const dx =
         pt.x < cell.minX ? cell.minX - pt.x : pt.x > cell.maxX ? pt.x - cell.maxX : 0
       const dy =
@@ -1281,7 +1271,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     const indices: number[] = []
     for (let i = 0; i < normalizedCells.length; i++) {
       const routeCell = normalizedCells[i]!
-      const keepouts = this.traceKeepoutCells[routeCell.cellId]!
+      const keepouts = this.getTraceKeepoutCells(routeCell.cellId)
       for (let j = 0; j < keepouts.length; j++) {
         const occCellId = keepouts[j]!
         const flatIdx = routeCell.z * this.planeSize + occCellId
@@ -1302,7 +1292,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     const displacedByVias: ConnId[] = []
     for (let i = 0; i < routeViaCellIds.length; i++) {
       const viaCellId = routeViaCellIds[i]!
-      const footprint = this.viaFootprintCells[viaCellId]!
+      const footprint = this.getViaFootprintCells(viaCellId)
       for (let z = 0; z < this.layers; z++) {
         const zBase = z * this.planeSize
         for (let j = 0; j < footprint.length; j++) {
@@ -1362,6 +1352,58 @@ export class HighDensitySolverA02 extends BaseSolver {
       }
     }
     return viaCellIds
+  }
+
+  private getTraceKeepoutCells(cellId: number) {
+    const cached = this.traceKeepoutCells[cellId]
+    if (cached) return cached
+
+    const cell = this.cells[cellId]!
+    const margin = this.traceMargin
+    const candidateIds = this.spatialIndex.search(
+      cell.minX - margin,
+      cell.minY - margin,
+      cell.maxX + margin,
+      cell.maxY + margin,
+    )
+    const keepouts: number[] = []
+
+    for (let i = 0; i < candidateIds.length; i++) {
+      const otherId = candidateIds[i]!
+      const other = this.cells[otherId]!
+      if (rectDistanceSq(cell, other) <= margin * margin) {
+        keepouts.push(otherId)
+      }
+    }
+
+    this.traceKeepoutCells[cellId] = keepouts
+    return keepouts
+  }
+
+  private getViaFootprintCells(cellId: number) {
+    const cached = this.viaFootprintCells[cellId]
+    if (cached) return cached
+
+    const cell = this.cells[cellId]!
+    const viaRadius = this.viaDiameter / 2
+    const footprintCandidateIds = this.spatialIndex.search(
+      cell.centerX - viaRadius,
+      cell.centerY - viaRadius,
+      cell.centerX + viaRadius,
+      cell.centerY + viaRadius,
+    )
+    const footprint: number[] = []
+
+    for (let i = 0; i < footprintCandidateIds.length; i++) {
+      const otherId = footprintCandidateIds[i]!
+      const other = this.cells[otherId]!
+      if (circleIntersectsRect(cell.centerX, cell.centerY, viaRadius, other)) {
+        footprint.push(otherId)
+      }
+    }
+
+    this.viaFootprintCells[cellId] = footprint
+    return footprint
   }
 
   private tryLastConnectionFallback(seg: ConnectionSeg) {
