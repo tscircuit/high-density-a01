@@ -15,8 +15,7 @@
     "build": "tsup lib/index.ts --dts --format esm",
     "benchmark:dataset02": "bun run scripts/run-dataset02-benchmark.ts --concurrency=4",
     "benchmark:dataset02:a02": "bun run scripts/run-dataset02-benchmark-a02.ts --concurrency=4",
-    "benchmark:dataset02:a02-v2": "bun run scripts/run-dataset02-benchmark-a02-v2.ts --concurrency=4",
-    "profile:a02-v2": "bun run scripts/profile-a02-v2.ts",
+    "profile:a02": "bun run scripts/profile-a02.ts",
     "format": "biome format --write .",
     "format:check": "biome format ."
   },

@@ -3,8 +3,8 @@ import {
   convertDataset02SampleToNodeWithPortPoints,
   type Dataset02Sample,
 } from "../lib/dataset02/convertDataset02SampleToNodeWithPortPoints"
-import { defaultA02V2Params } from "../lib/default-params"
-import { HighDensitySolverA02_V2 } from "../lib/HighDensitySolverA02_V2/HighDensitySolverA02_V2"
+import { defaultA02Params } from "../lib/default-params"
+import { HighDensitySolverA02 } from "../lib/HighDensitySolverA02/HighDensitySolverA02"
 import repro01 from "../tests/repros/repro01/repro01.json"
 
 const dataset02 = dataset02Json as Dataset02Sample[]
@@ -18,7 +18,7 @@ const showHelp = args.includes("--help") || args.includes("-h")
 
 if (showHelp) {
   console.log(`
-Usage: bun run scripts/profile-a02-v2.ts [options]
+Usage: bun run scripts/profile-a02.ts [options]
 
 Options:
   --dataset02-index=N  Run dataset02 sample N (1-based, default: 1)
@@ -28,9 +28,9 @@ Options:
   --help, -h           Show this help message
 
 Examples:
-  bun run scripts/profile-a02-v2.ts
-  bun run scripts/profile-a02-v2.ts --dataset02-index=20 --mode=fast
-  bun run scripts/profile-a02-v2.ts --repro01 --mode=strict --max-iterations=20000000
+  bun run scripts/profile-a02.ts
+  bun run scripts/profile-a02.ts --dataset02-index=20 --mode=fast
+  bun run scripts/profile-a02.ts --repro01 --mode=strict --max-iterations=20000000
 `)
   process.exit(0)
 }
@@ -59,8 +59,8 @@ const nodeWithPortPoints = useRepro
     })()
 
 const strictMode = mode === "strict"
-const solver = new HighDensitySolverA02_V2({
-  ...defaultA02V2Params,
+const solver = new HighDensitySolverA02({
+  ...defaultA02Params,
   nodeWithPortPoints,
   enableProfiling: true,
   enableDeferredConflictRepair: strictMode,

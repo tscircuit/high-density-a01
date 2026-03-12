@@ -9,5 +9,4 @@ export {
 } from "./gridToAffineTransform"
 export { HighDensitySolverA01 } from "./HighDensitySolverA01/HighDensitySolverA01"
 export { HighDensitySolverA02 } from "./HighDensitySolverA02/HighDensitySolverA02"
-export { HighDensitySolverA02_V2 } from "./HighDensitySolverA02_V2/HighDensitySolverA02_V2"
 export * from "./types"

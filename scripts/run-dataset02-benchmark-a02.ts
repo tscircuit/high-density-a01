@@ -3,9 +3,58 @@ import type { Dataset02Sample } from "../lib/dataset02/convertDataset02SampleToN
 
 const dataset02 = dataset02Json as Dataset02Sample[]
 
+type SolverMode = "fast" | "strict"
+
+type SampleResult = {
+  type: "result"
+  sampleIndex: number
+  solved: boolean
+  failed: boolean
+  iterations: number
+  durationMs: number
+  routes: number
+  error: string | null
+  profiling?: {
+    setupMs: number
+    buildGridMs: number
+    keepoutMs: number
+    searchMs: number
+    fallbackMs: number
+    repairMs: number
+    repairs: number
+  }
+  gridStats?: {
+    cells: number
+    layers: number
+    states: number
+    neighborEdges: number
+    traceKeepoutEntries: number
+    viaFootprintEntries: number
+  }
+}
+
+type WorkerOptions = {
+  enableProfiling: boolean
+  solverMode: SolverMode
+  maxIterations: number
+}
+
+type WorkerRequest =
+  | {
+      type: "run"
+      sampleIndex: number
+      options: WorkerOptions
+    }
+  | {
+      type: "shutdown"
+    }
+
 const args = process.argv.slice(2)
 const concurrencyArg = args.find((arg) => arg.startsWith("--concurrency="))
 const limitArg = args.find((arg) => arg.startsWith("--limit="))
+const modeArg = args.find((arg) => arg.startsWith("--mode="))
+const iterationsArg = args.find((arg) => arg.startsWith("--max-iterations="))
+const enableProfiling = args.includes("--profile")
 const showHelp = args.includes("--help") || args.includes("-h")
 
 if (showHelp) {
@@ -13,13 +62,17 @@ if (showHelp) {
 Usage: bun run scripts/run-dataset02-benchmark-a02.ts [options]
 
 Options:
-  --concurrency=N   Number of worker loops (default: 4)
-  --limit=N         Only run first N samples
-  --help, -h        Show this help message
+  --concurrency=N      Number of worker loops (default: 4)
+  --limit=N            Only run first N samples
+  --mode=fast|strict   Fast mode disables deferred repair; strict matches repro tuning
+  --max-iterations=N   Solver MAX_ITERATIONS (default: 10000000)
+  --profile            Aggregate setup/search profiling and grid stats
+  --help, -h           Show this help message
 
 Examples:
   bun run scripts/run-dataset02-benchmark-a02.ts --concurrency=4
-  bun run scripts/run-dataset02-benchmark-a02.ts --concurrency=4 --limit=50
+  bun run scripts/run-dataset02-benchmark-a02.ts --mode=strict --limit=20
+  bun run scripts/run-dataset02-benchmark-a02.ts --profile --limit=20 --concurrency=1
 `)
   process.exit(0)
 }
@@ -33,30 +86,20 @@ const concurrency = Number.isFinite(parsedConcurrency)
 const limit = limitArg
   ? Number.parseInt(limitArg.split("=")[1] ?? "0", 10)
   : undefined
+const solverMode = (() => {
+  const value = modeArg?.split("=")[1]
+  return value === "strict" ? "strict" : "fast"
+})()
+const parsedMaxIterations = iterationsArg
+  ? Number.parseInt(iterationsArg.split("=")[1] ?? "10000000", 10)
+  : 10_000_000
+const maxIterations = Number.isFinite(parsedMaxIterations)
+  ? Math.max(1, parsedMaxIterations)
+  : 10_000_000
 
 const samples = Number.isFinite(limit)
   ? dataset02.slice(0, Math.max(0, limit ?? 0))
   : dataset02
-
-type SampleResult = {
-  type: "result"
-  sampleIndex: number
-  solved: boolean
-  failed: boolean
-  iterations: number
-  durationMs: number
-  routes: number
-  error: string | null
-}
-
-type WorkerRequest =
-  | {
-      type: "run"
-      sampleIndex: number
-    }
-  | {
-      type: "shutdown"
-    }
 
 if (samples.length === 0) {
   console.log("No samples selected. Use --limit=N with N > 0.")
@@ -66,6 +109,11 @@ if (samples.length === 0) {
 const sampleIndices = samples.map((_, index) => index)
 const workerCount = Math.min(concurrency, sampleIndices.length)
 const results: Array<SampleResult | undefined> = new Array(samples.length)
+const workerOptions: WorkerOptions = {
+  enableProfiling,
+  solverMode,
+  maxIterations,
+}
 
 let nextJobPointer = 0
 let processedCount = 0
@@ -90,7 +138,11 @@ const runWithWorkers = async () => {
       return
     }
     nextJobPointer += 1
-    worker.postMessage({ type: "run", sampleIndex } satisfies WorkerRequest)
+    worker.postMessage({
+      type: "run",
+      sampleIndex,
+      options: workerOptions,
+    } satisfies WorkerRequest)
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -150,6 +202,9 @@ console.log("Dataset02 benchmark for HighDensitySolverA02")
 console.log("=".repeat(72))
 console.log(`Samples: ${samples.length}`)
 console.log(`Workers: ${workerCount}`)
+console.log(`Mode: ${solverMode}`)
+console.log(`Max iterations: ${maxIterations}`)
+console.log(`Profiling: ${enableProfiling ? "on" : "off"}`)
 console.log()
 
 await runWithWorkers()
@@ -179,4 +234,51 @@ console.log(
 )
 console.log(`Average sample time: ${avgDurationMs.toFixed(1)}ms`)
 console.log(`Average iterations: ${avgIterations.toFixed(0)}`)
+
+if (enableProfiling && completed.length > 0) {
+  const profiled = completed.filter((result) => result.profiling)
+  const average = (pick: (result: SampleResult) => number) =>
+    profiled.reduce((sum, result) => sum + pick(result), 0) /
+    Math.max(1, profiled.length)
+
+  console.log()
+  console.log("Average profiling:")
+  console.log(
+    `  setupMs=${average((r) => r.profiling?.setupMs ?? 0).toFixed(1)}`,
+  )
+  console.log(
+    `  buildGridMs=${average((r) => r.profiling?.buildGridMs ?? 0).toFixed(1)}`,
+  )
+  console.log(
+    `  keepoutMs=${average((r) => r.profiling?.keepoutMs ?? 0).toFixed(1)}`,
+  )
+  console.log(
+    `  searchMs=${average((r) => r.profiling?.searchMs ?? 0).toFixed(1)}`,
+  )
+  console.log(
+    `  fallbackMs=${average((r) => r.profiling?.fallbackMs ?? 0).toFixed(1)}`,
+  )
+  console.log(
+    `  repairMs=${average((r) => r.profiling?.repairMs ?? 0).toFixed(1)}`,
+  )
+  console.log(
+    `  repairs=${average((r) => r.profiling?.repairs ?? 0).toFixed(1)}`,
+  )
+
+  console.log()
+  console.log("Average grid stats:")
+  console.log(`  cells=${average((r) => r.gridStats?.cells ?? 0).toFixed(0)}`)
+  console.log(`  layers=${average((r) => r.gridStats?.layers ?? 0).toFixed(1)}`)
+  console.log(`  states=${average((r) => r.gridStats?.states ?? 0).toFixed(0)}`)
+  console.log(
+    `  neighborEdges=${average((r) => r.gridStats?.neighborEdges ?? 0).toFixed(0)}`,
+  )
+  console.log(
+    `  traceKeepoutEntries=${average((r) => r.gridStats?.traceKeepoutEntries ?? 0).toFixed(0)}`,
+  )
+  console.log(
+    `  viaFootprintEntries=${average((r) => r.gridStats?.viaFootprintEntries ?? 0).toFixed(0)}`,
+  )
+}
+
 console.log(`Total wall time: ${(benchmarkMs / 1000).toFixed(2)}s`)

@@ -8,9 +8,18 @@ import { HighDensitySolverA02 } from "../lib/HighDensitySolverA02/HighDensitySol
 
 const dataset02 = dataset02Json as Dataset02Sample[]
 
+type SolverMode = "fast" | "strict"
+
+type WorkerOptions = {
+  enableProfiling: boolean
+  solverMode: SolverMode
+  maxIterations: number
+}
+
 type RunRequest = {
   type: "run"
   sampleIndex: number
+  options: WorkerOptions
 }
 
 type ShutdownRequest = {
@@ -28,9 +37,29 @@ type SampleResult = {
   durationMs: number
   routes: number
   error: string | null
+  profiling?: {
+    setupMs: number
+    buildGridMs: number
+    keepoutMs: number
+    searchMs: number
+    fallbackMs: number
+    repairMs: number
+    repairs: number
+  }
+  gridStats?: {
+    cells: number
+    layers: number
+    states: number
+    neighborEdges: number
+    traceKeepoutEntries: number
+    viaFootprintEntries: number
+  }
 }
 
-const runSingleSample = (sampleIndex: number): SampleResult => {
+const runSingleSample = (
+  sampleIndex: number,
+  options: WorkerOptions,
+): SampleResult => {
   const sample = dataset02[sampleIndex]
   if (!sample) {
     return {
@@ -53,11 +82,22 @@ const runSingleSample = (sampleIndex: number): SampleResult => {
     },
   )
 
+  const strictMode = options.solverMode === "strict"
   const solver = new HighDensitySolverA02({
     ...defaultA02Params,
     nodeWithPortPoints,
+    enableProfiling: options.enableProfiling,
+    enableDeferredConflictRepair: strictMode,
+    maxDeferredRepairPasses: strictMode ? 48 : 0,
+    edgePenaltyStrength: strictMode ? 0.2 : undefined,
+    hyperParameters: strictMode
+      ? {
+          ripCost: 1,
+          greedyMultiplier: 1.2,
+        }
+      : undefined,
   })
-  solver.MAX_ITERATIONS = 10_000_000
+  solver.MAX_ITERATIONS = options.maxIterations
 
   const start = performance.now()
   solver.solve()
@@ -72,6 +112,8 @@ const runSingleSample = (sampleIndex: number): SampleResult => {
     durationMs,
     routes: solver.getOutput().length,
     error: solver.error,
+    profiling: options.enableProfiling ? solver.profiling : undefined,
+    gridStats: options.enableProfiling ? solver.gridStats : undefined,
   }
 }
 
@@ -82,6 +124,6 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     return
   }
 
-  const result = runSingleSample(message.sampleIndex)
+  const result = runSingleSample(message.sampleIndex, message.options)
   self.postMessage(result)
 }
