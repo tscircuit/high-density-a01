@@ -190,6 +190,87 @@ function pushUnique(arr: number[], value: number) {
   arr.push(value)
 }
 
+class SpatialCellIndex {
+  private readonly binSize: number
+  private readonly minX: number
+  private readonly minY: number
+  private readonly bins = new Map<number, number[]>()
+
+  constructor(
+    cells: CompositeCell[],
+    minX: number,
+    minY: number,
+    binSize: number,
+  ) {
+    this.binSize = Math.max(binSize, 1e-6)
+    this.minX = minX
+    this.minY = minY
+
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i]!
+      const startCol = this.toCol(cell.minX)
+      const endCol = this.toCol(cell.maxX)
+      const startRow = this.toRow(cell.minY)
+      const endRow = this.toRow(cell.maxY)
+      for (let row = startRow; row <= endRow; row++) {
+        for (let col = startCol; col <= endCol; col++) {
+          const key = this.pack(row, col)
+          let bucket = this.bins.get(key)
+          if (!bucket) {
+            bucket = []
+            this.bins.set(key, bucket)
+          }
+          bucket.push(i)
+        }
+      }
+    }
+  }
+
+  queryRect(
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+    mark: Uint8Array,
+    out: number[],
+  ) {
+    out.length = 0
+    const startCol = this.toCol(minX)
+    const endCol = this.toCol(maxX)
+    const startRow = this.toRow(minY)
+    const endRow = this.toRow(maxY)
+
+    for (let row = startRow; row <= endRow; row++) {
+      for (let col = startCol; col <= endCol; col++) {
+        const bucket = this.bins.get(this.pack(row, col))
+        if (!bucket) continue
+        for (let i = 0; i < bucket.length; i++) {
+          const cellIdx = bucket[i]!
+          if (mark[cellIdx]) continue
+          mark[cellIdx] = 1
+          out.push(cellIdx)
+        }
+      }
+    }
+
+    for (let i = 0; i < out.length; i++) {
+      mark[out[i]!] = 0
+    }
+  }
+
+  private toCol(x: number) {
+    return Math.floor((x - this.minX) / this.binSize)
+  }
+
+  private toRow(y: number) {
+    return Math.floor((y - this.minY) / this.binSize)
+  }
+
+  private pack(row: number, col: number) {
+    return row * 65536 + col
+  }
+}
+
 function buildOuterAxisSegments(
   start: number,
   total: number,
@@ -554,7 +635,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     const thicknessRows = thicknessCols
 
     const outerCells: CompositeCell[] = []
-    const outerMap = new Map<string, number>()
+    const outerMap = new Map<number, number>()
     const outerBoundaryCellIds: number[] = []
 
     let nextCellId = 0
@@ -584,7 +665,7 @@ export class HighDensitySolverA02 extends BaseSolver {
           height: ys.size,
         }
         outerCells.push(cell)
-        outerMap.set(`${row}:${col}`, cell.id)
+        outerMap.set(row * outerX.length + col, cell.id)
 
         const touchesHoleBoundary =
           row === thicknessRows - 1 ||
@@ -596,15 +677,14 @@ export class HighDensitySolverA02 extends BaseSolver {
     }
 
     const holeMinX = outerX[Math.min(thicknessCols, outerX.length - 1)]?.min
-    const holeMaxX =
-      outerX[Math.max(0, outerX.length - thicknessCols - 1)]?.max
+    const holeMaxX = outerX[Math.max(0, outerX.length - thicknessCols - 1)]?.max
     const holeMinY = outerY[Math.min(thicknessRows, outerY.length - 1)]?.min
-    const holeMaxY =
-      outerY[Math.max(0, outerY.length - thicknessRows - 1)]?.max
+    const holeMaxY = outerY[Math.max(0, outerY.length - thicknessRows - 1)]?.max
 
     const innerCells: CompositeCell[] = []
-    const innerMap = new Map<string, number>()
+    const innerMap = new Map<number, number>()
     const innerBoundaryCellIds: number[] = []
+    let innerCols = 0
 
     if (
       holeMinX !== undefined &&
@@ -625,6 +705,7 @@ export class HighDensitySolverA02 extends BaseSolver {
         this.innerGridCellSize,
       )
 
+      innerCols = innerX.length
       for (let row = 0; row < innerY.length; row++) {
         for (let col = 0; col < innerX.length; col++) {
           const ys = innerY[row]!
@@ -644,7 +725,7 @@ export class HighDensitySolverA02 extends BaseSolver {
             height: ys.size,
           }
           innerCells.push(cell)
-          innerMap.set(`${row}:${col}`, cell.id)
+          innerMap.set(row * innerX.length + col, cell.id)
 
           const isBoundary =
             row === 0 ||
@@ -666,36 +747,35 @@ export class HighDensitySolverA02 extends BaseSolver {
       if (a === b) return
       const cellA = cells[a]!
       const cellB = cells[b]!
-      const cost = Math.hypot(
-        cellA.centerX - cellB.centerX,
-        cellA.centerY - cellB.centerY,
-      )
+      const cost =
+        Math.abs(cellA.centerX - cellB.centerX) +
+        Math.abs(cellA.centerY - cellB.centerY)
       pushUniqueNeighbor(cellNeighbors[a]!, { cellId: b, cost })
       pushUniqueNeighbor(cellNeighbors[b]!, { cellId: a, cost })
     }
 
     for (const cell of outerCells) {
       const candidates = [
-        `${cell.row - 1}:${cell.col}`,
-        `${cell.row + 1}:${cell.col}`,
-        `${cell.row}:${cell.col - 1}`,
-        `${cell.row}:${cell.col + 1}`,
+        (cell.row - 1) * outerX.length + cell.col,
+        (cell.row + 1) * outerX.length + cell.col,
+        cell.row * outerX.length + (cell.col - 1),
+        cell.row * outerX.length + (cell.col + 1),
       ]
-      for (const key of candidates) {
-        const other = outerMap.get(key)
+      for (let i = 0; i < candidates.length; i++) {
+        const other = outerMap.get(candidates[i]!)
         if (other !== undefined) addBidirectionalEdge(cell.id, other)
       }
     }
 
     for (const cell of innerCells) {
       const candidates = [
-        `${cell.row - 1}:${cell.col}`,
-        `${cell.row + 1}:${cell.col}`,
-        `${cell.row}:${cell.col - 1}`,
-        `${cell.row}:${cell.col + 1}`,
+        (cell.row - 1) * innerCols + cell.col,
+        (cell.row + 1) * innerCols + cell.col,
+        cell.row * innerCols + (cell.col - 1),
+        cell.row * innerCols + (cell.col + 1),
       ]
-      for (const key of candidates) {
-        const other = innerMap.get(key)
+      for (let i = 0; i < candidates.length; i++) {
+        const other = innerMap.get(candidates[i]!)
         if (other !== undefined) addBidirectionalEdge(cell.id, other)
       }
     }
@@ -742,6 +822,15 @@ export class HighDensitySolverA02 extends BaseSolver {
     )
     const viaAllowed = new Uint8Array(cells.length)
 
+    const spatialIndex = new SpatialCellIndex(
+      cells,
+      this.boundsMinX,
+      this.boundsMinY,
+      Math.max(this.traceMargin, viaRadius, this.innerGridCellSize * 0.5),
+    )
+    const candidateMark = new Uint8Array(cells.length)
+    const candidates: number[] = []
+
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i]!
       const minBorderDist = Math.min(
@@ -752,15 +841,38 @@ export class HighDensitySolverA02 extends BaseSolver {
       )
       viaAllowed[i] = minBorderDist >= this.viaMinDistFromBorder ? 1 : 0
 
-      for (let j = 0; j < cells.length; j++) {
-        const other = cells[j]!
-        if (rectDistanceSq(cell, other) <= this.traceMargin * this.traceMargin) {
-          traceKeepoutCells[i]!.push(j)
+      spatialIndex.queryRect(
+        cell.minX - this.traceMargin,
+        cell.minY - this.traceMargin,
+        cell.maxX + this.traceMargin,
+        cell.maxY + this.traceMargin,
+        candidateMark,
+        candidates,
+      )
+      for (let j = 0; j < candidates.length; j++) {
+        const other = cells[candidates[j]!]!
+        if (
+          rectDistanceSq(cell, other) <=
+          this.traceMargin * this.traceMargin
+        ) {
+          traceKeepoutCells[i]!.push(other.id)
         }
+      }
+
+      spatialIndex.queryRect(
+        cell.centerX - viaRadius,
+        cell.centerY - viaRadius,
+        cell.centerX + viaRadius,
+        cell.centerY + viaRadius,
+        candidateMark,
+        candidates,
+      )
+      for (let j = 0; j < candidates.length; j++) {
+        const other = cells[candidates[j]!]!
         if (
           circleIntersectsRect(cell.centerX, cell.centerY, viaRadius, other)
         ) {
-          viaFootprintCells[i]!.push(j)
+          viaFootprintCells[i]!.push(other.id)
         }
       }
     }
@@ -1064,10 +1176,9 @@ export class HighDensitySolverA02 extends BaseSolver {
   ): number {
     const cell = this.cells[cellId]!
     const target = this.cells[toCellId]!
-    const dist = Math.hypot(
-      cell.centerX - target.centerX,
-      cell.centerY - target.centerY,
-    )
+    const dist =
+      Math.abs(cell.centerX - target.centerX) +
+      Math.abs(cell.centerY - target.centerY)
 
     if (z === toZ) return dist
     return dist + this.hyperParameters.viaBaseCost
@@ -1149,9 +1260,17 @@ export class HighDensitySolverA02 extends BaseSolver {
     for (let i = 0; i < this.cells.length; i++) {
       const cell = this.cells[i]!
       const dx =
-        pt.x < cell.minX ? cell.minX - pt.x : pt.x > cell.maxX ? pt.x - cell.maxX : 0
+        pt.x < cell.minX
+          ? cell.minX - pt.x
+          : pt.x > cell.maxX
+            ? pt.x - cell.maxX
+            : 0
       const dy =
-        pt.y < cell.minY ? cell.minY - pt.y : pt.y > cell.maxY ? pt.y - cell.maxY : 0
+        pt.y < cell.minY
+          ? cell.minY - pt.y
+          : pt.y > cell.maxY
+            ? pt.y - cell.maxY
+            : 0
       const distanceSq = dx * dx + dy * dy
       const area = cell.width * cell.height
       if (
@@ -1372,7 +1491,10 @@ export class HighDensitySolverA02 extends BaseSolver {
     }> = []
 
     rects.push({
-      center: { x: this.nodeWithPortPoints.center.x, y: this.nodeWithPortPoints.center.y },
+      center: {
+        x: this.nodeWithPortPoints.center.x,
+        y: this.nodeWithPortPoints.center.y,
+      },
       width: this.nodeWithPortPoints.width,
       height: this.nodeWithPortPoints.height,
       stroke: "gray",
