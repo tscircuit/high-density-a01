@@ -14,6 +14,7 @@
     "build:site": "bun run build && cosmos-export",
     "build": "tsup lib/index.ts --dts --format esm",
     "benchmark:dataset02": "bun run scripts/run-dataset02-benchmark.ts --concurrency=4",
+    "benchmark:dataset02:a02": "bun run scripts/run-dataset02-benchmark-a02.ts --concurrency=4",
     "format": "biome format --write .",
     "format:check": "biome format ."
   },
