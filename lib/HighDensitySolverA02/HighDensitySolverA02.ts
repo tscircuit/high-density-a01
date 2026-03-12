@@ -813,12 +813,35 @@ export class HighDensitySolverA02 extends BaseSolver {
 
     this.searchIterations++
     const connRips = this.ripCount[this.activeConnId] ?? 0
+    if (
+      this.unsolvedSegs.length <= 1 &&
+      this.MAX_ITERATIONS - this.iterations <= 50_000 &&
+      this.tryLastConnectionFallback(this.activeConnSeg)
+    ) {
+      this.activeConnSeg = null
+      this.activeConnId = -1
+      this.heap.clear()
+      this.nodePool = []
+      return
+    }
+
     const baseBudget = this.planeSize * this.layers * 60
     const budget = Math.min(
       baseBudget * (1 + connRips * 0.5),
       this.planeSize * this.layers * 600,
     )
     if (this.searchIterations > budget) {
+      if (
+        this.unsolvedSegs.length <= 1 &&
+        this.tryLastConnectionFallback(this.activeConnSeg)
+      ) {
+        this.activeConnSeg = null
+        this.activeConnId = -1
+        this.heap.clear()
+        this.nodePool = []
+        return
+      }
+
       const pen = this.penalty2d
       for (let i = 0; i < pen.length; i++) {
         pen[i] = pen[i]! * 0.9
@@ -1223,13 +1246,41 @@ export class HighDensitySolverA02 extends BaseSolver {
     for (let cur = goalNode.ripped; cur; cur = cur.prev) {
       rippedIds.push(cur.id)
     }
+    this.commitRoute(connId, cells, rippedIds, viaCellIds)
+  }
+
+  private commitRoute(
+    connId: ConnId,
+    cells: Array<{ z: number; cellId: number }>,
+    rippedIds: ConnId[],
+    viaCellIds?: number[],
+  ) {
+    const normalizedCells = cells.slice()
+
+    while (normalizedCells.length > 1) {
+      const first = normalizedCells[0]!
+      const firstFlat = first.z * this.planeSize + first.cellId
+      if (!this.sharedCrossRootPortCells.has(firstFlat)) break
+      normalizedCells.shift()
+    }
+    while (normalizedCells.length > 1) {
+      const last = normalizedCells[normalizedCells.length - 1]!
+      const lastFlat = last.z * this.planeSize + last.cellId
+      if (!this.sharedCrossRootPortCells.has(lastFlat)) break
+      normalizedCells.pop()
+    }
+
+    const routeViaCellIds = viaCellIds
+      ? viaCellIds.slice()
+      : this.extractViaCellIds(normalizedCells)
+
     for (let i = 0; i < rippedIds.length; i++) {
       this.ripTrace(rippedIds[i]!)
     }
 
     const indices: number[] = []
-    for (let i = 0; i < cells.length; i++) {
-      const routeCell = cells[i]!
+    for (let i = 0; i < normalizedCells.length; i++) {
+      const routeCell = normalizedCells[i]!
       const keepouts = this.traceKeepoutCells[routeCell.cellId]!
       for (let j = 0; j < keepouts.length; j++) {
         const occCellId = keepouts[j]!
@@ -1249,8 +1300,8 @@ export class HighDensitySolverA02 extends BaseSolver {
     }
 
     const displacedByVias: ConnId[] = []
-    for (let i = 0; i < viaCellIds.length; i++) {
-      const viaCellId = viaCellIds[i]!
+    for (let i = 0; i < routeViaCellIds.length; i++) {
+      const viaCellId = routeViaCellIds[i]!
       const footprint = this.viaFootprintCells[viaCellId]!
       for (let z = 0; z < this.layers; z++) {
         const zBase = z * this.planeSize
@@ -1276,7 +1327,11 @@ export class HighDensitySolverA02 extends BaseSolver {
       this.usedIndicesByConn.push([])
     }
     this.usedIndicesByConn[connId] = indices
-    this.solvedRoutes.set(connId, { connId, cells, viaCellIds })
+    this.solvedRoutes.set(connId, {
+      connId,
+      cells: normalizedCells,
+      viaCellIds: routeViaCellIds,
+    })
 
     for (let i = 0; i < displacedByVias.length; i++) {
       this.ripTrace(displacedByVias[i]!)
@@ -1297,6 +1352,129 @@ export class HighDensitySolverA02 extends BaseSolver {
         }
       }
     }
+  }
+
+  private extractViaCellIds(cells: Array<{ z: number; cellId: number }>) {
+    const viaCellIds: number[] = []
+    for (let i = 1; i < cells.length; i++) {
+      if (cells[i]!.z !== cells[i - 1]!.z) {
+        viaCellIds.push(cells[i]!.cellId)
+      }
+    }
+    return viaCellIds
+  }
+
+  private tryLastConnectionFallback(seg: ConnectionSeg) {
+    const stateCount = this.layers * this.planeSize
+    const gScore = new Float64Array(stateCount)
+    gScore.fill(Number.POSITIVE_INFINITY)
+    const parent = new Int32Array(stateCount).fill(-1)
+    const closed = new Uint8Array(stateCount)
+    const heap = new MinHeap()
+    const startIdx = seg.startZ * this.planeSize + seg.startCellId
+    const endIdx = seg.endZ * this.planeSize + seg.endCellId
+    let seq = 0
+
+    gScore[startIdx] = 0
+    heap.push(
+      this.computeH(seg.startZ, seg.startCellId, seg.endZ, seg.endCellId),
+      seq++,
+      startIdx,
+    )
+
+    while (heap.size > 0) {
+      const stateIdx = heap.pop()
+      if (closed[stateIdx]) continue
+      closed[stateIdx] = 1
+
+      if (stateIdx === endIdx) break
+
+      const z = Math.floor(stateIdx / this.planeSize)
+      const cellId = stateIdx - z * this.planeSize
+      const baseG = gScore[stateIdx]!
+      const neighbors = this.cellNeighbors[cellId]!
+
+      for (let i = 0; i < neighbors.length; i++) {
+        const neighbor = neighbors[i]!
+        const nextIdx = z * this.planeSize + neighbor.cellId
+        if (closed[nextIdx]) continue
+        if (
+          !this.canUseFallbackState(this.activeConnId, z, neighbor.cellId, seg)
+        ) {
+          continue
+        }
+
+        const nextG = baseG + neighbor.cost + this.penalty2d[neighbor.cellId]!
+        if (nextG >= gScore[nextIdx]!) continue
+        gScore[nextIdx] = nextG
+        parent[nextIdx] = stateIdx
+        heap.push(
+          nextG + this.computeH(z, neighbor.cellId, seg.endZ, seg.endCellId),
+          seq++,
+          nextIdx,
+        )
+      }
+
+      if (!this.viaAllowed[cellId]) continue
+
+      for (let nz = 0; nz < this.layers; nz++) {
+        if (nz === z) continue
+        const nextIdx = nz * this.planeSize + cellId
+        if (closed[nextIdx]) continue
+        if (!this.canUseFallbackState(this.activeConnId, nz, cellId, seg)) {
+          continue
+        }
+
+        const nextG =
+          baseG + this.hyperParameters.viaBaseCost + this.penalty2d[cellId]!
+        if (nextG >= gScore[nextIdx]!) continue
+        gScore[nextIdx] = nextG
+        parent[nextIdx] = stateIdx
+        heap.push(
+          nextG + this.computeH(nz, cellId, seg.endZ, seg.endCellId),
+          seq++,
+          nextIdx,
+        )
+      }
+    }
+
+    if (!closed[endIdx]) return false
+
+    const cells: Array<{ z: number; cellId: number }> = []
+    let cur = endIdx
+    while (cur >= 0) {
+      const z = Math.floor(cur / this.planeSize)
+      const cellId = cur - z * this.planeSize
+      cells.push({ z, cellId })
+      cur = parent[cur] ?? -1
+    }
+    cells.reverse()
+
+    this.consecutiveSkips = Math.max(0, this.consecutiveSkips - 1)
+    this.commitRoute(this.activeConnId, cells, [])
+    return true
+  }
+
+  private canUseFallbackState(
+    activeConn: ConnId,
+    z: number,
+    cellId: number,
+    seg: ConnectionSeg,
+  ) {
+    const flatIdx = z * this.planeSize + cellId
+    const fixedOwner = this.portOwnerFlat[flatIdx]!
+    const fixedSameRoot =
+      this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
+    const allowFixedOverlap =
+      fixedSameRoot &&
+      this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+    const isSegEnd = z === seg.endZ && cellId === seg.endCellId
+    return (
+      fixedOwner < 0 ||
+      fixedOwner === activeConn ||
+      allowFixedOverlap ||
+      isSegEnd
+    )
   }
 
   private ripTrace(connId: ConnId): void {
