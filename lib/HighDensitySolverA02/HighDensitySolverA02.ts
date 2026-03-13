@@ -1,5 +1,9 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
 import Flatbush from "flatbush"
+import {
+  type AffineTransform,
+  applyAffineTransformToPoint,
+} from "../gridToAffineTransform"
 import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 
 type ConnId = number
@@ -409,6 +413,7 @@ export class HighDensitySolverA02 extends BaseSolver {
   boundsMaxX!: number
   boundsMinY!: number
   boundsMaxY!: number
+  gridToBoundsTransform!: AffineTransform
 
   cells!: CompositeCell[]
   viaAllowed!: Uint8Array
@@ -642,6 +647,7 @@ export class HighDensitySolverA02 extends BaseSolver {
       this.cellRow[i] = cell.row
       this.cellCol[i] = cell.col
     }
+    this.gridToBoundsTransform = this.computeGridToBoundsTransform()
     const flattenedNeighbors = this.flattenNeighborLists(cellNeighbors)
     this.neighborOffset = flattenedNeighbors.offset
     this.neighborIds = flattenedNeighbors.ids
@@ -2053,6 +2059,7 @@ export class HighDensitySolverA02 extends BaseSolver {
 
   override visualize() {
     const LAYER_COLORS = ["red", "blue", "orange", "green"]
+    const vt = this.gridToBoundsTransform
 
     const points: Array<{
       x: number
@@ -2099,10 +2106,14 @@ export class HighDensitySolverA02 extends BaseSolver {
           const penalty = this.penalty2d[cell.id]!
           if (penalty <= 0) continue
           const alpha = Math.min(0.6, (penalty / maxPenalty) * 0.6)
+          const tc = applyAffineTransformToPoint(vt, {
+            x: cell.centerX,
+            y: cell.centerY,
+          })
           rects.push({
-            center: { x: cell.centerX, y: cell.centerY },
-            width: cell.width,
-            height: cell.height,
+            center: tc,
+            width: cell.width * vt.a,
+            height: cell.height * vt.e,
             fill: `rgba(255,165,0,${alpha.toFixed(3)})`,
           })
         }
@@ -2115,10 +2126,14 @@ export class HighDensitySolverA02 extends BaseSolver {
         for (const cell of this.cells) {
           const occ = this.usedCellsFlat[zBase + cell.id]!
           if (occ === -1) continue
+          const tc = applyAffineTransformToPoint(vt, {
+            x: cell.centerX,
+            y: cell.centerY,
+          })
           rects.push({
-            center: { x: cell.centerX, y: cell.centerY },
-            width: cell.width,
-            height: cell.height,
+            center: tc,
+            width: cell.width * vt.a,
+            height: cell.height * vt.e,
             fill: "rgba(0,0,255,0.5)",
           })
         }
@@ -2188,9 +2203,13 @@ export class HighDensitySolverA02 extends BaseSolver {
         const zBase = z * this.planeSize
         for (const cell of this.cells) {
           if (this.visitedStamp[zBase + cell.id] !== currentStamp) continue
-          points.push({
+          const tc = applyAffineTransformToPoint(vt, {
             x: cell.centerX,
             y: cell.centerY,
+          })
+          points.push({
+            x: tc.x,
+            y: tc.y,
             color: "rgba(0,0,255,0.2)",
           })
         }
@@ -2208,6 +2227,7 @@ export class HighDensitySolverA02 extends BaseSolver {
   }
 
   override getOutput(): HighDensityIntraNodeRoute[] {
+    const t = this.gridToBoundsTransform
     const result: HighDensityIntraNodeRoute[] = []
 
     for (let connId = 0; connId < this.solvedRoutes.length; connId++) {
@@ -2222,15 +2242,22 @@ export class HighDensitySolverA02 extends BaseSolver {
           const z = Math.floor(state / this.planeSize)
           const cellId = state - z * this.planeSize
           const cell = this.cells[cellId]!
-          return {
+          const tp = applyAffineTransformToPoint(t, {
             x: cell.centerX,
             y: cell.centerY,
+          })
+          return {
+            x: tp.x,
+            y: tp.y,
             z: this.layerToZ.get(z) ?? z,
           }
         }),
         vias: Array.from(route.viaCellIds, (cellId) => {
           const cell = this.cells[cellId]!
-          return { x: cell.centerX, y: cell.centerY }
+          return applyAffineTransformToPoint(t, {
+            x: cell.centerX,
+            y: cell.centerY,
+          })
         }),
       })
     }
@@ -2244,6 +2271,40 @@ export class HighDensitySolverA02 extends BaseSolver {
       if (this.solvedRoutes[i]) count++
     }
     return count
+  }
+
+  private computeGridToBoundsTransform(): AffineTransform {
+    let minCenterX = Infinity
+    let maxCenterX = -Infinity
+    let minCenterY = Infinity
+    let maxCenterY = -Infinity
+
+    for (let i = 0; i < this.cells.length; i++) {
+      const cell = this.cells[i]!
+      if (cell.centerX < minCenterX) minCenterX = cell.centerX
+      if (cell.centerX > maxCenterX) maxCenterX = cell.centerX
+      if (cell.centerY < minCenterY) minCenterY = cell.centerY
+      if (cell.centerY > maxCenterY) maxCenterY = cell.centerY
+    }
+
+    const xSpan = maxCenterX - minCenterX
+    const ySpan = maxCenterY - minCenterY
+    const width = this.boundsMaxX - this.boundsMinX
+    const height = this.boundsMaxY - this.boundsMinY
+
+    const a = xSpan > 0 ? width / xSpan : 1
+    const e = ySpan > 0 ? height / ySpan : 1
+
+    const c =
+      xSpan > 0
+        ? this.boundsMinX - a * minCenterX
+        : (this.boundsMinX + this.boundsMaxX) / 2 - minCenterX
+    const f =
+      ySpan > 0
+        ? this.boundsMinY - e * minCenterY
+        : (this.boundsMinY + this.boundsMaxY) / 2 - minCenterY
+
+    return { a, b: 0, c, d: 0, e, f }
   }
 }
 
