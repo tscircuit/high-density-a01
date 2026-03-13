@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - '!version-bumps/**'
+    paths:
+      - "lib/**"
   workflow_dispatch:
 
 env:
