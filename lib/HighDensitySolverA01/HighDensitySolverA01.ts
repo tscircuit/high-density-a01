@@ -1425,7 +1425,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     const t = this.gridToBoundsTransform
     const result: HighDensityIntraNodeRoute[] = []
 
-    for (const [connId, route] of this.solvedRoutes) {
+    for (const [connId, route] of this.solvedRoutes ?? []) {
       const connName = this.connIdToName[connId]!
       result.push({
         connectionName: connName,
