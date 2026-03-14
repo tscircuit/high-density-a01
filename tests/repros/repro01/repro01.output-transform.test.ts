@@ -1,49 +1,58 @@
 import { expect, test } from "bun:test"
-import { defaultA02Params } from "../../../lib/default-params"
-import { HighDensitySolverA02 } from "../../../lib/HighDensitySolverA02/HighDensitySolverA02"
+import { defaultA03Params } from "../../../lib/default-params"
+import { HighDensitySolverA03 } from "../../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import repro01 from "./repro01.json"
 
-test("A02 getOutput applies grid-to-bounds transform to solved routes", () => {
-  const solver = new HighDensitySolverA02({
-    ...defaultA02Params,
+test("A03 getOutput applies grid-to-bounds transform to solved routes", () => {
+  const solver = new HighDensitySolverA03({
+    ...defaultA03Params,
     nodeWithPortPoints: repro01.nodeWithPortPoints,
   })
   solver.setup()
 
   const internal = solver as any
-  const cells = internal.cells as Array<{
-    id: number
-    centerX: number
-    centerY: number
-  }>
+  const cellCenterX = internal.cellCenterX as Float64Array
+  const cellCenterY = internal.cellCenterY as Float64Array
 
   let minCenterX = Infinity
   let maxCenterX = -Infinity
   let minCenterY = Infinity
   let maxCenterY = -Infinity
 
-  for (const cell of cells) {
-    if (cell.centerX < minCenterX) minCenterX = cell.centerX
-    if (cell.centerX > maxCenterX) maxCenterX = cell.centerX
-    if (cell.centerY < minCenterY) minCenterY = cell.centerY
-    if (cell.centerY > maxCenterY) maxCenterY = cell.centerY
+  for (let cellId = 0; cellId < cellCenterX.length; cellId++) {
+    const centerX = cellCenterX[cellId]!
+    const centerY = cellCenterY[cellId]!
+    if (centerX < minCenterX) minCenterX = centerX
+    if (centerX > maxCenterX) maxCenterX = centerX
+    if (centerY < minCenterY) minCenterY = centerY
+    if (centerY > maxCenterY) maxCenterY = centerY
   }
 
-  const startCell = cells.find(
-    (cell) => cell.centerX === minCenterX && cell.centerY === minCenterY,
-  )
-  const endCell = cells.find(
-    (cell) => cell.centerX === maxCenterX && cell.centerY === maxCenterY,
-  )
+  let startCellId = -1
+  let endCellId = -1
+  for (let cellId = 0; cellId < cellCenterX.length; cellId++) {
+    if (
+      cellCenterX[cellId] === minCenterX &&
+      cellCenterY[cellId] === minCenterY
+    ) {
+      startCellId = cellId
+    }
+    if (
+      cellCenterX[cellId] === maxCenterX &&
+      cellCenterY[cellId] === maxCenterY
+    ) {
+      endCellId = cellId
+    }
+  }
 
-  expect(startCell).toBeDefined()
-  expect(endCell).toBeDefined()
+  expect(startCellId).toBeGreaterThanOrEqual(0)
+  expect(endCellId).toBeGreaterThanOrEqual(0)
 
   internal.solvedRoutes = [
     {
       connId: 0,
-      states: Int32Array.from([startCell!.id, endCell!.id]),
-      viaCellIds: Int32Array.from([startCell!.id, endCell!.id]),
+      states: Int32Array.from([startCellId, endCellId]),
+      viaCellIds: Int32Array.from([startCellId, endCellId]),
     },
   ]
 

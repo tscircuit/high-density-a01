@@ -3,17 +3,14 @@ import { expect, setDefaultTimeout, test } from "bun:test"
 setDefaultTimeout(120_000)
 import "bun-match-svg"
 import "graphics-debug/matcher"
-import { defaultA02Params } from "../../../lib/default-params"
-import { HighDensitySolverA02 } from "../../../lib/HighDensitySolverA02/HighDensitySolverA02"
+import { defaultA03Params } from "../../../lib/default-params"
+import { HighDensitySolverA03 } from "../../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import repro04 from "./repro04.json"
 
 function createSolver() {
-  const solver = new HighDensitySolverA02({
-    ...defaultA02Params,
+  const solver = new HighDensitySolverA03({
+    ...defaultA03Params,
     nodeWithPortPoints: repro04.nodeWithPortPoints,
-    enableDeferredConflictRepair: true,
-    maxDeferredRepairPasses: 48,
-    edgePenaltyStrength: 0.2,
     hyperParameters: {
       ripCost: 1,
       greedyMultiplier: 1.2,

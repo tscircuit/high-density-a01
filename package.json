@@ -15,6 +15,7 @@
     "build": "tsup lib/index.ts --dts --format esm",
     "benchmark:dataset02": "bun run scripts/run-dataset02-benchmark.ts --concurrency=4",
     "benchmark:dataset02:a02": "bun run scripts/run-dataset02-benchmark-a02.ts --concurrency=4",
+    "benchmark:dataset02:a03": "bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4",
     "profile:a02": "bun run scripts/profile-a02.ts",
     "format": "biome format --write .",
     "format:check": "biome format ."
@@ -29,6 +30,7 @@
     "@types/bun": "latest",
     "bun-match-svg": "^0.0.15",
     "graphics-debug": "^0.0.86",
+    "high-density-dataset-z04": "https://github.com/tscircuit/high-density-dataset-z04.git",
     "react-cosmos": "^7.1.1",
     "react-cosmos-plugin-vite": "^7.1.1",
     "tsup": "^8.5.1"
