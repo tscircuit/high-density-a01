@@ -1,3 +1,4 @@
+// @ts-ignore
 import { hgProblems } from "../../high-density-dataset-z04/hg-problem/index.ts"
 
 const datasetZ04ProblemCount = hgProblems.length
