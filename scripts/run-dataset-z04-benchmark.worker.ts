@@ -6,6 +6,7 @@ import {
   defaultA03Params,
   defaultParams,
 } from "../lib/default-params"
+// @ts-ignore
 import { hgProblems } from "../../high-density-dataset-z04/hg-problem/index.ts"
 import type {
   HighDensityIntraNodeRoute,
