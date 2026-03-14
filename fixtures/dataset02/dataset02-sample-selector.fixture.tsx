@@ -1,12 +1,10 @@
 import dataset02Json from "@tscircuit/hypergraph/datasets/jumper-graph-solver/dataset02.json"
-import { GenericSolverDebugger } from "@tscircuit/solver-utils/react"
 import { useMemo, useState } from "react"
 import {
   convertDataset02SampleToNodeWithPortPoints,
   type Dataset02Sample,
 } from "../../lib/dataset02/convertDataset02SampleToNodeWithPortPoints"
-import { defaultParams } from "../../lib/default-params"
-import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
+import { SolverDebugger } from "../components/SolverDebugger"
 
 const dataset02 = dataset02Json as Dataset02Sample[]
 
@@ -68,17 +66,10 @@ export default function Dataset02SampleSelectorFixture() {
         </span>
       </div>
 
-      <GenericSolverDebugger
-        key={`dataset02-${safeSampleNumber}`}
-        createSolver={() => {
-          const solver = new HighDensitySolverA01({
-            ...defaultParams,
-            nodeWithPortPoints,
-          })
-          solver.MAX_ITERATIONS = 10_000_000
-          solver.setup()
-          return solver
-        }}
+      <SolverDebugger
+        nodeWithPortPoints={nodeWithPortPoints}
+        defaultSolverKey="a01"
+        debugKey={`dataset02-${safeSampleNumber}`}
       />
     </div>
   )

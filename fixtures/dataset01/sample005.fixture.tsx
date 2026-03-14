@@ -1,17 +1,10 @@
-import { GenericSolverDebugger } from "@tscircuit/solver-utils/react"
-import { defaultParams } from "../../lib/default-params"
-import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
+import { SolverDebugger } from "../components/SolverDebugger"
 import sample005 from "../../tests/dataset01/sample005/sample005.json"
 
 export default () => (
-  <GenericSolverDebugger
-    createSolver={() => {
-      const solver = new HighDensitySolverA01({
-        ...defaultParams,
-        nodeWithPortPoints: sample005.nodeWithPortPoints,
-      })
-      solver.setup()
-      return solver
-    }}
+  <SolverDebugger
+    nodeWithPortPoints={sample005.nodeWithPortPoints}
+    defaultSolverKey="a01"
+    debugKey="dataset01-sample005"
   />
 )

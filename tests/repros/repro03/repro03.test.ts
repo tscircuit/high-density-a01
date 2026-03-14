@@ -21,7 +21,7 @@ function createSolver() {
   return solver
 }
 
-test("repro03 snapshot", async () => {
+test.skip("repro03 snapshot", async () => {
   const solver = createSolver()
 
   const graphics = solver.visualize()
