@@ -1095,10 +1095,18 @@ export class HighDensitySolverA02 extends BaseSolver {
 
     this.searchIterations++
     const connRips = this.ripCount[this.activeConnId] ?? 0
+    const shouldTryEmergencyFallback =
+      connRips >= 24 &&
+      this.searchIterations > Math.max(10_000, Math.floor(this.planeSize * 6))
+
     if (
-      this.unsolvedSegs.length <= 2 &&
-      this.MAX_ITERATIONS - this.iterations <= 50_000 &&
-      this.tryLastConnectionFallback(this.activeConnSeg)
+      ((this.unsolvedSegs.length <= 2 &&
+        this.MAX_ITERATIONS - this.iterations <= 50_000) ||
+        shouldTryEmergencyFallback) &&
+      this.tryLastConnectionFallback(
+        this.activeConnSeg,
+        shouldTryEmergencyFallback,
+      )
     ) {
       this.activeConnSeg = null
       this.activeConnId = -1
@@ -1114,8 +1122,11 @@ export class HighDensitySolverA02 extends BaseSolver {
     )
     if (this.searchIterations > budget) {
       if (
-        this.unsolvedSegs.length <= 2 &&
-        this.tryLastConnectionFallback(this.activeConnSeg)
+        (this.unsolvedSegs.length <= 2 || shouldTryEmergencyFallback) &&
+        this.tryLastConnectionFallback(
+          this.activeConnSeg,
+          shouldTryEmergencyFallback,
+        )
       ) {
         this.activeConnSeg = null
         this.activeConnId = -1
@@ -1578,7 +1589,8 @@ export class HighDensitySolverA02 extends BaseSolver {
     const connId = this.activeConnId
     this.ripChain.collect(this.nodePool.ripHead[goalNodeIdx]!, this._rippedIds)
     const deferRipup =
-      this.enableDeferredConflictRepair && this.unsolvedSegs.length <= 1
+      this.enableDeferredConflictRepair &&
+      (this.unsolvedSegs.length <= 4 || (this.ripCount[connId] ?? 0) >= 8)
     this.commitRoute(connId, states, this._rippedIds, viaCellIds, deferRipup)
   }
 
@@ -1713,7 +1725,10 @@ export class HighDensitySolverA02 extends BaseSolver {
     return viaCellIds
   }
 
-  private tryLastConnectionFallback(seg: ConnectionSeg) {
+  private tryLastConnectionFallback(
+    seg: ConnectionSeg,
+    forceDeferredRipup = false,
+  ) {
     const profileStart = this.enableProfiling ? performance.now() : 0
     const stateCount = this.layers * this.planeSize
     const gScore = new Float64Array(stateCount)
@@ -1803,7 +1818,10 @@ export class HighDensitySolverA02 extends BaseSolver {
 
     this.consecutiveSkips = Math.max(0, this.consecutiveSkips - 1)
     const deferRipup =
-      this.enableDeferredConflictRepair && this.unsolvedSegs.length <= 1
+      this.enableDeferredConflictRepair &&
+      (forceDeferredRipup ||
+        this.unsolvedSegs.length <= 4 ||
+        (this.ripCount[this.activeConnId] ?? 0) >= 8)
     this.commitRoute(this.activeConnId, states, [], viaCellIds, deferRipup)
     if (this.enableProfiling) {
       this.profileData.fallbackMs += performance.now() - profileStart

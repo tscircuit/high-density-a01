@@ -30,5 +30,7 @@ test("repro04 snapshot", async () => {
   const graphics = solver.visualize()
 
   await expect(graphics).toMatchGraphicsSvg(import.meta.path)
+  expect(solver.solved).toBeTrue()
+  expect(solver.failed).toBeFalse()
   expect(solver.iterations).toBeGreaterThan(0)
 })
