@@ -839,8 +839,13 @@ export class HighDensitySolverA03 extends BaseSolver {
     const right = this.regions[REGION_RIGHT]!
     const bottom = this.regions[REGION_BOTTOM]!
     const middle = this.regions[REGION_MIDDLE]!
+    const hasLeft = left.rows > 0 && left.cols > 0
+    const hasTop = top.rows > 0 && top.cols > 0
+    const hasRight = right.rows > 0 && right.cols > 0
+    const hasBottom = bottom.rows > 0 && bottom.cols > 0
+    const hasMiddle = middle.rows > 0 && middle.cols > 0
 
-    if (left.rows > 0 && left.cols > 0 && top.rows > 0 && top.cols > 0) {
+    if (hasLeft && hasTop) {
       for (let globalRow = 0; globalRow < this.bandRows; globalRow++) {
         addBidirectionalEdge(
           this.cellIdFor(REGION_LEFT, globalRow, left.cols - 1),
@@ -849,7 +854,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (top.rows > 0 && top.cols > 0 && right.rows > 0 && right.cols > 0) {
+    if (hasTop && hasRight) {
       for (let globalRow = 0; globalRow < this.bandRows; globalRow++) {
         addBidirectionalEdge(
           this.cellIdFor(REGION_TOP, globalRow, top.cols - 1),
@@ -858,7 +863,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (left.rows > 0 && left.cols > 0 && bottom.rows > 0 && bottom.cols > 0) {
+    if (hasLeft && hasBottom) {
       for (
         let globalRow = this.fineRows - this.bandRows;
         globalRow < this.fineRows;
@@ -875,12 +880,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (
-      bottom.rows > 0 &&
-      bottom.cols > 0 &&
-      right.rows > 0 &&
-      right.cols > 0
-    ) {
+    if (hasBottom && hasRight) {
       for (
         let globalRow = this.fineRows - this.bandRows;
         globalRow < this.fineRows;
@@ -897,7 +897,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (left.rows > 0 && left.cols > 0 && middle.rows > 0 && middle.cols > 0) {
+    if (hasLeft && hasMiddle) {
       for (
         let globalRow = this.bandRows;
         globalRow < this.fineRows - this.bandRows;
@@ -914,12 +914,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (
-      right.rows > 0 &&
-      right.cols > 0 &&
-      middle.rows > 0 &&
-      middle.cols > 0
-    ) {
+    if (hasRight && hasMiddle) {
       for (
         let globalRow = this.bandRows;
         globalRow < this.fineRows - this.bandRows;
@@ -936,7 +931,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (top.rows > 0 && top.cols > 0 && middle.rows > 0 && middle.cols > 0) {
+    if (hasTop && hasMiddle) {
       for (
         let globalCol = this.bandCols;
         globalCol < this.fineCols - this.bandCols;
@@ -953,12 +948,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (
-      bottom.rows > 0 &&
-      bottom.cols > 0 &&
-      middle.rows > 0 &&
-      middle.cols > 0
-    ) {
+    if (hasBottom && hasMiddle) {
       for (
         let globalCol = this.bandCols;
         globalCol < this.fineCols - this.bandCols;
@@ -971,6 +961,27 @@ export class HighDensitySolverA03 extends BaseSolver {
             Math.floor((globalCol - this.bandCols) / this.lowScale),
           ),
           this.cellIdFor(REGION_BOTTOM, 0, globalCol - this.bandCols),
+        )
+      }
+    }
+
+    // Degenerate small-node cases can collapse away the middle and one axis of
+    // edge bands. In those layouts, the remaining opposing regions still share
+    // a seam and must be connected directly.
+    if (!hasMiddle && !hasTop && !hasBottom && hasLeft && hasRight) {
+      for (let row = 0; row < Math.min(left.rows, right.rows); row++) {
+        addBidirectionalEdge(
+          this.cellIdFor(REGION_LEFT, row, left.cols - 1),
+          this.cellIdFor(REGION_RIGHT, row, 0),
+        )
+      }
+    }
+
+    if (!hasMiddle && !hasLeft && !hasRight && hasTop && hasBottom) {
+      for (let col = 0; col < Math.min(top.cols, bottom.cols); col++) {
+        addBidirectionalEdge(
+          this.cellIdFor(REGION_TOP, top.rows - 1, col),
+          this.cellIdFor(REGION_BOTTOM, 0, col),
         )
       }
     }
