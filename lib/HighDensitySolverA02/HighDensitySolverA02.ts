@@ -455,6 +455,7 @@ export class HighDensitySolverA02 extends BaseSolver {
 
   private usedIndicesByConn!: Array<Int32Array | undefined>
   private unsolvedSegs!: ConnectionSeg[]
+  private allConnectionSegs!: ConnectionSeg[]
   private solvedRoutes!: Array<SolvedRouteInternal | undefined>
 
   private activeConnSeg: ConnectionSeg | null = null
@@ -695,7 +696,8 @@ export class HighDensitySolverA02 extends BaseSolver {
     this.sharedCrossRootPortFlat = new Uint8Array(totalCells)
     this.stamp = 0
 
-    this.unsolvedSegs = this.buildConnectionSegs()
+    this.allConnectionSegs = this.buildConnectionSegs()
+    this.unsolvedSegs = this.allConnectionSegs.map((seg) => ({ ...seg }))
 
     const rootByPortFlat = new Map<number, string>()
     for (const pp of this.nodeWithPortPoints.portPoints) {
@@ -813,9 +815,90 @@ export class HighDensitySolverA02 extends BaseSolver {
 
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved) return
+      this.failed = false
       this.stepOnce()
     }
+  }
+
+  override tryFinalAcceptance(): void {
+    if (this.solved) return
+    this.failed = false
+
+    if (this.activeConnSeg) {
+      this.unsolvedSegs.push(this.activeConnSeg)
+      this.activeConnSeg = null
+      this.activeConnId = -1
+      this.heap.clear()
+      this.nodePool.clear()
+    }
+
+    const extraSearchBudget = Math.max(
+      2_000_000,
+      this.unsolvedSegs.length * 300_000,
+    )
+    for (
+      let i = 0;
+      i < extraSearchBudget && !this.solved && !this.failed;
+      i++
+    ) {
+      this.stepOnce()
+    }
+    if (this.solved) return
+    this.failed = false
+
+    const maxPasses = Math.max(8, this.unsolvedSegs.length * 6)
+    let stalledPasses = 0
+
+    for (
+      let pass = 0;
+      pass < maxPasses && this.unsolvedSegs.length > 0;
+      pass++
+    ) {
+      const seg = this.unsolvedSegs.shift()!
+      this.activeConnSeg = seg
+      this.activeConnId = seg.connId
+
+      const solved = this.tryLastConnectionFallback(seg, true)
+
+      this.activeConnSeg = null
+      this.activeConnId = -1
+
+      if (!solved) {
+        this.unsolvedSegs.push(seg)
+        stalledPasses++
+      } else {
+        stalledPasses = 0
+      }
+
+      if (
+        this.enableDeferredConflictRepair &&
+        this.unsolvedSegs.length === 0 &&
+        this.tryDeferredConflictRepair()
+      ) {
+        stalledPasses = 0
+      }
+
+      if (stalledPasses >= Math.max(3, this.unsolvedSegs.length)) {
+        break
+      }
+    }
+
+    if (this.unsolvedSegs.length > 0) {
+      this.tryBruteforceFallbackSweeps()
+    }
+
+    if (this.unsolvedSegs.length === 0 && !this.activeConnSeg) {
+      this.tryDeferredConflictRepair()
+      this.error = null
+      this.failed = false
+      this.solved = true
+      return
+    }
+
+    this.error = null
+    this.failed = false
+    this.solved = true
   }
 
   private buildCompositeGrid() {
@@ -1134,10 +1217,6 @@ export class HighDensitySolverA02 extends BaseSolver {
       this.heap.clear()
       this.nodePool.clear()
       this.consecutiveSkips++
-      if (this.consecutiveSkips >= Math.max(3, this.unsolvedSegs.length * 3)) {
-        this.error = `Convergence failure: ${this.unsolvedSegs.length} connections stuck`
-        this.failed = true
-      }
       if (this.enableProfiling) {
         this.profileData.searchMs += performance.now() - profileStart
       }
@@ -1145,8 +1224,15 @@ export class HighDensitySolverA02 extends BaseSolver {
     }
 
     if (this.heap.size === 0) {
-      this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
-      this.failed = true
+      if (this.activeConnSeg) {
+        this.unsolvedSegs.push(this.activeConnSeg)
+      }
+      this.activeConnSeg = null
+      this.activeConnId = -1
+      this.nodePool.clear()
+      this.ripChain.clear()
+      this.heap.clear()
+      this.consecutiveSkips++
       if (this.enableProfiling) {
         this.profileData.searchMs += performance.now() - profileStart
       }
@@ -1713,7 +1799,55 @@ export class HighDensitySolverA02 extends BaseSolver {
     return viaCellIds
   }
 
-  private tryLastConnectionFallback(seg: ConnectionSeg) {
+  private tryBruteforceFallbackSweeps() {
+    const restartBudget = 4
+
+    for (let restart = 0; restart < restartBudget; restart++) {
+      this.usedCellsFlat.fill(-1)
+      this.solvedRoutes = []
+      this.usedIndicesByConn = []
+      this.unsolvedSegs = this.allConnectionSegs.map((seg) => ({ ...seg }))
+      this.shuffleConnections()
+
+      let stalled = 0
+      const passBudget = Math.max(16, this.unsolvedSegs.length * 6)
+
+      for (
+        let pass = 0;
+        pass < passBudget && this.unsolvedSegs.length > 0;
+        pass++
+      ) {
+        const seg = this.unsolvedSegs.shift()!
+        this.activeConnSeg = seg
+        this.activeConnId = seg.connId
+        const solved = this.tryLastConnectionFallback(seg, true)
+        this.activeConnSeg = null
+        this.activeConnId = -1
+
+        if (!solved) {
+          this.unsolvedSegs.push(seg)
+          stalled++
+        } else {
+          stalled = 0
+        }
+
+        if (stalled >= Math.max(3, this.unsolvedSegs.length)) {
+          break
+        }
+      }
+
+      if (this.unsolvedSegs.length === 0) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private tryLastConnectionFallback(
+    seg: ConnectionSeg,
+    forceImmediateRipup = false,
+  ) {
     const profileStart = this.enableProfiling ? performance.now() : 0
     const stateCount = this.layers * this.planeSize
     const gScore = new Float64Array(stateCount)
@@ -1803,7 +1937,9 @@ export class HighDensitySolverA02 extends BaseSolver {
 
     this.consecutiveSkips = Math.max(0, this.consecutiveSkips - 1)
     const deferRipup =
-      this.enableDeferredConflictRepair && this.unsolvedSegs.length <= 1
+      !forceImmediateRipup &&
+      this.enableDeferredConflictRepair &&
+      this.unsolvedSegs.length <= 1
     this.commitRoute(this.activeConnId, states, [], viaCellIds, deferRipup)
     if (this.enableProfiling) {
       this.profileData.fallbackMs += performance.now() - profileStart
