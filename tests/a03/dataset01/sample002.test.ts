@@ -19,7 +19,7 @@ function createSolver() {
   return solver
 }
 
-test("A03 sample002 reproduces the current intersection result", () => {
+test("A03 sample002 has no same-layer intersections", () => {
   const solver = createSolver()
   const graphics = solver.visualize()
   const intersections = findSameLayerIntersections(solver.getOutput()).map(
@@ -38,20 +38,5 @@ test("A03 sample002 reproduces the current intersection result", () => {
   expect(solver.solved).toBeTrue()
   expect(solver.failed).toBeFalse()
   expect(graphics).toMatchGraphicsSvg(import.meta.path)
-  expect(intersections).toEqual([
-    {
-      trace1: "source_net_12_mst1",
-      trace2: "source_net_13_mst1",
-      z: 0,
-      type: "shared_point",
-      point: { x: -2.592379, y: 0.015373 },
-    },
-    {
-      trace1: "source_net_12_mst1",
-      trace2: "source_net_13_mst1",
-      z: 0,
-      type: "shared_point",
-      point: { x: -2.592379, y: 0.115994 },
-    },
-  ])
+  expect(intersections).toEqual([])
 })

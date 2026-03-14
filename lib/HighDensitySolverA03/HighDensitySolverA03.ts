@@ -381,6 +381,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   neighborCosts!: Float32Array
 
   private usedCellsFlat!: Int32Array
+  private sharedCellsFlat!: Array<number[] | undefined>
   private portOwnerFlat!: Int32Array
   private penalty2d!: Float64Array
   private ripStateBuckets!: number
@@ -408,6 +409,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private seqCounter = 0
 
   private _viaOccs: ConnId[] = []
+  private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
   private totalRipEvents = 0
@@ -593,6 +595,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
 
     this.usedCellsFlat = new Int32Array(totalCells).fill(-1)
+    this.sharedCellsFlat = Array.from({ length: totalCells }, () => undefined)
     this.portOwnerFlat = new Int32Array(totalCells).fill(-1)
     this.sharedCrossRootPortFlat = new Uint8Array(totalCells)
 
@@ -1212,9 +1215,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
 
       const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const fixedSameRoot =
-        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
-      const allowFixedOverlap = fixedSameRoot
+      const allowFixedOverlap = this.allowSharedUse(activeConn, fixedOwner)
       const seg = this.activeConnSeg
       const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
       if (
@@ -1244,9 +1245,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
 
       const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const fixedSameRoot =
-        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
-      const allowFixedOverlap = fixedSameRoot
+      const allowFixedOverlap = this.allowSharedUse(activeConn, fixedOwner)
       const seg = this.activeConnSeg
       const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
       if (
@@ -1260,9 +1259,9 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
 
-      const occ = this.usedCellsFlat[toFlatIdx]!
-      const allowSameRootOverlap = this.allowSharedUse(activeConn, occ)
-      if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
+      this.fillTraceOccupants(toFlatIdx, activeConn, this._cellOccs)
+      for (let i = 0; i < this._cellOccs.length; i++) {
+        const occ = this._cellOccs[i]!
         if (!this.ripChain.contains(head, occ)) {
           cost += this.hyperParameters.ripCost
           head = this.ripChain.append(head, occ)
@@ -1297,12 +1296,85 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
       for (let z = 0; z < this.layers; z++) {
-        const occ = this.usedCellsFlat[z * this.planeSize + occCellId]!
-        if (occ === -1 || occ === activeConn) continue
-        if (this.allowSharedUse(activeConn, occ)) continue
-        pushUnique(occs, occ)
+        this.pushFlatOccupants(
+          z * this.planeSize + occCellId,
+          activeConn,
+          occs,
+        )
       }
     })
+  }
+
+  private fillTraceOccupants(
+    flatIdx: number,
+    activeConn: ConnId,
+    out: ConnId[],
+  ): void {
+    out.length = 0
+    this.pushFlatOccupants(flatIdx, activeConn, out)
+  }
+
+  private pushFlatOccupants(
+    flatIdx: number,
+    activeConn: ConnId,
+    out: ConnId[],
+  ): void {
+    const primaryOcc = this.usedCellsFlat[flatIdx]!
+    if (
+      primaryOcc !== -1 &&
+      primaryOcc !== activeConn &&
+      !this.allowSharedUse(activeConn, primaryOcc)
+    ) {
+      pushUnique(out, primaryOcc)
+    }
+
+    const sharedOccs = this.sharedCellsFlat[flatIdx]
+    if (!sharedOccs) return
+    for (let i = 0; i < sharedOccs.length; i++) {
+      const occ = sharedOccs[i]!
+      if (occ === activeConn) continue
+      if (this.allowSharedUse(activeConn, occ)) continue
+      pushUnique(out, occ)
+    }
+  }
+
+  private addSharedOccupant(flatIdx: number, connId: ConnId): void {
+    const primaryOcc = this.usedCellsFlat[flatIdx]!
+    if (primaryOcc === connId) return
+    let sharedOccs = this.sharedCellsFlat[flatIdx]
+    if (!sharedOccs) {
+      sharedOccs = []
+      this.sharedCellsFlat[flatIdx] = sharedOccs
+    }
+    pushUnique(sharedOccs, connId)
+  }
+
+  private replaceOccupants(flatIdx: number, connId: ConnId): void {
+    this.usedCellsFlat[flatIdx] = connId
+    this.sharedCellsFlat[flatIdx] = undefined
+  }
+
+  private removeOccupant(flatIdx: number, connId: ConnId): void {
+    const sharedOccs = this.sharedCellsFlat[flatIdx]
+    if (this.usedCellsFlat[flatIdx] === connId) {
+      if (sharedOccs && sharedOccs.length > 0) {
+        this.usedCellsFlat[flatIdx] = sharedOccs.pop()!
+        if (sharedOccs.length === 0) {
+          this.sharedCellsFlat[flatIdx] = undefined
+        }
+      } else {
+        this.usedCellsFlat[flatIdx] = -1
+      }
+      return
+    }
+
+    if (!sharedOccs) return
+    const idx = sharedOccs.indexOf(connId)
+    if (idx === -1) return
+    sharedOccs.splice(idx, 1)
+    if (sharedOccs.length === 0) {
+      this.sharedCellsFlat[flatIdx] = undefined
+    }
   }
 
   private allowSharedUse(activeConn: ConnId, existingConn: ConnId) {
@@ -1587,7 +1659,11 @@ export class HighDensitySolverA03 extends BaseSolver {
       if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
         return
       }
-      this.usedCellsFlat[flatIdx] = connId
+      if (existing !== -1 && existing !== connId) {
+        this.addSharedOccupant(flatIdx, connId)
+      } else {
+        this.usedCellsFlat[flatIdx] = connId
+      }
       indices.push(flatIdx)
     })
   }
@@ -1616,12 +1692,21 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
       for (let z = 0; z < this.layers; z++) {
         const flatIdx = z * this.planeSize + cellId
-        const existing = this.usedCellsFlat[flatIdx]!
-        const allowSameRootOverlap = this.allowSharedUse(connId, existing)
-        if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
-          pushUnique(displacedByVias, existing)
+        this.fillTraceOccupants(flatIdx, connId, this._cellOccs)
+        if (this._cellOccs.length > 0) {
+          for (let i = 0; i < this._cellOccs.length; i++) {
+            pushUnique(displacedByVias, this._cellOccs[i]!)
+          }
+          this.replaceOccupants(flatIdx, connId)
+          indices.push(flatIdx)
+          continue
         }
-        this.usedCellsFlat[flatIdx] = connId
+        const existing = this.usedCellsFlat[flatIdx]!
+        if (existing !== -1 && existing !== connId) {
+          this.addSharedOccupant(flatIdx, connId)
+        } else {
+          this.usedCellsFlat[flatIdx] = connId
+        }
         indices.push(flatIdx)
       }
     })
@@ -1715,10 +1800,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     const indices = this.usedIndicesByConn[connId]
     if (indices) {
       for (let i = 0; i < indices.length; i++) {
-        const flatIdx = indices[i]!
-        if (this.usedCellsFlat[flatIdx] === connId) {
-          this.usedCellsFlat[flatIdx] = -1
-        }
+        this.removeOccupant(indices[i]!, connId)
       }
       this.usedIndicesByConn[connId] = undefined
     }
