@@ -11,7 +11,7 @@ import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
 } from "../lib/types"
-import { findSameLayerIntersections } from "../tests/fixtures/validateNoIntersections"
+import { findRouteGeometryViolations } from "../tests/fixtures/validateNoIntersections"
 import type {
   Z04SampleResult,
   Z04SolverMode,
@@ -144,7 +144,7 @@ const runSingleSample = (
       iterations: 0,
       durationMs: 0,
       routes: 0,
-      intersectionCount: 0,
+      violationCount: 0,
       error: `Problem ${sampleIndex} not found`,
     }
   }
@@ -156,9 +156,9 @@ const runSingleSample = (
   solver.solve()
   const durationMs = performance.now() - start
   const routes = solver.getOutput()
-  const intersections = findSameLayerIntersections(routes)
-  const intersectionCount = intersections.length
-  const valid = solver.solved && intersectionCount === 0
+  const violations = findRouteGeometryViolations(routes)
+  const violationCount = violations.length
+  const valid = solver.solved && violationCount === 0
 
   return {
     type: "result",
@@ -170,7 +170,7 @@ const runSingleSample = (
     iterations: solver.iterations,
     durationMs,
     routes: routes.length,
-    intersectionCount,
+    violationCount,
     error: solver.error,
     gridStats: options.collectStats
       ? normalizeGridStats(solver.gridStats)

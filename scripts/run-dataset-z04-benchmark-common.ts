@@ -16,7 +16,7 @@ export type Z04SampleResult = {
   iterations: number
   durationMs: number
   routes: number
-  intersectionCount: number
+  violationCount: number
   error: string | null
   gridStats?: {
     cells: number
@@ -185,7 +185,7 @@ Examples:
                 ? "failed"
                 : "incomplete"
           console.log(
-            `[worker ${workerIndex + 1}] problem ${result.problemId} (${result.sampleIndex + 1}/${sampleCount}): ${status} in ${result.durationMs.toFixed(1)}ms (iterations=${result.iterations}, routes=${result.routes}, intersections=${result.intersectionCount}) | completed=${completedCountSoFar}/${processedCount} (${completionRateSoFar.toFixed(1)}%), valid=${validCountSoFar}/${processedCount} (${validRateSoFar.toFixed(1)}%)`,
+            `[worker ${workerIndex + 1}] problem ${result.problemId} (${result.sampleIndex + 1}/${sampleCount}): ${status} in ${result.durationMs.toFixed(1)}ms (iterations=${result.iterations}, routes=${result.routes}, violations=${result.violationCount}) | completed=${completedCountSoFar}/${processedCount} (${completionRateSoFar.toFixed(1)}%), valid=${validCountSoFar}/${processedCount} (${validRateSoFar.toFixed(1)}%)`,
           )
           if (result.error) {
             console.log(`  error: ${result.error}`)
