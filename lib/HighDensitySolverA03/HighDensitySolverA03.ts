@@ -840,7 +840,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     const bottom = this.regions[REGION_BOTTOM]!
     const middle = this.regions[REGION_MIDDLE]!
 
-    if (left.cols > 0 && top.cols > 0) {
+    if (left.rows > 0 && left.cols > 0 && top.rows > 0 && top.cols > 0) {
       for (let globalRow = 0; globalRow < this.bandRows; globalRow++) {
         addBidirectionalEdge(
           this.cellIdFor(REGION_LEFT, globalRow, left.cols - 1),
@@ -849,7 +849,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (top.cols > 0 && right.cols > 0) {
+    if (top.rows > 0 && top.cols > 0 && right.rows > 0 && right.cols > 0) {
       for (let globalRow = 0; globalRow < this.bandRows; globalRow++) {
         addBidirectionalEdge(
           this.cellIdFor(REGION_TOP, globalRow, top.cols - 1),
@@ -858,7 +858,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (left.cols > 0 && bottom.cols > 0) {
+    if (left.rows > 0 && left.cols > 0 && bottom.rows > 0 && bottom.cols > 0) {
       for (
         let globalRow = this.fineRows - this.bandRows;
         globalRow < this.fineRows;
@@ -875,7 +875,12 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (bottom.cols > 0 && right.cols > 0) {
+    if (
+      bottom.rows > 0 &&
+      bottom.cols > 0 &&
+      right.rows > 0 &&
+      right.cols > 0
+    ) {
       for (
         let globalRow = this.fineRows - this.bandRows;
         globalRow < this.fineRows;
@@ -892,7 +897,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (left.cols > 0 && middle.cols > 0) {
+    if (left.rows > 0 && left.cols > 0 && middle.rows > 0 && middle.cols > 0) {
       for (
         let globalRow = this.bandRows;
         globalRow < this.fineRows - this.bandRows;
@@ -909,7 +914,12 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (right.cols > 0 && middle.cols > 0) {
+    if (
+      right.rows > 0 &&
+      right.cols > 0 &&
+      middle.rows > 0 &&
+      middle.cols > 0
+    ) {
       for (
         let globalRow = this.bandRows;
         globalRow < this.fineRows - this.bandRows;
@@ -926,7 +936,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (top.cols > 0 && middle.rows > 0) {
+    if (top.rows > 0 && top.cols > 0 && middle.rows > 0 && middle.cols > 0) {
       for (
         let globalCol = this.bandCols;
         globalCol < this.fineCols - this.bandCols;
@@ -943,7 +953,12 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
 
-    if (bottom.cols > 0 && middle.rows > 0) {
+    if (
+      bottom.rows > 0 &&
+      bottom.cols > 0 &&
+      middle.rows > 0 &&
+      middle.cols > 0
+    ) {
       for (
         let globalCol = this.bandCols;
         globalCol < this.fineCols - this.bandCols;
