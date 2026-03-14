@@ -1296,11 +1296,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
       for (let z = 0; z < this.layers; z++) {
-        this.pushFlatOccupants(
-          z * this.planeSize + occCellId,
-          activeConn,
-          occs,
-        )
+        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
       }
     })
   }
