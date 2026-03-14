@@ -31,4 +31,6 @@ test("repro03 snapshot", async () => {
 
   await expect(graphics).toMatchGraphicsSvg(import.meta.path)
   expect(solver.iterations).toBeGreaterThan(0)
+  expect(solver.solved).toBeTrue()
+  expect(solver.failed).toBeFalse()
 })
