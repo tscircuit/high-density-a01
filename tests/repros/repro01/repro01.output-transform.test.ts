@@ -53,6 +53,8 @@ test("A03 getOutput applies grid-to-bounds transform to solved routes", () => {
       connId: 0,
       states: Int32Array.from([startCellId, endCellId]),
       viaCellIds: Int32Array.from([startCellId, endCellId]),
+      startPoint: { x: internal.boundsMinX, y: internal.boundsMinY, z: 0 },
+      endPoint: { x: internal.boundsMaxX, y: internal.boundsMaxY, z: 0 },
     },
   ]
 
@@ -67,4 +69,38 @@ test("A03 getOutput applies grid-to-bounds transform to solved routes", () => {
   expect(route!.vias[0]!.y).toBeCloseTo(internal.boundsMinY, 6)
   expect(route!.vias[1]!.x).toBeCloseTo(internal.boundsMaxX, 6)
   expect(route!.vias[1]!.y).toBeCloseTo(internal.boundsMaxY, 6)
+})
+
+test("A03 getOutput preserves exact user-provided route endpoints", () => {
+  const solver = new HighDensitySolverA03({
+    ...defaultA03Params,
+    nodeWithPortPoints: repro01.nodeWithPortPoints,
+  })
+  solver.setup()
+
+  const internal = solver as any
+  const startCellId = 0
+  const endCellId = internal.cellCenterX.length - 1
+  const startPoint = { x: -0.237, y: -0.191, z: 0 }
+  const endPoint = { x: 0.243, y: 0.217, z: 1 }
+
+  internal.solvedRoutes = [
+    {
+      connId: 0,
+      states: Int32Array.from([
+        startCellId,
+        Math.floor(internal.planeSize / 2),
+        internal.planeSize + endCellId,
+      ]),
+      viaCellIds: Int32Array.from([endCellId]),
+      startPoint,
+      endPoint,
+    },
+  ]
+
+  const [route] = solver.getOutput()
+
+  expect(route).toBeDefined()
+  expect(route!.route[0]).toEqual(startPoint)
+  expect(route!.route[route!.route.length - 1]).toEqual(endPoint)
 })

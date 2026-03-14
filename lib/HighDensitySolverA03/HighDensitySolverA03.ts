@@ -34,14 +34,18 @@ interface ConnectionSeg {
   connId: ConnId
   startZ: number
   startCellId: number
+  startPoint: { x: number; y: number; z: number }
   endZ: number
   endCellId: number
+  endPoint: { x: number; y: number; z: number }
 }
 
 interface SolvedRouteInternal {
   connId: ConnId
   states: Int32Array
   viaCellIds: Int32Array
+  startPoint: { x: number; y: number; z: number }
+  endPoint: { x: number; y: number; z: number }
 }
 
 interface HyperParameters {
@@ -1469,8 +1473,10 @@ export class HighDensitySolverA03 extends BaseSolver {
           connId,
           startZ: s.z,
           startCellId: s.cellId,
+          startPoint: pts[i]!,
           endZ: e.z,
           endCellId: e.cellId,
+          endPoint: pts[i + 1]!,
         })
       }
     }
@@ -1590,6 +1596,8 @@ export class HighDensitySolverA03 extends BaseSolver {
       connId,
       states: Int32Array.from(states),
       viaCellIds: Int32Array.from(viaCellIds),
+      startPoint: this.activeConnSeg!.startPoint,
+      endPoint: this.activeConnSeg!.endPoint,
     }
 
     for (let i = 0; i < displacedByVias.length; i++) {
@@ -1811,8 +1819,10 @@ export class HighDensitySolverA03 extends BaseSolver {
         connId,
         startZ,
         startCellId: first - startZ * this.planeSize,
+        startPoint: route.startPoint,
         endZ,
         endCellId: last - endZ * this.planeSize,
+        endPoint: route.endPoint,
       })
     }
   }
@@ -2019,23 +2029,30 @@ export class HighDensitySolverA03 extends BaseSolver {
       const route = this.solvedRoutes[connId]
       if (!route) continue
       const connName = this.connIdToName[connId]!
+      const points = Array.from(route.states, (state) => {
+        const z = Math.floor(state / this.planeSize)
+        const cellId = state - z * this.planeSize
+        const tp = applyAffineTransformToPoint(t, {
+          x: this.cellCenterX[cellId]!,
+          y: this.cellCenterY[cellId]!,
+        })
+        return {
+          x: tp.x,
+          y: tp.y,
+          z: this.layerToZ.get(z) ?? z,
+        }
+      })
+      if (points.length > 0) {
+        points[0] = { ...route.startPoint }
+        if (points.length > 1) {
+          points[points.length - 1] = { ...route.endPoint }
+        }
+      }
       result.push({
         connectionName: connName,
         traceThickness: this.traceThickness,
         viaDiameter: this.viaDiameter,
-        route: Array.from(route.states, (state) => {
-          const z = Math.floor(state / this.planeSize)
-          const cellId = state - z * this.planeSize
-          const tp = applyAffineTransformToPoint(t, {
-            x: this.cellCenterX[cellId]!,
-            y: this.cellCenterY[cellId]!,
-          })
-          return {
-            x: tp.x,
-            y: tp.y,
-            z: this.layerToZ.get(z) ?? z,
-          }
-        }),
+        route: points,
         vias: Array.from(route.viaCellIds, (cellId) =>
           applyAffineTransformToPoint(t, {
             x: this.cellCenterX[cellId]!,
