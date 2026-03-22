@@ -42,10 +42,7 @@
           "rootConnectionName": "source_net_16"
         }
       ],
-      "availableZ": [
-        0,
-        1
-      ]
+      "availableZ": [0, 1]
     },
     "highResolutionCellSize": 0.1,
     "highResolutionCellThickness": 8,
