@@ -655,7 +655,6 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.portOwnerFlat[flatIdx] = -2
       }
     }
-
     this.solvedRoutes = []
     this.usedIndicesByConn = []
     this.ripCount = []
@@ -1361,14 +1360,6 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
   }
 
-  private shouldSkipForeignFixedPort(flatIdx: number, connId: ConnId) {
-    const fixedOwner = this.portOwnerFlat[flatIdx]!
-    if (fixedOwner === connId) return false
-    if (fixedOwner === -2) return true
-    if (fixedOwner < 0) return false
-    return !this.allowSharedUse(connId, fixedOwner)
-  }
-
   private addSharedOccupant(flatIdx: number, connId: ConnId): void {
     const primaryOcc = this.usedCellsFlat[flatIdx]!
     if (primaryOcc === connId) return
@@ -1413,6 +1404,14 @@ export class HighDensitySolverA03 extends BaseSolver {
     const sameRoot =
       this.connIdToRootNet[existingConn] === this.connIdToRootNet[activeConn]
     return sameRoot
+  }
+
+  private shouldSkipFixedPortHalo(flatIdx: number, connId: ConnId) {
+    const fixedOwner = this.portOwnerFlat[flatIdx]!
+    if (fixedOwner === connId) return false
+    if (fixedOwner === -2) return true
+    if (fixedOwner < 0) return false
+    return !this.allowSharedUse(connId, fixedOwner)
   }
 
   private nextStamp(): void {
@@ -1691,7 +1690,10 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
       const flatIdx = z * this.planeSize + cellId
-      if (this.shouldSkipForeignFixedPort(flatIdx, connId)) {
+      if (
+        cellId !== sourceCellId &&
+        this.shouldSkipFixedPortHalo(flatIdx, connId)
+      ) {
         return
       }
       const existing = this.usedCellsFlat[flatIdx]!
@@ -1732,7 +1734,10 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
       for (let z = 0; z < this.layers; z++) {
         const flatIdx = z * this.planeSize + cellId
-        if (this.shouldSkipForeignFixedPort(flatIdx, connId)) {
+        if (
+          cellId !== sourceCellId &&
+          this.shouldSkipFixedPortHalo(flatIdx, connId)
+        ) {
           continue
         }
         this.fillTraceOccupants(flatIdx, connId, this._cellOccs)
