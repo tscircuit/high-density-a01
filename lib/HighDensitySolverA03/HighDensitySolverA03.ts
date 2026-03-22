@@ -1361,6 +1361,14 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
   }
 
+  private shouldSkipForeignFixedPort(flatIdx: number, connId: ConnId) {
+    const fixedOwner = this.portOwnerFlat[flatIdx]!
+    if (fixedOwner === connId) return false
+    if (fixedOwner === -2) return true
+    if (fixedOwner < 0) return false
+    return !this.allowSharedUse(connId, fixedOwner)
+  }
+
   private addSharedOccupant(flatIdx: number, connId: ConnId): void {
     const primaryOcc = this.usedCellsFlat[flatIdx]!
     if (primaryOcc === connId) return
@@ -1683,6 +1691,9 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
       const flatIdx = z * this.planeSize + cellId
+      if (this.shouldSkipForeignFixedPort(flatIdx, connId)) {
+        return
+      }
       const existing = this.usedCellsFlat[flatIdx]!
       const allowSameRootOverlap = this.allowSharedUse(connId, existing)
       if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
@@ -1721,6 +1732,9 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
       for (let z = 0; z < this.layers; z++) {
         const flatIdx = z * this.planeSize + cellId
+        if (this.shouldSkipForeignFixedPort(flatIdx, connId)) {
+          continue
+        }
         this.fillTraceOccupants(flatIdx, connId, this._cellOccs)
         if (this._cellOccs.length > 0) {
           for (let i = 0; i < this._cellOccs.length; i++) {

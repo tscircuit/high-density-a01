@@ -1053,6 +1053,18 @@ export class HighDensitySolverA01 extends BaseSolver {
     const rows = this.rows
     const cols = this.cols
     const used = this.usedCellsFlat
+    const shouldSkipForeignFixedPort = (flatIdx: number) => {
+      const fixedOwner = this.portOwnerFlat[flatIdx]!
+      if (fixedOwner === connId) return false
+      if (fixedOwner === -2) return true
+      if (fixedOwner < 0) return false
+      const sameRoot =
+        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[connId]
+      return !(
+        sameRoot &&
+        this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+      )
+    }
 
     for (let ci = 0; ci < cells.length; ci++) {
       const cell = cells[ci]!
@@ -1062,6 +1074,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           const c = cell.col + dc
           if (r < 0 || r >= rows || c < 0 || c >= cols) continue
           const flatIdx = (cell.z * rows + r) * cols + c
+          if (shouldSkipForeignFixedPort(flatIdx)) continue
           const existing = used[flatIdx]!
           const sameRoot =
             this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
@@ -1092,6 +1105,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           const c = via.col + offDc[oi]!
           if (r < 0 || r >= rows || c < 0 || c >= cols) continue
           const flatIdx = zBase + r * cols + c
+          if (shouldSkipForeignFixedPort(flatIdx)) continue
           const existing = used[flatIdx]!
           const sameRoot =
             this.connIdToRootNet[existing] === this.connIdToRootNet[connId]

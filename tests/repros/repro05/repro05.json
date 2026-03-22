@@ -42,7 +42,10 @@
           "rootConnectionName": "source_net_16"
         }
       ],
-      "availableZ": [0, 1]
+      "availableZ": [
+        0,
+        1
+      ]
     },
     "highResolutionCellSize": 0.1,
     "highResolutionCellThickness": 8,
@@ -50,7 +53,7 @@
     "viaDiameter": 0.3,
     "stepMultiplier": 1,
     "traceThickness": 0.1,
-    "traceMargin": 0.15,
+    "traceMargin": 0.1,
     "viaMinDistFromBorder": 0.15,
     "showPenaltyMap": false,
     "showUsedCellMap": false,

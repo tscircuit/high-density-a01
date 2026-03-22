@@ -5,7 +5,7 @@ import { defaultA03Params } from "../../../lib/default-params"
 import { HighDensitySolverA03 } from "../../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import repro05 from "./repro05.json"
 
-test("repro05 A03 stops when it exceeds MAX_RIPS", () => {
+test("repro05 A03 solves", () => {
   const input = Array.isArray(repro05) ? repro05[0] : repro05
   if (!input) {
     throw new Error("repro05 fixture is empty")
@@ -19,13 +19,13 @@ test("repro05 A03 stops when it exceeds MAX_RIPS", () => {
   solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
 
-  expect(solver.solved).toBeFalse()
-  expect(solver.failed).toBeTrue()
+  expect(solver.solved).toBeTrue()
+  expect(solver.failed).toBeFalse()
   console.log("A03 iterations used", solver.iterations)
-  expect(solver.error).toContain("MAX_RIPS")
+  expect(solver.error).toBeNull()
 })
 
-test("repro05 A01 stops when it exceeds MAX_RIPS", () => {
+test("repro05 A01 solves", () => {
   const input = Array.isArray(repro05) ? repro05[0] : repro05
   if (!input) {
     throw new Error("repro05 fixture is empty")
@@ -40,12 +40,13 @@ test("repro05 A01 stops when it exceeds MAX_RIPS", () => {
     viaMinDistFromBorder:
       input.viaMinDistFromBorder ?? defaultParams.viaMinDistFromBorder,
     nodeWithPortPoints: input.nodeWithPortPoints,
+    hyperParameters: input.hyperParameters,
   })
   solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
 
-  expect(solver.solved).toBeFalse()
-  expect(solver.failed).toBeTrue()
+  expect(solver.solved).toBeTrue()
+  expect(solver.failed).toBeFalse()
   console.log("A01 iterations used", solver.iterations)
-  expect(solver.error).toContain("MAX_RIPS")
+  expect(solver.error).toBeNull()
 })
