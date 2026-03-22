@@ -339,6 +339,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   highResolutionCellThickness: number
   lowResolutionCellSize: number
   viaDiameter: number
+  MAX_RIPS: number
   maxCellCount?: number
   traceThickness: number
   traceMargin: number
@@ -517,6 +518,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       ...props.hyperParameters,
     }
     this.MAX_ITERATIONS = 100e6
+    this.MAX_RIPS = 200
     this.initialPenaltyFn = props.initialPenaltyFn
   }
 
@@ -1591,6 +1593,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     for (let i = 0; i < this._rippedIds.length; i++) {
       this.ripTrace(this._rippedIds[i]!)
+      if (this.failed) return
     }
 
     const indices: number[] = []
@@ -1623,6 +1626,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     for (let i = 0; i < displacedByVias.length; i++) {
       this.ripTrace(displacedByVias[i]!)
+      if (this.failed) return
     }
 
     if (this._rippedIds.length > 0 || displacedByVias.length > 0) {
@@ -1806,6 +1810,11 @@ export class HighDensitySolverA03 extends BaseSolver {
     while (this.ripCount.length <= connId) this.ripCount.push(0)
     this.ripCount[connId]!++
     this.totalRipEvents++
+    if (this.totalRipEvents >= this.MAX_RIPS) {
+      this.error = `Convergence failure: exceeded MAX_RIPS ${this.MAX_RIPS}`
+      this.failed = true
+      return
+    }
 
     const route = this.solvedRoutes[connId]
     if (route) {
