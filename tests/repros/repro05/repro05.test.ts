@@ -21,6 +21,7 @@ test("repro05 A03 stops when it exceeds MAX_RIPS", () => {
 
   expect(solver.solved).toBeFalse()
   expect(solver.failed).toBeTrue()
+  console.log("A03 iterations used", solver.iterations)
   expect(solver.error).toContain("MAX_RIPS")
 })
 
@@ -45,5 +46,6 @@ test("repro05 A01 stops when it exceeds MAX_RIPS", () => {
 
   expect(solver.solved).toBeFalse()
   expect(solver.failed).toBeTrue()
+  console.log("A01 iterations used", solver.iterations)
   expect(solver.error).toContain("MAX_RIPS")
 })
