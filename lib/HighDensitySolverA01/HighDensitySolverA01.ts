@@ -4,6 +4,7 @@ import {
   applyAffineTransformToPoint,
   computeGridToAffineTransform,
 } from "../gridToAffineTransform"
+import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
 import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 
 // --- Interned connection ID ---
@@ -150,6 +151,7 @@ export interface HighDensitySolverA01Props {
   viaMinDistFromBorder?: number
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
+  effort?: number
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -176,6 +178,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   viaMinDistFromBorder: number
   showPenaltyMap: boolean
   showUsedCellMap: boolean
+  effort: number
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
@@ -244,6 +247,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private searchIterations = 0
   private consecutiveSkips = 0
   private penaltyCap!: number
+  private baseSearchBudgetIters!: number
 
   // --- Reusable scratch for computeMoveCostAndRips ---
   private _moveCost = 0
@@ -268,6 +272,13 @@ export class HighDensitySolverA01 extends BaseSolver {
   get openSet() {
     return { length: this.heap?.size ?? 0 }
   }
+  get gridStats() {
+    return {
+      cells: this.planeSize || 0,
+      layers: this.layers || 0,
+      states: (this.planeSize || 0) * (this.layers || 0),
+    }
+  }
 
   constructor(props: HighDensitySolverA01Props) {
     super()
@@ -280,6 +291,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 0.15
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
+    this.effort = props.effort ?? 1
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
@@ -308,6 +320,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         viaMinDistFromBorder: this.viaMinDistFromBorder,
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
+        effort: this.effort,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
       },
@@ -459,6 +472,15 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
     this.shuffleConnections()
+    const budget = computeMaxIterationsByNodeSizeAndConnectionCount({
+      planeSize: this.planeSize,
+      layers: this.layers,
+      connectionCount: this.unsolvedSegs.length,
+      effort: this.effort,
+      maxIterations: this.MAX_ITERATIONS,
+    })
+    this.baseSearchBudgetIters = budget.baseSearchBudgetIters
+    this.MAX_ITERATIONS = budget.maxIterationsIters
 
     // A* state
     this.activeConnSeg = null
@@ -520,10 +542,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     // 2. Per-search budget check
     this.searchIterations++
     const connRips = this.ripCount[this.activeConnId] ?? 0
-    const baseBudget = this.planeSize * this.layers * 50
-    const budget = Math.min(
-      baseBudget * (1 + connRips * 0.5),
-      this.planeSize * this.layers * 500,
+    const budget = Math.round(
+      this.baseSearchBudgetIters * (1 + Math.min(connRips, 10) * 0.25),
     )
     if (this.searchIterations > budget) {
       // Global penalty decay on budget-skip: gradually makes penalized zones
