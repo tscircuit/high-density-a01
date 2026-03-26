@@ -7,10 +7,6 @@ export interface MaxIterationsByNodeSizeAndConnectionCountInput {
 }
 
 export interface MaxIterationsByNodeSizeAndConnectionCountResult {
-  states: number
-  connectionCount: number
-  computedMaxIters: number
-  minIterationBudgetIters: number
   maxIterationsIters: number
   baseSearchBudgetIters: number
 }
@@ -58,10 +54,6 @@ export function computeMaxIterationsByNodeSizeAndConnectionCount(
   )
 
   return {
-    states,
-    connectionCount,
-    computedMaxIters,
-    minIterationBudgetIters,
     maxIterationsIters,
     baseSearchBudgetIters,
   }

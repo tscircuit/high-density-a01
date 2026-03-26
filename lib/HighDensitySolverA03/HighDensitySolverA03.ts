@@ -348,7 +348,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   viaMinDistFromBorder: number
   showPenaltyMap: boolean
   showUsedCellMap: boolean
-  effortMultiplier: number
+  effort: number
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
@@ -424,10 +424,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private searchIterations = 0
   private consecutiveSkips = 0
   private penaltyCap!: number
-  private connectionCount = 0
-  private computedMaxIters = 1
-  private minIterationBudgetIters = 1
-  private baseSearchBudgetIters = 50_000
+  private baseSearchBudgetIters!: number
 
   private _moveCost = 0
   private _moveRippedHead = -1
@@ -485,12 +482,6 @@ export class HighDensitySolverA03 extends BaseSolver {
       cells: this.planeSize || 0,
       layers: this.layers || 0,
       states: (this.planeSize || 0) * (this.layers || 0),
-      effortMultiplier: this.effortMultiplier,
-      connectionCount: this.connectionCount,
-      computedMaxIters: this.computedMaxIters,
-      minIterationBudgetIters: this.minIterationBudgetIters,
-      maxIterationsIters: this.MAX_ITERATIONS,
-      baseSearchBudgetIters: this.baseSearchBudgetIters,
       ripStateBuckets: this.ripStateBuckets || 0,
       neighborEdges: this.neighborIds?.length ?? 0,
       regionCounts: this.regions
@@ -520,10 +511,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 0.15
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
-    this.effortMultiplier =
-      Number.isFinite(props.effort) && (props.effort ?? 0) > 0
-        ? (props.effort as number)
-        : 1
+    this.effort = props.effort ?? 1
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
@@ -554,7 +542,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         viaMinDistFromBorder: this.viaMinDistFromBorder,
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
-        effort: this.effortMultiplier,
+        effort: this.effort,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
       },
@@ -684,12 +672,9 @@ export class HighDensitySolverA03 extends BaseSolver {
       planeSize: this.planeSize,
       layers: this.layers,
       connectionCount: this.unsolvedSegs.length,
-      effort: this.effortMultiplier,
+      effort: this.effort,
       maxIterations: this.MAX_ITERATIONS,
     })
-    this.connectionCount = budget.connectionCount
-    this.computedMaxIters = budget.computedMaxIters
-    this.minIterationBudgetIters = budget.minIterationBudgetIters
     this.baseSearchBudgetIters = budget.baseSearchBudgetIters
     this.MAX_ITERATIONS = budget.maxIterationsIters
 
