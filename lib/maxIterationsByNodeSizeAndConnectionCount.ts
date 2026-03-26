@@ -18,11 +18,9 @@ function clamp(value: number, min: number, max: number) {
 export function computeMaxIterationsByNodeSizeAndConnectionCount(
   input: MaxIterationsByNodeSizeAndConnectionCountInput,
 ): MaxIterationsByNodeSizeAndConnectionCountResult {
-  const states = Math.max(1, input.planeSize * input.layers)
-  const connectionCount = Math.max(0, input.connectionCount)
+  const states = input.planeSize * input.layers
+  const connectionCount = input.connectionCount
   const connectionFactor = Math.sqrt(connectionCount)
-  const effortMultiplier =
-    Number.isFinite(input.effort) && input.effort > 0 ? input.effort : 1
   const requestedMaxIterations = Math.max(1, input.maxIterations)
 
   const baseComputedMaxIterations = clamp(
@@ -31,7 +29,7 @@ export function computeMaxIterationsByNodeSizeAndConnectionCount(
     12_000_000,
   )
   const computedMaxIters = clamp(
-    Math.round(baseComputedMaxIterations * effortMultiplier),
+    Math.round(baseComputedMaxIterations * input.effort),
     150_000,
     12_000_000,
   )
@@ -48,7 +46,7 @@ export function computeMaxIterationsByNodeSizeAndConnectionCount(
     ),
   )
   const baseSearchBudgetIters = clamp(
-    Math.round(states * (10 + 0.8 * connectionFactor) * effortMultiplier),
+    Math.round(states * (10 + 0.8 * connectionFactor) * input.effort),
     50_000,
     4_000_000,
   )
