@@ -664,7 +664,6 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.solvedRoutes = []
     this.usedIndicesByConn = []
     this.ripCount = []
-    this.totalRipEvents = 0
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
     this.shuffleConnections()
