@@ -3,14 +3,16 @@ import { useEffect, useState } from "react"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import { HighDensitySolverA02 } from "../../lib/HighDensitySolverA02/HighDensitySolverA02"
 import { HighDensitySolverA03 } from "../../lib/HighDensitySolverA03/HighDensitySolverA03"
+import { HighDensitySolverA04 } from "../../lib/HighDensitySolverA04/HighDensitySolverA04"
 import {
+  defaultA04Params,
   defaultA02Params,
   defaultA03Params,
   defaultParams,
 } from "../../lib/default-params"
 import type { NodeWithPortPoints } from "../../lib/types"
 
-type SolverKey = "a01" | "a02" | "a03"
+type SolverKey = "a01" | "a02" | "a03" | "a04"
 
 const STORAGE_KEY = "high-density:selected-solver"
 
@@ -18,10 +20,11 @@ const SOLVER_OPTIONS: Array<{ label: string; value: SolverKey }> = [
   { label: "A01", value: "a01" },
   { label: "A02", value: "a02" },
   { label: "A03", value: "a03" },
+  { label: "A04", value: "a04" },
 ]
 
 const isSolverKey = (value: string | null): value is SolverKey =>
-  value === "a01" || value === "a02" || value === "a03"
+  value === "a01" || value === "a02" || value === "a03" || value === "a04"
 
 const getInitialSolverKey = (fallback: SolverKey) => {
   if (typeof window === "undefined") return fallback
@@ -77,6 +80,7 @@ export function SolverDebugger({
             | HighDensitySolverA01
             | HighDensitySolverA02
             | HighDensitySolverA03
+            | HighDensitySolverA04
 
           switch (solverKey) {
             case "a01":
@@ -94,6 +98,12 @@ export function SolverDebugger({
             case "a03":
               solver = new HighDensitySolverA03({
                 ...defaultA03Params,
+                nodeWithPortPoints,
+              })
+              break
+            case "a04":
+              solver = new HighDensitySolverA04({
+                ...defaultA04Params,
                 nodeWithPortPoints,
               })
               break

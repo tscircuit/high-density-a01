@@ -1,6 +1,7 @@
 import type { HighDensitySolverA01Props } from "./HighDensitySolverA01/HighDensitySolverA01"
 import type { HighDensitySolverA02Props } from "./HighDensitySolverA02/HighDensitySolverA02"
 import type { HighDensitySolverA03Props } from "./HighDensitySolverA03/HighDensitySolverA03"
+import type { HighDensitySolverA04Props } from "./HighDensitySolverA04/HighDensitySolverA04"
 
 export const defaultParams: Pick<
   HighDensitySolverA01Props,
@@ -49,6 +50,21 @@ export const defaultA03Params: Pick<
   highResolutionCellSize: 0.1,
   highResolutionCellThickness: 8,
   lowResolutionCellSize: 0.4,
+  traceMargin: 0.15,
+  traceThickness: 0.1,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+}
+
+export const defaultA04Params: Pick<
+  HighDensitySolverA04Props,
+  | "cellSizeMm"
+  | "traceMargin"
+  | "traceThickness"
+  | "viaDiameter"
+  | "viaMinDistFromBorder"
+> = {
+  cellSizeMm: 0.1,
   traceMargin: 0.15,
   traceThickness: 0.1,
   viaDiameter: 0.3,

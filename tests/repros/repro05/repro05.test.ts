@@ -1,10 +1,12 @@
 import { expect, setDefaultTimeout, test } from "bun:test"
 import "bun-match-svg"
 import "graphics-debug/matcher"
+import { defaultA04Params } from "../../../lib/default-params"
 import { defaultA03Params } from "../../../lib/default-params"
 import { defaultParams } from "../../../lib/default-params"
 import { HighDensitySolverA01 } from "../../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import { HighDensitySolverA03 } from "../../../lib/HighDensitySolverA03/HighDensitySolverA03"
+import { HighDensitySolverA04 } from "../../../lib/HighDensitySolverA04/HighDensitySolverA04"
 import repro05 from "./repro05.json"
 
 setDefaultTimeout(120_000)
@@ -66,5 +68,27 @@ test("repro05 A01 solves", () => {
   expect(solver.solved).toBeTrue()
   expect(solver.failed).toBeFalse()
   console.log("A01 iterations used", solver.iterations)
+  expect(solver.error).toBeNull()
+})
+
+test("repro05 A04 solves", () => {
+  const input = getInput()
+
+  const solver = new HighDensitySolverA04({
+    ...defaultA04Params,
+    cellSizeMm: input.highResolutionCellSize ?? defaultA04Params.cellSizeMm,
+    traceMargin: input.traceMargin ?? defaultA04Params.traceMargin,
+    traceThickness: input.traceThickness ?? defaultA04Params.traceThickness,
+    viaDiameter: input.viaDiameter ?? defaultA04Params.viaDiameter,
+    viaMinDistFromBorder:
+      input.viaMinDistFromBorder ?? defaultA04Params.viaMinDistFromBorder,
+    nodeWithPortPoints: input.nodeWithPortPoints,
+    hyperParameters: input.hyperParameters,
+  })
+  solver.solve()
+
+  expect(solver.solved).toBeTrue()
+  expect(solver.failed).toBeFalse()
+  console.log("A04 iterations used", solver.iterations)
   expect(solver.error).toBeNull()
 })
