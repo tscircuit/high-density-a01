@@ -15,5 +15,5 @@ test("repro06 A04 solves with default geometry", () => {
   expect(solver.solved).toBeTrue()
   expect(solver.failed).toBeFalse()
   expect(solver.error).toBeNull()
-  expect(solver.iterations).toBeLessThan(10_000_000)
+  expect(solver.iterations).toBeLessThan(5_000_000)
 })

@@ -22,6 +22,7 @@ interface A04CellRef {
 interface A04InternalState {
   rows: number
   cols: number
+  penalty2d: Float64Array
   unsolvedSegs: A04ConnectionSeg[]
   nodeWithPortPoints: {
     portPoints: Array<{ x: number; y: number; z: number }>
@@ -34,6 +35,7 @@ export interface HighDensitySolverA04Props extends HighDensitySolverA01Props {
   iterationMultiplier?: number
   maxExtendedIterations?: number
   maxExtendedRips?: number
+  initialCornerCongestionPenalty?: number
 }
 
 export class HighDensitySolverA04 extends HighDensitySolverA01 {
@@ -41,6 +43,7 @@ export class HighDensitySolverA04 extends HighDensitySolverA01 {
   iterationMultiplier: number
   maxExtendedIterations: number
   maxExtendedRips: number
+  initialCornerCongestionPenalty: number
 
   constructor(props: HighDensitySolverA04Props) {
     const minEffort = props.minEffort ?? 20
@@ -52,6 +55,8 @@ export class HighDensitySolverA04 extends HighDensitySolverA01 {
     this.iterationMultiplier = props.iterationMultiplier ?? 8
     this.maxExtendedIterations = props.maxExtendedIterations ?? 50_000_000
     this.maxExtendedRips = props.maxExtendedRips ?? 20_000
+    this.initialCornerCongestionPenalty =
+      props.initialCornerCongestionPenalty ?? 0.1
   }
 
   override getConstructorParams(): [HighDensitySolverA04Props] {
@@ -63,6 +68,7 @@ export class HighDensitySolverA04 extends HighDensitySolverA01 {
         iterationMultiplier: this.iterationMultiplier,
         maxExtendedIterations: this.maxExtendedIterations,
         maxExtendedRips: this.maxExtendedRips,
+        initialCornerCongestionPenalty: this.initialCornerCongestionPenalty,
       },
     ]
   }
@@ -72,6 +78,7 @@ export class HighDensitySolverA04 extends HighDensitySolverA01 {
     if (this.failed) return
 
     this.prioritizeInitialConnections()
+    this.applyInitialCornerCongestionMap()
 
     const computedBudget = this.MAX_ITERATIONS
     const scaledBudget = Math.round(computedBudget * this.iterationMultiplier)
@@ -151,5 +158,112 @@ export class HighDensitySolverA04 extends HighDensitySolverA01 {
 
       return a.connId - b.connId
     })
+  }
+
+  private applyInitialCornerCongestionMap(): void {
+    if (this.initialCornerCongestionPenalty <= 0) return
+
+    const state = this as unknown as A04InternalState
+    const rows = state.rows
+    const cols = state.cols
+    const penalty2d = state.penalty2d
+
+    const sideCounts = {
+      leftByRow: new Int32Array(rows),
+      rightByRow: new Int32Array(rows),
+      topByCol: new Int32Array(cols),
+      bottomByCol: new Int32Array(cols),
+    }
+
+    const pointToCell = state.pointToCell.bind(this)
+    for (let i = 0; i < state.nodeWithPortPoints.portPoints.length; i++) {
+      const port = pointToCell(state.nodeWithPortPoints.portPoints[i]!)
+      const dLeft = port.col
+      const dRight = cols - 1 - port.col
+      const dTop = port.row
+      const dBottom = rows - 1 - port.row
+      const minBorderDistance = Math.min(dLeft, dRight, dTop, dBottom)
+
+      if (minBorderDistance === dLeft) {
+        sideCounts.leftByRow[port.row]!++
+      } else if (minBorderDistance === dRight) {
+        sideCounts.rightByRow[port.row]!++
+      } else if (minBorderDistance === dTop) {
+        sideCounts.topByCol[port.col]!++
+      } else {
+        sideCounts.bottomByCol[port.col]!++
+      }
+    }
+
+    const prefix = (counts: Int32Array) => {
+      const out = new Int32Array(counts.length)
+      let running = 0
+      for (let i = 0; i < counts.length; i++) {
+        running += counts[i]!
+        out[i] = running
+      }
+      return out
+    }
+
+    const leftPrefix = prefix(sideCounts.leftByRow)
+    const rightPrefix = prefix(sideCounts.rightByRow)
+    const topPrefix = prefix(sideCounts.topByCol)
+    const bottomPrefix = prefix(sideCounts.bottomByCol)
+
+    const leftTotal = leftPrefix[leftPrefix.length - 1] ?? 0
+    const rightTotal = rightPrefix[rightPrefix.length - 1] ?? 0
+    const topTotal = topPrefix[topPrefix.length - 1] ?? 0
+    const bottomTotal = bottomPrefix[bottomPrefix.length - 1] ?? 0
+
+    const getPrefixValue = (values: Int32Array, idx: number) =>
+      idx >= 0 ? values[idx] ?? 0 : 0
+
+    const getSuffixValue = (values: Int32Array, total: number, idx: number) =>
+      total - getPrefixValue(values, idx - 1)
+
+    const cornerPressure = new Float64Array(rows * cols)
+    let maxPressure = 0
+
+    for (let row = 0; row < rows; row++) {
+      const leftAtOrAbove = leftPrefix[row] ?? 0
+      const leftAtOrBelow = getSuffixValue(leftPrefix, leftTotal, row)
+      const rightAtOrAbove = rightPrefix[row] ?? 0
+      const rightAtOrBelow = getSuffixValue(rightPrefix, rightTotal, row)
+
+      for (let col = 0; col < cols; col++) {
+        const topAtOrLeft = topPrefix[col] ?? 0
+        const topAtOrRight = getSuffixValue(topPrefix, topTotal, col)
+        const bottomAtOrLeft = bottomPrefix[col] ?? 0
+        const bottomAtOrRight = getSuffixValue(bottomPrefix, bottomTotal, col)
+
+        const topLeftPressure =
+          (leftAtOrAbove + topAtOrLeft) / (row + col + 2)
+        const bottomLeftPressure =
+          (leftAtOrBelow + bottomAtOrLeft) / (rows - row + col + 1)
+        const topRightPressure =
+          (rightAtOrAbove + topAtOrRight) / (row + (cols - col) + 1)
+        const bottomRightPressure =
+          (rightAtOrBelow + bottomAtOrRight) / (rows - row + cols - col)
+
+        const pressure = Math.max(
+          topLeftPressure,
+          bottomLeftPressure,
+          topRightPressure,
+          bottomRightPressure,
+        )
+        const idx = row * cols + col
+        cornerPressure[idx] = pressure
+        if (pressure > maxPressure) maxPressure = pressure
+      }
+    }
+
+    if (maxPressure <= 0) return
+
+    // Keep the seeded congestion soft: it should only bias the search away
+    // from oversubscribed corners, not override the real routing costs.
+    const penaltyScale = this.initialCornerCongestionPenalty / maxPressure
+    for (let i = 0; i < cornerPressure.length; i++) {
+      penalty2d[i] = penalty2d[i]! + cornerPressure[i]! * penaltyScale
+    }
   }
 }
