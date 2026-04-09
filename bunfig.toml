@@ -1,4 +1,5 @@
-# [test]
+[test]
+root = "./tests"
 # preload = ["./tests/fixtures/preload.ts"]
 
 [install.lockfile]

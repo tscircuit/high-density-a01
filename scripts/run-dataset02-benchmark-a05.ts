@@ -29,6 +29,8 @@ type WorkerOptions = {
   maxIterations: number
   ripCost?: number
   greedyMultiplier?: number
+  borderPenaltyStrength?: number
+  borderPenaltyFalloff?: number
 }
 
 type WorkerRequest =
@@ -50,12 +52,18 @@ const ripCostArg = args.find((arg) => arg.startsWith("--rip-cost="))
 const greedyMultiplierArg = args.find((arg) =>
   arg.startsWith("--greedy-multiplier="),
 )
+const borderPenaltyStrengthArg = args.find((arg) =>
+  arg.startsWith("--border-penalty-strength="),
+)
+const borderPenaltyFalloffArg = args.find((arg) =>
+  arg.startsWith("--border-penalty-falloff="),
+)
 const showStats = args.includes("--stats")
 const showHelp = args.includes("--help") || args.includes("-h")
 
 if (showHelp) {
   console.log(`
-Usage: bun run scripts/run-dataset02-benchmark-a03.ts [options]
+Usage: bun run scripts/run-dataset02-benchmark-a05.ts [options]
 
 Options:
   --concurrency=N      Number of worker loops (default: 4)
@@ -65,13 +73,18 @@ Options:
   --rip-cost=N         Override hyperParameters.ripCost
   --greedy-multiplier=N
                        Override hyperParameters.greedyMultiplier
+  --border-penalty-strength=N
+                       Override A05 default border penalty strength
+  --border-penalty-falloff=N
+                       Override A05 default border penalty falloff
   --stats              Print average grid stats
   --help, -h           Show this help message
 
 Examples:
-  bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
-  bun run scripts/run-dataset02-benchmark-a03.ts --limit=100 --mode=repro
-  bun run scripts/run-dataset02-benchmark-a03.ts --rip-cost=4 --greedy-multiplier=1.4
+  bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4
+  bun run scripts/run-dataset02-benchmark-a05.ts --limit=100 --mode=repro
+  bun run scripts/run-dataset02-benchmark-a05.ts --rip-cost=4 --greedy-multiplier=1.4
+  bun run scripts/run-dataset02-benchmark-a05.ts --border-penalty-strength=0.1 --border-penalty-falloff=0.08
 `)
   process.exit(0)
 }
@@ -105,6 +118,18 @@ const parsedGreedyMultiplier = greedyMultiplierArg
 const greedyMultiplier = Number.isFinite(parsedGreedyMultiplier)
   ? parsedGreedyMultiplier
   : undefined
+const parsedBorderPenaltyStrength = borderPenaltyStrengthArg
+  ? Number.parseFloat(borderPenaltyStrengthArg.split("=")[1] ?? "")
+  : Number.NaN
+const borderPenaltyStrength = Number.isFinite(parsedBorderPenaltyStrength)
+  ? parsedBorderPenaltyStrength
+  : undefined
+const parsedBorderPenaltyFalloff = borderPenaltyFalloffArg
+  ? Number.parseFloat(borderPenaltyFalloffArg.split("=")[1] ?? "")
+  : Number.NaN
+const borderPenaltyFalloff = Number.isFinite(parsedBorderPenaltyFalloff)
+  ? parsedBorderPenaltyFalloff
+  : undefined
 
 const samples = Number.isFinite(limit)
   ? dataset02.slice(0, Math.max(0, limit ?? 0))
@@ -123,6 +148,8 @@ const workerOptions: WorkerOptions = {
   maxIterations,
   ripCost,
   greedyMultiplier,
+  borderPenaltyStrength,
+  borderPenaltyFalloff,
 }
 
 let nextJobPointer = 0
@@ -131,7 +158,7 @@ let solvedCountSoFar = 0
 let failedCountSoFar = 0
 
 const workerScriptUrl = new URL(
-  "./run-dataset02-benchmark-a03.worker.ts",
+  "./run-dataset02-benchmark-a05.worker.ts",
   import.meta.url,
 )
 
@@ -208,7 +235,7 @@ const runWithWorkers = async () => {
 
 const benchmarkStart = performance.now()
 
-console.log("Dataset02 benchmark for HighDensitySolverA03")
+console.log("Dataset02 benchmark for HighDensitySolverA05")
 console.log("=".repeat(72))
 console.log(`Samples: ${samples.length}`)
 console.log(`Workers: ${workerCount}`)
@@ -217,6 +244,12 @@ console.log(`Max iterations: ${maxIterations}`)
 if (ripCost !== undefined) console.log(`ripCost override: ${ripCost}`)
 if (greedyMultiplier !== undefined) {
   console.log(`greedyMultiplier override: ${greedyMultiplier}`)
+}
+if (borderPenaltyStrength !== undefined) {
+  console.log(`borderPenaltyStrength override: ${borderPenaltyStrength}`)
+}
+if (borderPenaltyFalloff !== undefined) {
+  console.log(`borderPenaltyFalloff override: ${borderPenaltyFalloff}`)
 }
 console.log(`Grid stats: ${showStats ? "on" : "off"}`)
 console.log()

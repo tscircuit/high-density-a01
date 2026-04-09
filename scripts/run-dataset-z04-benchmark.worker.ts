@@ -1,9 +1,11 @@
 import { HighDensitySolverA01 } from "../lib/HighDensitySolverA01/HighDensitySolverA01"
 import { HighDensitySolverA02 } from "../lib/HighDensitySolverA02/HighDensitySolverA02"
 import { HighDensitySolverA03 } from "../lib/HighDensitySolverA03/HighDensitySolverA03"
+import { HighDensitySolverA05 } from "../lib/HighDensitySolverA05/HighDensitySolverA05"
 import {
   defaultA02Params,
   defaultA03Params,
+  defaultA05Params,
   defaultParams,
 } from "../lib/default-params"
 // @ts-ignore
@@ -80,6 +82,18 @@ const createSolver = (
     case "a03":
       return new HighDensitySolverA03({
         ...defaultA03Params,
+        nodeWithPortPoints,
+        hyperParameters:
+          options.solverMode === "repro"
+            ? {
+                ripCost: 1,
+                greedyMultiplier: 1.2,
+              }
+            : undefined,
+      })
+    case "a05":
+      return new HighDensitySolverA05({
+        ...defaultA05Params,
         nodeWithPortPoints,
         hyperParameters:
           options.solverMode === "repro"

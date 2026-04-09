@@ -3,8 +3,8 @@ import {
   convertDataset02SampleToNodeWithPortPoints,
   type Dataset02Sample,
 } from "../lib/dataset02/convertDataset02SampleToNodeWithPortPoints"
-import { defaultA03Params } from "../lib/default-params"
-import { HighDensitySolverA03 } from "../lib/HighDensitySolverA03/HighDensitySolverA03"
+import { defaultA05Params } from "../lib/default-params"
+import { HighDensitySolverA05 } from "../lib/HighDensitySolverA05/HighDensitySolverA05"
 
 const dataset02 = dataset02Json as Dataset02Sample[]
 
@@ -15,6 +15,8 @@ type WorkerOptions = {
   maxIterations: number
   ripCost?: number
   greedyMultiplier?: number
+  borderPenaltyStrength?: number
+  borderPenaltyFalloff?: number
 }
 
 type RunRequest = {
@@ -87,9 +89,15 @@ const runSingleSample = (
       : { greedyMultiplier: options.greedyMultiplier }),
   }
 
-  const solver = new HighDensitySolverA03({
-    ...defaultA03Params,
+  const solver = new HighDensitySolverA05({
+    ...defaultA05Params,
     nodeWithPortPoints,
+    ...(options.borderPenaltyStrength === undefined
+      ? {}
+      : { borderPenaltyStrength: options.borderPenaltyStrength }),
+    ...(options.borderPenaltyFalloff === undefined
+      ? {}
+      : { borderPenaltyFalloff: options.borderPenaltyFalloff }),
     hyperParameters:
       Object.keys(hyperParameters).length > 0 ? hyperParameters : undefined,
   })
