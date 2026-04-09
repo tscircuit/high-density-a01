@@ -91,6 +91,10 @@ const BORDER_REPULSION_TAIL_RATIO = 0.08
 const BORDER_REPULSION_FALLOFF = 20
 const VIA_BORDER_REPULSION_TAIL_RATIO = 0.015
 const VIA_BORDER_REPULSION_FALLOFF = 80
+const VIA_CENTER_ATTRACTION_STRENGTH = 0.05
+const VIA_CENTER_EDGE_ATTRACTION_BOOST = 0.08
+const VIA_CENTER_EDGE_ATTRACTION_FALLOFF_DISTANCE = 1.5
+const MAX_VIA_CENTER_MOVE_PER_STEP = 0.024
 const SHAPE_RESTORE_STRENGTH = 0.14
 const PATH_SMOOTHING_STRENGTH = 0.22
 const TIGHTENING_FORCE_STRENGTH = 0.55
@@ -884,6 +888,77 @@ const getBorderForce = (
   }
 }
 
+const getNearestBorderDistance = (
+  bounds: Bounds,
+  pointX: number,
+  pointY: number,
+) =>
+  Math.min(
+    pointX - bounds.minX,
+    bounds.maxX - pointX,
+    pointY - bounds.minY,
+    bounds.maxY - pointY,
+  )
+
+const getViaCenterForce = (
+  bounds: Bounds,
+  element: ForceElement,
+  elementX: number,
+  elementY: number,
+  stepDecay: number,
+): Vector => {
+  if (element.fixed || element.kind !== "via") return { x: 0, y: 0 }
+
+  const centerX = (bounds.minX + bounds.maxX) * 0.5
+  const centerY = (bounds.minY + bounds.maxY) * 0.5
+  const nearestBorderDistance = getNearestBorderDistance(
+    bounds,
+    elementX,
+    elementY,
+  )
+  const edgePressure =
+    1 -
+    clampUnitInterval(
+      nearestBorderDistance / VIA_CENTER_EDGE_ATTRACTION_FALLOFF_DISTANCE,
+    )
+  const attractionStrength =
+    VIA_CENTER_ATTRACTION_STRENGTH +
+    edgePressure * VIA_CENTER_EDGE_ATTRACTION_BOOST
+
+  return {
+    x: (centerX - elementX) * attractionStrength * stepDecay,
+    y: (centerY - elementY) * attractionStrength * stepDecay,
+  }
+}
+
+const getViaCenterMove = (
+  bounds: Bounds,
+  node: MutableNode,
+  stepDecay: number,
+): Vector => {
+  if (node.fixed || node.pointIndexes.length <= 1) return { x: 0, y: 0 }
+
+  const centerX = (bounds.minX + bounds.maxX) * 0.5
+  const centerY = (bounds.minY + bounds.maxY) * 0.5
+  const nearestBorderDistance = getNearestBorderDistance(bounds, node.x, node.y)
+  const edgePressure =
+    1 -
+    clampUnitInterval(
+      nearestBorderDistance / VIA_CENTER_EDGE_ATTRACTION_FALLOFF_DISTANCE,
+    )
+  const attractionStrength =
+    VIA_CENTER_ATTRACTION_STRENGTH +
+    edgePressure * VIA_CENTER_EDGE_ATTRACTION_BOOST
+
+  return clampVectorMagnitude(
+    {
+      x: (centerX - node.x) * attractionStrength * stepDecay,
+      y: (centerY - node.y) * attractionStrength * stepDecay,
+    },
+    MAX_VIA_CENTER_MOVE_PER_STEP * (1 + edgePressure) * stepDecay,
+  )
+}
+
 const materializeRoutes = (mutableRoutes: MutableRoute[]) =>
   mutableRoutes.map(({ route, nodes, pointNodeIndexes }) => {
     const nextRoutePoints = route.route.map((point, pointIndex) => {
@@ -1334,6 +1409,20 @@ export const runForceDirectedRouteReflow = (
         stepDecay,
       )
       applyForceToElement(element, borderForce.x, borderForce.y, nodeForces)
+
+      const viaCenterForce = getViaCenterForce(
+        bounds,
+        element,
+        elementNode.x,
+        elementNode.y,
+        stepDecay,
+      )
+      applyForceToElement(
+        element,
+        viaCenterForce.x,
+        viaCenterForce.y,
+        nodeForces,
+      )
     }
 
     for (
@@ -1363,6 +1452,8 @@ export const runForceDirectedRouteReflow = (
         let tighteningMoveY = 0
         let orthogonalMoveX = 0
         let orthogonalMoveY = 0
+        let viaCenterMoveX = 0
+        let viaCenterMoveY = 0
 
         const previousNode = mutableRoute.nodes[nodeIndex - 1]
         const nextNode = mutableRoute.nodes[nodeIndex + 1]
@@ -1443,6 +1534,12 @@ export const runForceDirectedRouteReflow = (
           }
         }
 
+        if (node.pointIndexes.length > 1) {
+          const viaCenterMove = getViaCenterMove(bounds, node, stepDecay)
+          viaCenterMoveX = viaCenterMove.x
+          viaCenterMoveY = viaCenterMove.y
+        }
+
         let movementX = nextForceX * STEP_SIZE * stepDecay
         let movementY = nextForceY * STEP_SIZE * stepDecay
         const movementMagnitude = Math.hypot(movementX, movementY)
@@ -1456,8 +1553,8 @@ export const runForceDirectedRouteReflow = (
           movementY *= movementScale
         }
 
-        node.x += movementX + tighteningMoveX + orthogonalMoveX
-        node.y += movementY + tighteningMoveY + orthogonalMoveY
+        node.x += movementX + tighteningMoveX + orthogonalMoveX + viaCenterMoveX
+        node.y += movementY + tighteningMoveY + orthogonalMoveY + viaCenterMoveY
       }
     }
 

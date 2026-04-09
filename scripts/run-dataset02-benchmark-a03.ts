@@ -27,6 +27,8 @@ type SampleResult = {
 type WorkerOptions = {
   solverMode: SolverMode
   maxIterations: number
+  ripCost?: number
+  greedyMultiplier?: number
 }
 
 type WorkerRequest =
@@ -44,6 +46,10 @@ const concurrencyArg = args.find((arg) => arg.startsWith("--concurrency="))
 const limitArg = args.find((arg) => arg.startsWith("--limit="))
 const modeArg = args.find((arg) => arg.startsWith("--mode="))
 const iterationsArg = args.find((arg) => arg.startsWith("--max-iterations="))
+const ripCostArg = args.find((arg) => arg.startsWith("--rip-cost="))
+const greedyMultiplierArg = args.find((arg) =>
+  arg.startsWith("--greedy-multiplier="),
+)
 const showStats = args.includes("--stats")
 const showHelp = args.includes("--help") || args.includes("-h")
 
@@ -56,12 +62,16 @@ Options:
   --limit=N            Only run first N samples
   --mode=default|repro Solver tuning preset (default: default)
   --max-iterations=N   Solver MAX_ITERATIONS (default: 10000000)
+  --rip-cost=N         Override hyperParameters.ripCost
+  --greedy-multiplier=N
+                       Override hyperParameters.greedyMultiplier
   --stats              Print average grid stats
   --help, -h           Show this help message
 
 Examples:
   bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
   bun run scripts/run-dataset02-benchmark-a03.ts --limit=100 --mode=repro
+  bun run scripts/run-dataset02-benchmark-a03.ts --rip-cost=4 --greedy-multiplier=1.4
 `)
   process.exit(0)
 }
@@ -85,6 +95,16 @@ const parsedMaxIterations = iterationsArg
 const maxIterations = Number.isFinite(parsedMaxIterations)
   ? Math.max(1, parsedMaxIterations)
   : 10_000_000
+const parsedRipCost = ripCostArg
+  ? Number.parseFloat(ripCostArg.split("=")[1] ?? "")
+  : Number.NaN
+const ripCost = Number.isFinite(parsedRipCost) ? parsedRipCost : undefined
+const parsedGreedyMultiplier = greedyMultiplierArg
+  ? Number.parseFloat(greedyMultiplierArg.split("=")[1] ?? "")
+  : Number.NaN
+const greedyMultiplier = Number.isFinite(parsedGreedyMultiplier)
+  ? parsedGreedyMultiplier
+  : undefined
 
 const samples = Number.isFinite(limit)
   ? dataset02.slice(0, Math.max(0, limit ?? 0))
@@ -101,6 +121,8 @@ const results: Array<SampleResult | undefined> = new Array(samples.length)
 const workerOptions: WorkerOptions = {
   solverMode,
   maxIterations,
+  ripCost,
+  greedyMultiplier,
 }
 
 let nextJobPointer = 0
@@ -192,6 +214,10 @@ console.log(`Samples: ${samples.length}`)
 console.log(`Workers: ${workerCount}`)
 console.log(`Mode: ${solverMode}`)
 console.log(`Max iterations: ${maxIterations}`)
+if (ripCost !== undefined) console.log(`ripCost override: ${ripCost}`)
+if (greedyMultiplier !== undefined) {
+  console.log(`greedyMultiplier override: ${greedyMultiplier}`)
+}
 console.log(`Grid stats: ${showStats ? "on" : "off"}`)
 console.log()
 

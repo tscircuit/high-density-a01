@@ -126,3 +126,56 @@ test("runForceDirectedRouteReflow keeps routes inside node bounds", () => {
     }
   }
 })
+
+test("runForceDirectedRouteReflow pulls vias inward from boundary-heavy routes", () => {
+  const nodeWithPortPoints: NodeWithPortPoints = {
+    capacityMeshNodeId: "route-reflow-via-center",
+    center: { x: 0, y: 0 },
+    width: 8,
+    height: 8,
+    availableZ: [0, 1],
+    portPoints: [
+      {
+        connectionName: "conn00",
+        rootConnectionName: "root00",
+        x: 4,
+        y: 3,
+        z: 0,
+      },
+      {
+        connectionName: "conn00",
+        rootConnectionName: "root00",
+        x: 4,
+        y: -3,
+        z: 1,
+      },
+    ],
+  }
+
+  const routes: HighDensityIntraNodeRoute[] = [
+    {
+      connectionName: "conn00",
+      rootConnectionName: "root00",
+      traceThickness: 0.1,
+      viaDiameter: 0.3,
+      vias: [{ x: 3.2, y: 0.4 }],
+      route: [
+        { x: 4, y: 3, z: 0 },
+        { x: 3.2, y: 0.4, z: 0 },
+        { x: 3.2, y: 0.4, z: 1 },
+        { x: 4, y: -3, z: 1 },
+      ],
+    },
+  ]
+
+  const improvedRoutes = runForceDirectedRouteReflow(
+    nodeWithPortPoints,
+    routes,
+    30,
+  )
+  const via = improvedRoutes[0]?.vias[0]
+
+  expect(via).toBeDefined()
+  expect(via?.x).toBeLessThan(3.05)
+  expect(via?.x).toBeLessThan(routes[0]!.vias[0]!.x)
+})

@@ -13,6 +13,8 @@ type SolverMode = "default" | "repro"
 type WorkerOptions = {
   solverMode: SolverMode
   maxIterations: number
+  ripCost?: number
+  greedyMultiplier?: number
 }
 
 type RunRequest = {
@@ -72,16 +74,24 @@ const runSingleSample = (
     },
   )
 
+  const hyperParameters = {
+    ...(options.solverMode === "repro"
+      ? {
+          ripCost: 1,
+          greedyMultiplier: 1.2,
+        }
+      : {}),
+    ...(options.ripCost === undefined ? {} : { ripCost: options.ripCost }),
+    ...(options.greedyMultiplier === undefined
+      ? {}
+      : { greedyMultiplier: options.greedyMultiplier }),
+  }
+
   const solver = new HighDensitySolverA03({
     ...defaultA03Params,
     nodeWithPortPoints,
     hyperParameters:
-      options.solverMode === "repro"
-        ? {
-            ripCost: 1,
-            greedyMultiplier: 1.2,
-          }
-        : undefined,
+      Object.keys(hyperParameters).length > 0 ? hyperParameters : undefined,
   })
   solver.MAX_ITERATIONS = options.maxIterations
 
