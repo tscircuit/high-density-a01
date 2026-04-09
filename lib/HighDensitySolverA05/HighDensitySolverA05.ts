@@ -36,6 +36,32 @@ interface RegionDef {
   offset: number
 }
 
+const DEFAULT_BORDER_PENALTY_STRENGTH = 0.15
+const DEFAULT_BORDER_PENALTY_FALLOFF = 0.12
+
+type BorderPenaltyParams = {
+  px: number
+  py: number
+}
+
+export const createA05BorderPenaltyFn =
+  ({
+    strength = DEFAULT_BORDER_PENALTY_STRENGTH,
+    falloff = DEFAULT_BORDER_PENALTY_FALLOFF,
+  }: {
+    strength?: number
+    falloff?: number
+  } = {}) =>
+  ({ px, py }: BorderPenaltyParams) => {
+    if (strength <= 0 || falloff <= 0) return 0
+
+    const borderDistance = Math.min(px, py, 1 - px, 1 - py)
+    if (!Number.isFinite(borderDistance) || borderDistance >= falloff) return 0
+
+    const normalizedDistance = 1 - borderDistance / falloff
+    return strength * normalizedDistance ** 2
+  }
+
 interface ConnectionSeg {
   connId: ConnId
   startZ: number
@@ -328,6 +354,8 @@ export interface HighDensitySolverA05Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  borderPenaltyStrength?: number
+  borderPenaltyFalloff?: number
   postRouteSegmentCount?: number
   postRouteForceDirectedSteps?: number
   hyperParameters?: Partial<HyperParameters>
@@ -358,6 +386,8 @@ export class HighDensitySolverA05 extends BaseSolver {
   showUsedCellMap: boolean
   effort: number
   stepMultiplier: number
+  borderPenaltyStrength: number
+  borderPenaltyFalloff: number
   postRouteSegmentCount?: number
   postRouteForceDirectedSteps: number
   hyperParameters: HyperParameters
@@ -524,6 +554,10 @@ export class HighDensitySolverA05 extends BaseSolver {
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
+    this.borderPenaltyStrength =
+      props.borderPenaltyStrength ?? DEFAULT_BORDER_PENALTY_STRENGTH
+    this.borderPenaltyFalloff =
+      props.borderPenaltyFalloff ?? DEFAULT_BORDER_PENALTY_FALLOFF
     this.postRouteSegmentCount = props.postRouteSegmentCount ?? 16
     this.postRouteForceDirectedSteps = Math.max(
       0,
@@ -540,7 +574,12 @@ export class HighDensitySolverA05 extends BaseSolver {
     }
     this.MAX_ITERATIONS = 100e6
     this.MAX_RIPS = 200
-    this.initialPenaltyFn = props.initialPenaltyFn
+    this.initialPenaltyFn =
+      props.initialPenaltyFn ??
+      createA05BorderPenaltyFn({
+        strength: this.borderPenaltyStrength,
+        falloff: this.borderPenaltyFalloff,
+      })
   }
 
   override getConstructorParams(): [HighDensitySolverA05Props] {
@@ -559,6 +598,8 @@ export class HighDensitySolverA05 extends BaseSolver {
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
+        borderPenaltyStrength: this.borderPenaltyStrength,
+        borderPenaltyFalloff: this.borderPenaltyFalloff,
         postRouteSegmentCount: this.postRouteSegmentCount,
         postRouteForceDirectedSteps: this.postRouteForceDirectedSteps,
         hyperParameters: this.hyperParameters,

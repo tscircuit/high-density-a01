@@ -15,6 +15,8 @@ type WorkerOptions = {
   maxIterations: number
   ripCost?: number
   greedyMultiplier?: number
+  borderPenaltyStrength?: number
+  borderPenaltyFalloff?: number
 }
 
 type RunRequest = {
@@ -90,6 +92,12 @@ const runSingleSample = (
   const solver = new HighDensitySolverA05({
     ...defaultA05Params,
     nodeWithPortPoints,
+    ...(options.borderPenaltyStrength === undefined
+      ? {}
+      : { borderPenaltyStrength: options.borderPenaltyStrength }),
+    ...(options.borderPenaltyFalloff === undefined
+      ? {}
+      : { borderPenaltyFalloff: options.borderPenaltyFalloff }),
     hyperParameters:
       Object.keys(hyperParameters).length > 0 ? hyperParameters : undefined,
   })
