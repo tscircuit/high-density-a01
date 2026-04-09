@@ -16,6 +16,7 @@
     "benchmark:dataset02": "bun run scripts/run-dataset02-benchmark.ts --concurrency=4",
     "benchmark:dataset02:a02": "bun run scripts/run-dataset02-benchmark-a02.ts --concurrency=4",
     "benchmark:dataset02:a03": "bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4",
+    "benchmark:dataset-fails03:a05": "bun run scripts/run-dataset-fails03-benchmark-a05.ts --concurrency=4",
     "benchmark:dataset-z04:a01": "bun run scripts/run-dataset-z04-benchmark-a01.ts --concurrency=4",
     "benchmark:dataset-z04:a02": "bun run scripts/run-dataset-z04-benchmark-a02.ts --concurrency=4",
     "benchmark:dataset-z04:a03": "bun run scripts/run-dataset-z04-benchmark-a03.ts --concurrency=4",
