@@ -17,56 +17,134 @@ properties:
 
 ## Usage
 
-```tsx
-const solver = new HighDensitySolverA01({
-  nodeWithPortPoints,
-  cellSizeMm: 0.05,
-  viaDiameter: 0.3,
-  maxCellCount: 200_000, // optional safety limit; fail during setup if exceeded
-  stepMultiplier: 4, // optional, each solver step runs 4 internal steps
+The package exports the solver classes directly:
 
-  // optional hyperparameters to control algorithm
-  // Unit of penalty is ~mm
+```ts
+import {
+  HighDensitySolverA03,
+  HighDensitySolverA05,
+} from "@tscircuit/high-density-a01"
+```
+
+### A03
+
+Use `HighDensitySolverA03` for the baseline high-density solver:
+
+```ts
+const solver = new HighDensitySolverA03({
+  nodeWithPortPoints,
+  highResolutionCellSize: 0.1,
+  highResolutionCellThickness: 8,
+  lowResolutionCellSize: 0.4,
+  traceThickness: 0.1,
+  traceMargin: 0.15,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+  maxCellCount: 200_000,
+  stepMultiplier: 4,
+
   hyperParameters: {
     shuffleSeed: 0,
-    ripCost: 10,
+    ripCost: 8,
     ripTracePenalty: 0.5,
     ripViaPenalty: 0.75,
     viaBaseCost: 0.1,
+    greedyMultiplier: 1.5,
   },
 
-  // Optional functions to generate initial penalty map
-  // initialPenaltyFn: ({ x, y, px, py, row, col }) => ...
+  // Optional initial penalty map
+  // initialPenaltyFn: ({ x, y, px, py, row, col, region }) => ...
 })
 
 solver.solve()
+const routes = solver.getOutput()
 ```
+
+### A05
+
+Use `HighDensitySolverA05` when you want A03-style routing plus route
+normalization and force-directed reflow after each solved route:
+
+```ts
+const solver = new HighDensitySolverA05({
+  nodeWithPortPoints,
+  highResolutionCellSize: 0.1,
+  highResolutionCellThickness: 8,
+  lowResolutionCellSize: 0.4,
+  traceThickness: 0.1,
+  traceMargin: 0.15,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+
+  // A05 defaults
+  postRouteSegmentCount: 16,
+  postRouteForceDirectedSteps: 20,
+
+  // Initial border-avoidance bias
+  borderPenaltyStrength: 0.25,
+  borderPenaltyFalloff: 0.12,
+})
+
+solver.solve()
+const routes = solver.getOutput()
+```
+
+Notes:
+
+- `HighDensitySolverA05` uses the same routing hyperparameters as A03 by default.
+- `postRouteSegmentCount` counts vias toward the total segment budget.
+- The default A05 initial penalty map discourages routing too close to the node
+  border. Set `borderPenaltyStrength: 0` to disable that bias.
+- Providing `initialPenaltyFn` overrides the built-in A05 border penalty.
+- The output routes preserve the exact user-provided endpoints.
 
 ## How it works
 
-We form a grid based on the parameters `cellSizeMm`
+For A03/A05, we form a two-resolution grid using
+`highResolutionCellSize`, `highResolutionCellThickness`, and
+`lowResolutionCellSize`.
 
-We compute the initial penalty map from the `initialPenaltyFn`, this function
-sets an additional cost of traversal for a cell. This function accepts `x`,`y`
-which represent the "real coordinates", as well as `px`/`py` which are `[0,1]`
-representing the fraction of the coordinate within the problem bounds.
+We compute the initial penalty map from `initialPenaltyFn`. This function sets
+an additional cost of traversal for a cell. It receives `x`/`y` in board
+coordinates, and `px`/`py` in `[0,1]` relative to the node bounds.
 
 We shuffle the trace order based on the shuffle seed.
 
-We run a basic A\* solver for each path from the `start` to the `end`.
-When we explore, we consider both used and unused
-cells via the `usedCell` structure. The `usedCell` structure contains 0 or 1
-depending on whether or not a cell has been used by either a trace or via. When
-we explore, we explore in 8 directions as well as creating a via. A via enables
-exploring to any other layer. When a cell is used, we add the `ripCost` to
-the exploration of that path. A path that rips the same trace will only incur
-the `ripCost` once, so we must track for each path what traces have been ripped.
+We run an A\* search for each path from the `start` to the `end`. During
+exploration, we consider both used and unused cells. Used cells incur rip costs
+and trace/via penalties, while vias allow moving between any available layers.
+A path that rips the same trace only pays `ripCost` once, so the search tracks
+which traces have already been ripped along that candidate path.
 
-When we reach the `end` of a path, we then mark that route as `solved` and apply
-the used cells to the `usedCell` structure. Note that vias occupy more cells
-based on the `viaDiameter`. We then see if we needed to rip any traces. When we
-rip a trace, we remove it from the `usedCell` structure, remove it from the
-`solvedConnections` list and add it back to the `unsolvedConnections` queue.
+When we reach the `end` of a path, we mark that route as solved and apply its
+occupied cells to the congestion structure. Vias occupy more cells based on
+`viaDiameter`. If a solved route displaced other routes, those routes are ripped
+out and added back to the unsolved queue.
+
+For A05, after each solved route we:
+
+1. Normalize all solved routes to a fixed total segment count.
+2. Run a force-directed reflow pass over the solved route set.
+3. Rebuild occupancy from the updated geometry before routing the next trace.
+
+This creates additional room for later routes at the cost of extra per-route
+work.
+
+## Benchmarks
+
+Useful benchmark commands:
+
+```sh
+bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
+bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4
+```
+
+A05 tuning examples:
+
+```sh
+bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4 --border-penalty-strength=0.25 --border-penalty-falloff=0.12
+bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4 --rip-cost=8 --greedy-multiplier=1.5
+```
 
 ## high-density-a02
 
