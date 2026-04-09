@@ -36,7 +36,7 @@ interface RegionDef {
   offset: number
 }
 
-const DEFAULT_BORDER_PENALTY_STRENGTH = 0.15
+const DEFAULT_BORDER_PENALTY_STRENGTH = 0.25
 const DEFAULT_BORDER_PENALTY_FALLOFF = 0.12
 
 type BorderPenaltyParams = {
