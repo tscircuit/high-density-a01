@@ -9,8 +9,13 @@ export class HighDensitySolverA05 extends HighDensitySolverA03 {
   constructor(props: HighDensitySolverA05Props) {
     super({
       ...props,
+      highResolutionCellThickness: props.highResolutionCellThickness ?? 4,
       postRouteSegmentCount: props.postRouteSegmentCount ?? 16,
-      postRouteForceDirectedSteps: props.postRouteForceDirectedSteps ?? 20,
+      postRouteForceDirectedSteps: props.postRouteForceDirectedSteps ?? 200,
+      hyperParameters: {
+        ...props.hyperParameters,
+        greedyMultiplier: props.hyperParameters?.greedyMultiplier ?? 2,
+      },
     })
   }
 

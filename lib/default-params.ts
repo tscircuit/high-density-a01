@@ -67,7 +67,7 @@ export const defaultA05Params: Pick<
   | "viaMinDistFromBorder"
 > = {
   highResolutionCellSize: 0.1,
-  highResolutionCellThickness: 8,
+  highResolutionCellThickness: 4,
   lowResolutionCellSize: 0.4,
   traceMargin: 0.15,
   traceThickness: 0.1,

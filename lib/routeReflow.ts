@@ -73,12 +73,12 @@ const TARGET_CLEARANCE = 0.2
 const CLEARANCE_FALLOFF_DISTANCE = 0.4
 const POINT_SEGMENT_TARGET_CLEARANCE = 0.25
 const POINT_SEGMENT_FALLOFF_DISTANCE = 0.5
-const VIA_BORDER_EXTRA_CLEARANCE = 0.15
+const VIA_BORDER_EXTRA_CLEARANCE = 0.25
 const VIA_SEGMENT_TARGET_CLEARANCE = 0.4
 const VIA_SEGMENT_FALLOFF_DISTANCE = 0.5
 const VIA_BORDER_TARGET_CLEARANCE =
-  VIA_SEGMENT_TARGET_CLEARANCE + VIA_BORDER_EXTRA_CLEARANCE + 0.1
-const VIA_BORDER_FALLOFF_DISTANCE = VIA_BORDER_TARGET_CLEARANCE + 0.05
+  VIA_SEGMENT_TARGET_CLEARANCE + VIA_BORDER_EXTRA_CLEARANCE + 0.15
+const VIA_BORDER_FALLOFF_DISTANCE = VIA_BORDER_TARGET_CLEARANCE + 0.15
 const VIA_VIA_REPULSION_STRENGTH = 0.034
 const VIA_SEGMENT_REPULSION_STRENGTH = 0.18
 const POINT_SEGMENT_REPULSION_STRENGTH = 0.06
@@ -89,8 +89,9 @@ const VIA_SEGMENT_INTERSECTION_FORCE_BOOST = 12
 const BORDER_REPULSION_STRENGTH = 0.03
 const BORDER_REPULSION_TAIL_RATIO = 0.08
 const BORDER_REPULSION_FALLOFF = 20
-const VIA_BORDER_REPULSION_TAIL_RATIO = 0.015
-const VIA_BORDER_REPULSION_FALLOFF = 80
+const VIA_BORDER_REPULSION_TAIL_RATIO = 0.03
+const VIA_BORDER_REPULSION_FALLOFF = 55
+const VIA_CENTERING_FORCE_STRENGTH = 0.09
 const SHAPE_RESTORE_STRENGTH = 0.14
 const PATH_SMOOTHING_STRENGTH = 0.22
 const TIGHTENING_FORCE_STRENGTH = 0.55
@@ -1146,6 +1147,8 @@ export const runForceDirectedRouteReflow = (
   const segments = buildSegmentObstacles(mutableRoutes)
   const nodeForces = new Float64Array(totalNodeCount * 2)
   const nodeCorrections = new Float64Array(totalNodeCount * 2)
+  const centerX = sample.center.x
+  const centerY = sample.center.y
 
   clampMutableRoutesToBounds(mutableRoutes, bounds)
 
@@ -1334,6 +1337,15 @@ export const runForceDirectedRouteReflow = (
         stepDecay,
       )
       applyForceToElement(element, borderForce.x, borderForce.y, nodeForces)
+
+      if (element.kind === "via" && !element.fixed) {
+        applyForceToElement(
+          element,
+          (centerX - elementNode.x) * VIA_CENTERING_FORCE_STRENGTH * stepDecay,
+          (centerY - elementNode.y) * VIA_CENTERING_FORCE_STRENGTH * stepDecay,
+          nodeForces,
+        )
+      }
     }
 
     for (
