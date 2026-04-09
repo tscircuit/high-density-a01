@@ -42,3 +42,6 @@ cosmos-export
 # wasm build artifacts
 wasm/target
 wasm/pkg
+
+# local reference checkout used for A05 development
+hd-cache.tscircuit.com

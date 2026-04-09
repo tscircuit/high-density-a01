@@ -4,6 +4,11 @@ import {
   applyAffineTransformToPoint,
 } from "../gridToAffineTransform"
 import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
+import {
+  deriveViasFromRoutePoints,
+  normalizeRoutesToTotalSegmentCount,
+  runForceDirectedRouteReflow,
+} from "../routeReflow"
 import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 
 type ConnId = number
@@ -47,6 +52,7 @@ interface SolvedRouteInternal {
   viaCellIds: Int32Array
   startPoint: { x: number; y: number; z: number }
   endPoint: { x: number; y: number; z: number }
+  routePoints: Array<{ x: number; y: number; z: number }>
 }
 
 interface HyperParameters {
@@ -322,6 +328,8 @@ export interface HighDensitySolverA03Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  postRouteSegmentCount?: number
+  postRouteForceDirectedSteps?: number
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -350,6 +358,8 @@ export class HighDensitySolverA03 extends BaseSolver {
   showUsedCellMap: boolean
   effort: number
   stepMultiplier: number
+  postRouteSegmentCount?: number
+  postRouteForceDirectedSteps: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
 
@@ -432,6 +442,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private traceKeepoutRadius!: number
   private viaKeepoutRadius!: number
+  private routeSampleStep!: number
 
   get unsolvedConnections() {
     return this.unsolvedSegs
@@ -513,6 +524,11 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
+    this.postRouteSegmentCount = props.postRouteSegmentCount
+    this.postRouteForceDirectedSteps = Math.max(
+      0,
+      Math.floor(props.postRouteForceDirectedSteps ?? 0),
+    )
     this.hyperParameters = {
       shuffleSeed: 0,
       ripCost: 8,
@@ -543,6 +559,8 @@ export class HighDensitySolverA03 extends BaseSolver {
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
+        postRouteSegmentCount: this.postRouteSegmentCount,
+        postRouteForceDirectedSteps: this.postRouteForceDirectedSteps,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
       },
@@ -589,6 +607,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     this.traceKeepoutRadius = this.traceMargin + this.traceThickness / 2
     this.viaKeepoutRadius = this.viaDiameter / 2 + this.traceKeepoutRadius
+    this.routeSampleStep = Math.max(this.highResolutionCellSize * 0.5, 0.02)
 
     this.buildFiveRegionGrid(width, height)
     this.gridToBoundsTransform = this.computeGridToBoundsTransform()
@@ -1636,12 +1655,18 @@ export class HighDensitySolverA03 extends BaseSolver {
     while (this.solvedRoutes.length <= connId) {
       this.solvedRoutes.push(undefined)
     }
+    const routePoints = this.buildRoutePointsFromStates(
+      states,
+      this.activeConnSeg!.startPoint,
+      this.activeConnSeg!.endPoint,
+    )
     this.solvedRoutes[connId] = {
       connId,
       states: Int32Array.from(states),
       viaCellIds: Int32Array.from(viaCellIds),
       startPoint: this.activeConnSeg!.startPoint,
       endPoint: this.activeConnSeg!.endPoint,
+      routePoints,
     }
 
     for (let i = 0; i < displacedByVias.length; i++) {
@@ -1664,6 +1689,8 @@ export class HighDensitySolverA03 extends BaseSolver {
         }
       }
     }
+
+    this.applyPostRouteReflow()
   }
 
   private extractViaCellIds(states: number[]) {
@@ -1678,6 +1705,309 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
     return viaCellIds
+  }
+
+  private buildRoutePointsFromStates(
+    states: ArrayLike<number>,
+    startPoint: { x: number; y: number; z: number },
+    endPoint: { x: number; y: number; z: number },
+  ) {
+    const t = this.gridToBoundsTransform
+    const points = Array.from(states, (state) => {
+      const z = Math.floor(state / this.planeSize)
+      const cellId = state - z * this.planeSize
+      const tp = applyAffineTransformToPoint(t, {
+        x: this.cellCenterX[cellId]!,
+        y: this.cellCenterY[cellId]!,
+      })
+      return {
+        x: tp.x,
+        y: tp.y,
+        z: this.layerToZ.get(z) ?? z,
+      }
+    })
+
+    if (points.length > 0) {
+      points[0] = { ...startPoint }
+      if (points.length > 1) {
+        points[points.length - 1] = { ...endPoint }
+      }
+    }
+
+    return points
+  }
+
+  private getRouteViaPoints(route: Pick<SolvedRouteInternal, "routePoints">) {
+    const vias: Array<{ x: number; y: number }> = []
+    for (let i = 1; i < route.routePoints.length; i++) {
+      const prev = route.routePoints[i - 1]!
+      const next = route.routePoints[i]!
+      if (prev.z === next.z) continue
+      if (prev.x !== next.x || prev.y !== next.y) continue
+      const lastVia = vias[vias.length - 1]
+      if (lastVia && lastVia.x === prev.x && lastVia.y === prev.y) continue
+      vias.push({ x: prev.x, y: prev.y })
+    }
+    return vias
+  }
+
+  private applyPostRouteReflow() {
+    if (
+      (!this.postRouteSegmentCount || this.postRouteSegmentCount <= 0) &&
+      this.postRouteForceDirectedSteps <= 0
+    ) {
+      return
+    }
+
+    const connIds: ConnId[] = []
+    let routes: HighDensityIntraNodeRoute[] = []
+
+    for (let connId = 0; connId < this.solvedRoutes.length; connId++) {
+      const route = this.solvedRoutes[connId]
+      if (!route) continue
+      connIds.push(connId)
+      routes.push({
+        connectionName: this.connIdToName[connId]!,
+        rootConnectionName: this.connIdToRootNet[connId],
+        traceThickness: this.traceThickness,
+        viaDiameter: this.viaDiameter,
+        route: route.routePoints.map((point) => ({ ...point })),
+        vias: this.getRouteViaPoints(route),
+      })
+    }
+
+    if (routes.length === 0) return
+
+    if (this.postRouteSegmentCount && this.postRouteSegmentCount > 0) {
+      routes = normalizeRoutesToTotalSegmentCount(
+        routes,
+        this.postRouteSegmentCount,
+      )
+    }
+
+    if (this.postRouteForceDirectedSteps > 0) {
+      routes = runForceDirectedRouteReflow(
+        this.nodeWithPortPoints,
+        routes,
+        this.postRouteForceDirectedSteps,
+      )
+    }
+
+    const viaZ =
+      this.availableZ[0] ?? this.nodeWithPortPoints.portPoints[0]?.z ?? 0
+    for (let index = 0; index < connIds.length; index++) {
+      const connId = connIds[index]!
+      const solvedRoute = this.solvedRoutes[connId]
+      const reflowedRoute = routes[index]
+      if (!solvedRoute || !reflowedRoute) continue
+
+      const routePoints = reflowedRoute.route.map((point) => ({ ...point }))
+      if (routePoints.length > 0) {
+        routePoints[0] = { ...solvedRoute.startPoint }
+        if (routePoints.length > 1) {
+          routePoints[routePoints.length - 1] = { ...solvedRoute.endPoint }
+        }
+      }
+
+      solvedRoute.routePoints = routePoints
+      solvedRoute.viaCellIds = Int32Array.from(
+        deriveViasFromRoutePoints(routePoints).map(
+          (via) => this.pointToCell({ x: via.x, y: via.y, z: viaZ }).cellId,
+        ),
+      )
+    }
+
+    this.rebuildOccupancyFromSolvedRoutes()
+  }
+
+  private rebuildOccupancyFromSolvedRoutes() {
+    this.usedCellsFlat.fill(-1)
+    for (let i = 0; i < this.sharedCellsFlat.length; i++) {
+      this.sharedCellsFlat[i] = undefined
+    }
+    for (let i = 0; i < this.usedIndicesByConn.length; i++) {
+      this.usedIndicesByConn[i] = undefined
+    }
+
+    for (let connId = 0; connId < this.solvedRoutes.length; connId++) {
+      const route = this.solvedRoutes[connId]
+      if (!route) continue
+      const indices: number[] = []
+      this.markGeometryRouteFootprint(connId, route.routePoints, indices)
+      while (this.usedIndicesByConn.length <= connId) {
+        this.usedIndicesByConn.push(undefined)
+      }
+      this.usedIndicesByConn[connId] = indices
+    }
+  }
+
+  private markGeometryRouteFootprint(
+    connId: ConnId,
+    routePoints: Array<{ x: number; y: number; z: number }>,
+    indices: number[],
+  ) {
+    for (let i = 1; i < routePoints.length; i++) {
+      const prev = routePoints[i - 1]!
+      const next = routePoints[i]!
+      if (prev.z !== next.z) continue
+
+      const layer = this.zToLayer.get(prev.z)
+      if (layer === undefined) continue
+
+      const segmentLength = Math.hypot(next.x - prev.x, next.y - prev.y)
+      const stepCount = Math.max(
+        1,
+        Math.ceil(segmentLength / this.routeSampleStep),
+      )
+      for (let step = 0; step <= stepCount; step++) {
+        const t = stepCount === 0 ? 0 : step / stepCount
+        const x = prev.x + (next.x - prev.x) * t
+        const y = prev.y + (next.y - prev.y) * t
+        const sourceCellId = this.pointToCell({ x, y, z: prev.z }).cellId
+        this.markTraceFootprintAtPosition(
+          connId,
+          layer,
+          sourceCellId,
+          x,
+          y,
+          indices,
+        )
+      }
+    }
+
+    const viaZ =
+      this.availableZ[0] ?? this.nodeWithPortPoints.portPoints[0]?.z ?? 0
+    for (const via of deriveViasFromRoutePoints(routePoints)) {
+      const sourceCellId = this.pointToCell({
+        x: via.x,
+        y: via.y,
+        z: viaZ,
+      }).cellId
+      this.markViaFootprintAtPosition(
+        connId,
+        sourceCellId,
+        via.x,
+        via.y,
+        indices,
+      )
+    }
+  }
+
+  private markTraceFootprintAtPosition(
+    connId: ConnId,
+    z: number,
+    sourceCellId: number,
+    cx: number,
+    cy: number,
+    indices: number[],
+  ) {
+    this.forEachCellNearCircle(cx, cy, this.traceKeepoutRadius, (cellId) => {
+      if (
+        !circleIntersectsRect(
+          cx,
+          cy,
+          this.traceKeepoutRadius,
+          this.cellMinX[cellId]!,
+          this.cellMinY[cellId]!,
+          this.cellMaxX[cellId]!,
+          this.cellMaxY[cellId]!,
+        )
+      ) {
+        return
+      }
+      const flatIdx = z * this.planeSize + cellId
+      if (
+        cellId !== sourceCellId &&
+        this.shouldSkipFixedPortHalo(flatIdx, connId)
+      ) {
+        return
+      }
+      const existing = this.usedCellsFlat[flatIdx]!
+      const allowSameRootOverlap = this.allowSharedUse(connId, existing)
+      if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
+        return
+      }
+      if (existing !== -1 && existing !== connId) {
+        this.addSharedOccupant(flatIdx, connId)
+      } else {
+        this.usedCellsFlat[flatIdx] = connId
+      }
+      indices.push(flatIdx)
+    })
+  }
+
+  private markViaFootprintAtPosition(
+    connId: ConnId,
+    sourceCellId: number,
+    cx: number,
+    cy: number,
+    indices: number[],
+  ) {
+    this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (cellId) => {
+      if (
+        !circleIntersectsRect(
+          cx,
+          cy,
+          this.viaKeepoutRadius,
+          this.cellMinX[cellId]!,
+          this.cellMinY[cellId]!,
+          this.cellMaxX[cellId]!,
+          this.cellMaxY[cellId]!,
+        )
+      ) {
+        return
+      }
+      for (let z = 0; z < this.layers; z++) {
+        const flatIdx = z * this.planeSize + cellId
+        if (
+          cellId !== sourceCellId &&
+          this.shouldSkipFixedPortHalo(flatIdx, connId)
+        ) {
+          continue
+        }
+        const existing = this.usedCellsFlat[flatIdx]!
+        const allowSameRootOverlap = this.allowSharedUse(connId, existing)
+        if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
+          continue
+        }
+        if (existing !== -1 && existing !== connId) {
+          this.addSharedOccupant(flatIdx, connId)
+        } else {
+          this.usedCellsFlat[flatIdx] = connId
+        }
+        indices.push(flatIdx)
+      }
+    })
+  }
+
+  private addRipPenaltyForRoute(route: SolvedRouteInternal) {
+    for (let i = 1; i < route.routePoints.length; i++) {
+      const prev = route.routePoints[i - 1]!
+      const next = route.routePoints[i]!
+      if (prev.z !== next.z) continue
+
+      const segmentLength = Math.hypot(next.x - prev.x, next.y - prev.y)
+      const stepCount = Math.max(
+        1,
+        Math.ceil(segmentLength / this.routeSampleStep),
+      )
+      for (let step = 0; step <= stepCount; step++) {
+        const t = stepCount === 0 ? 0 : step / stepCount
+        const x = prev.x + (next.x - prev.x) * t
+        const y = prev.y + (next.y - prev.y) * t
+        const cellId = this.pointToCell({ x, y, z: prev.z }).cellId
+        this.penalty2d[cellId] =
+          this.penalty2d[cellId]! + this.hyperParameters.ripTracePenalty
+      }
+    }
+
+    const viaZ =
+      this.availableZ[0] ?? this.nodeWithPortPoints.portPoints[0]?.z ?? 0
+    for (const via of this.getRouteViaPoints(route)) {
+      const cellId = this.pointToCell({ x: via.x, y: via.y, z: viaZ }).cellId
+      this.penalty2d[cellId] =
+        this.penalty2d[cellId]! + this.hyperParameters.ripViaPenalty
+    }
   }
 
   private markTraceFootprint(
@@ -1850,17 +2180,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     const route = this.solvedRoutes[connId]
     if (route) {
-      for (let i = 0; i < route.states.length; i++) {
-        const state = route.states[i]!
-        const cellId = state % this.planeSize
-        this.penalty2d[cellId] =
-          this.penalty2d[cellId]! + this.hyperParameters.ripTracePenalty
-      }
-      for (let i = 0; i < route.viaCellIds.length; i++) {
-        const cellId = route.viaCellIds[i]!
-        this.penalty2d[cellId] =
-          this.penalty2d[cellId]! + this.hyperParameters.ripViaPenalty
-      }
+      this.addRipPenaltyForRoute(route)
     }
 
     const indices = this.usedIndicesByConn[connId]
@@ -2084,43 +2404,19 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override getOutput(): HighDensityIntraNodeRoute[] {
-    const t = this.gridToBoundsTransform
     const result: HighDensityIntraNodeRoute[] = []
 
     for (let connId = 0; connId < this.solvedRoutes.length; connId++) {
       const route = this.solvedRoutes[connId]
       if (!route) continue
       const connName = this.connIdToName[connId]!
-      const points = Array.from(route.states, (state) => {
-        const z = Math.floor(state / this.planeSize)
-        const cellId = state - z * this.planeSize
-        const tp = applyAffineTransformToPoint(t, {
-          x: this.cellCenterX[cellId]!,
-          y: this.cellCenterY[cellId]!,
-        })
-        return {
-          x: tp.x,
-          y: tp.y,
-          z: this.layerToZ.get(z) ?? z,
-        }
-      })
-      if (points.length > 0) {
-        points[0] = { ...route.startPoint }
-        if (points.length > 1) {
-          points[points.length - 1] = { ...route.endPoint }
-        }
-      }
       result.push({
         connectionName: connName,
+        rootConnectionName: this.connIdToRootNet[connId],
         traceThickness: this.traceThickness,
         viaDiameter: this.viaDiameter,
-        route: points,
-        vias: Array.from(route.viaCellIds, (cellId) =>
-          applyAffineTransformToPoint(t, {
-            x: this.cellCenterX[cellId]!,
-            y: this.cellCenterY[cellId]!,
-          }),
-        ),
+        route: route.routePoints.map((point) => ({ ...point })),
+        vias: this.getRouteViaPoints(route),
       })
     }
 
