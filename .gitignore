@@ -45,3 +45,4 @@ wasm/pkg
 
 # local reference checkout used for A05 development
 hd-cache.tscircuit.com
+tmp

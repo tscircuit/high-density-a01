@@ -28,7 +28,7 @@ type CheckpointReport = {
   }
 }
 
-type A05Internals = HighDensitySolverA05 & {
+type A05DiagnosticView = {
   penalty2d?: Float64Array
   planeSize?: number
   gridToBoundsTransform?: {
@@ -87,7 +87,7 @@ const outDir = resolve(
 )
 
 const createCongestionOverlay = (
-  solver: A05Internals,
+  solver: A05DiagnosticView,
   baselinePenalty2d: Float64Array,
 ) => {
   const penalty2d = solver.penalty2d
@@ -182,7 +182,7 @@ const createCongestionOverlay = (
 
 const withCongestionOverlay = (
   graphics: GraphicsObject,
-  solver: A05Internals,
+  solver: A05DiagnosticView,
   baselinePenalty2d: Float64Array,
 ): { graphics: GraphicsObject; summary: CheckpointReport["congestion"] } => {
   const congestion = createCongestionOverlay(solver, baselinePenalty2d)
@@ -231,7 +231,7 @@ const solver = new HighDensitySolverA05({
 solver.MAX_ITERATIONS = 10_000_000
 solver.setup()
 
-const anySolver = solver as A05Internals
+const anySolver = solver as unknown as A05DiagnosticView
 const baselinePenalty2d = Float64Array.from(anySolver.penalty2d ?? [])
 
 const capturedGraphics: GraphicsObject[] = []

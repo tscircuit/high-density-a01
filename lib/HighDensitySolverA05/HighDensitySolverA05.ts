@@ -565,7 +565,7 @@ export class HighDensitySolverA05 extends BaseSolver {
     )
     this.hyperParameters = {
       shuffleSeed: 0,
-      ripCost: 8,
+      ripCost: 12,
       ripTracePenalty: 0.5,
       ripViaPenalty: 0.75,
       viaBaseCost: 0.1,
@@ -1333,6 +1333,11 @@ export class HighDensitySolverA05 extends BaseSolver {
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!this.ripChain.contains(head, occ)) {
+          if (this.totalRipEvents + ripCount + 1 >= this.MAX_RIPS) {
+            this._moveCost = -1
+            this._moveRippedHead = head
+            return
+          }
           cost += this.hyperParameters.ripCost
           head = this.ripChain.append(head, occ)
           ripCount++
@@ -1362,6 +1367,11 @@ export class HighDensitySolverA05 extends BaseSolver {
       for (let i = 0; i < this._cellOccs.length; i++) {
         const occ = this._cellOccs[i]!
         if (!this.ripChain.contains(head, occ)) {
+          if (this.totalRipEvents + ripCount + 1 >= this.MAX_RIPS) {
+            this._moveCost = -1
+            this._moveRippedHead = head
+            return
+          }
           cost += this.hyperParameters.ripCost
           head = this.ripChain.append(head, occ)
           ripCount++
@@ -1374,7 +1384,6 @@ export class HighDensitySolverA05 extends BaseSolver {
     this._moveRippedHead = head
     this._moveRipCount = ripCount
   }
-
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
@@ -1731,7 +1740,9 @@ export class HighDensitySolverA05 extends BaseSolver {
       }
     }
 
-    this.applyPostRouteReflow()
+    if (this.unsolvedSegs.length === 0) {
+      this.applyPostRouteReflow()
+    }
   }
 
   private extractViaCellIds(states: number[]) {

@@ -120,10 +120,7 @@
             "rootConnectionName": "source_net_13"
           }
         ],
-        "availableZ": [
-          0,
-          1
-        ]
+        "availableZ": [0, 1]
       }
     },
     {
@@ -193,10 +190,7 @@
             "rootConnectionName": "source_net_4"
           }
         ],
-        "availableZ": [
-          0,
-          1
-        ]
+        "availableZ": [0, 1]
       }
     },
     {
@@ -346,10 +340,7 @@
             "rootConnectionName": "source_net_24"
           }
         ],
-        "availableZ": [
-          0,
-          1
-        ]
+        "availableZ": [0, 1]
       }
     },
     {
@@ -531,10 +522,7 @@
             "rootConnectionName": "source_net_3"
           }
         ],
-        "availableZ": [
-          0,
-          1
-        ]
+        "availableZ": [0, 1]
       }
     },
     {
@@ -764,10 +752,7 @@
             "rootConnectionName": "source_net_1"
           }
         ],
-        "availableZ": [
-          0,
-          1
-        ]
+        "availableZ": [0, 1]
       }
     },
     {
@@ -885,10 +870,7 @@
             "rootConnectionName": "source_net_0"
           }
         ],
-        "availableZ": [
-          0,
-          1
-        ]
+        "availableZ": [0, 1]
       }
     },
     {
@@ -990,12 +972,7 @@
             "rootConnectionName": "source_net_0"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -1257,12 +1234,7 @@
             "rootConnectionName": "source_net_1"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -1460,12 +1432,7 @@
             "rootConnectionName": "source_net_5"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -1647,12 +1614,7 @@
             "rootConnectionName": "source_net_27"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -1882,12 +1844,7 @@
             "rootConnectionName": "source_net_6"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -1989,12 +1946,7 @@
             "rootConnectionName": "source_net_9"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -2176,12 +2128,7 @@
             "rootConnectionName": "source_net_5"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -2459,12 +2406,7 @@
             "rootConnectionName": "source_net_8"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -2694,12 +2636,7 @@
             "rootConnectionName": "source_net_0"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -2849,12 +2786,7 @@
             "rootConnectionName": "source_net_1"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -3052,12 +2984,7 @@
             "rootConnectionName": "source_net_7"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -3255,12 +3182,7 @@
             "rootConnectionName": "source_net_12"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     },
     {
@@ -3442,12 +3364,7 @@
             "rootConnectionName": "source_net_9"
           }
         ],
-        "availableZ": [
-          0,
-          1,
-          2,
-          3
-        ]
+        "availableZ": [0, 1, 2, 3]
       }
     }
   ],

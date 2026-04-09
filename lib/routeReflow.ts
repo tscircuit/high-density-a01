@@ -14,6 +14,11 @@ type Vector = {
   y: number
 }
 
+type ViaAttraction = {
+  target: Vector
+  strengthScale: number
+}
+
 type Bounds = {
   minX: number
   maxX: number
@@ -95,6 +100,7 @@ const VIA_CENTER_ATTRACTION_STRENGTH = 0.05
 const VIA_CENTER_EDGE_ATTRACTION_BOOST = 0.08
 const VIA_CENTER_EDGE_ATTRACTION_FALLOFF_DISTANCE = 1.5
 const MAX_VIA_CENTER_MOVE_PER_STEP = 0.024
+const CORNER_ORTHOGONAL_RELAX_DISTANCE = 0.5
 const SHAPE_RESTORE_STRENGTH = 0.14
 const PATH_SMOOTHING_STRENGTH = 0.22
 const TIGHTENING_FORCE_STRENGTH = 0.55
@@ -477,6 +483,32 @@ const getSampleBounds = (sample: NodeWithPortPoints): Bounds => ({
   maxY: sample.center.y + sample.height / 2,
 })
 
+const getNearestCornerDistance = (
+  bounds: Bounds,
+  pointX: number,
+  pointY: number,
+) =>
+  Math.min(
+    Math.hypot(pointX - bounds.minX, pointY - bounds.minY),
+    Math.hypot(pointX - bounds.minX, pointY - bounds.maxY),
+    Math.hypot(pointX - bounds.maxX, pointY - bounds.minY),
+    Math.hypot(pointX - bounds.maxX, pointY - bounds.maxY),
+  )
+
+const getCornerOrthogonalRelaxation = (
+  endpoint: MutableNode,
+  bounds: Bounds,
+) => {
+  const nearestCornerDistance = getNearestCornerDistance(
+    bounds,
+    endpoint.originalX,
+    endpoint.originalY,
+  )
+  return clampUnitInterval(
+    nearestCornerDistance / CORNER_ORTHOGONAL_RELAX_DISTANCE,
+  )
+}
+
 const clampNodeToBounds = (node: MutableNode, bounds: Bounds) => {
   const inset = node.boundaryPadding > 0 ? BOUNDARY_INSET : 0
   const minX = bounds.minX + node.boundaryPadding + inset
@@ -529,6 +561,11 @@ const getEndpointOrthogonalMove = (
   bounds: Bounds,
   decay: number,
 ) => {
+  const cornerRelaxation = getCornerOrthogonalRelaxation(endpoint, bounds)
+  if (cornerRelaxation <= POSITION_EPSILON) {
+    return { x: 0, y: 0 }
+  }
+
   const orthogonalLockAxis = getEndpointOrthogonalLockAxis(
     endpoint,
     adjacentNode,
@@ -541,10 +578,11 @@ const getEndpointOrthogonalMove = (
         x:
           (endpoint.x - adjacentNode.x) *
           END_SEGMENT_ORTHOGONAL_FORCE_STRENGTH *
+          cornerRelaxation *
           decay,
         y: 0,
       },
-      MAX_END_SEGMENT_ORTHOGONAL_MOVE_PER_STEP * decay,
+      MAX_END_SEGMENT_ORTHOGONAL_MOVE_PER_STEP * cornerRelaxation * decay,
     )
   }
 
@@ -554,9 +592,10 @@ const getEndpointOrthogonalMove = (
       y:
         (endpoint.y - adjacentNode.y) *
         END_SEGMENT_ORTHOGONAL_FORCE_STRENGTH *
+        cornerRelaxation *
         decay,
     },
-    MAX_END_SEGMENT_ORTHOGONAL_MOVE_PER_STEP * decay,
+    MAX_END_SEGMENT_ORTHOGONAL_MOVE_PER_STEP * cornerRelaxation * decay,
   )
 }
 
@@ -900,8 +939,68 @@ const getNearestBorderDistance = (
     bounds.maxY - pointY,
   )
 
+const getViaAttractionTarget = (
+  sample: NodeWithPortPoints,
+  bounds: Bounds,
+): ViaAttraction => {
+  const centerX = (bounds.minX + bounds.maxX) * 0.5
+  const centerY = (bounds.minY + bounds.maxY) * 0.5
+
+  if (sample.portPoints.length === 0) {
+    return {
+      target: {
+        x: centerX,
+        y: centerY,
+      },
+      strengthScale: 1,
+    }
+  }
+
+  const portCentroid = sample.portPoints.reduce(
+    (accumulator, portPoint) => ({
+      x: accumulator.x + portPoint.x,
+      y: accumulator.y + portPoint.y,
+    }),
+    { x: 0, y: 0 },
+  )
+  const inversePortCount = 1 / sample.portPoints.length
+  const portCenterX = portCentroid.x * inversePortCount
+  const portCenterY = portCentroid.y * inversePortCount
+  const halfWidth = Math.max(
+    (bounds.maxX - bounds.minX) * 0.5,
+    POSITION_EPSILON,
+  )
+  const halfHeight = Math.max(
+    (bounds.maxY - bounds.minY) * 0.5,
+    POSITION_EPSILON,
+  )
+  const skewMagnitude = clampUnitInterval(
+    Math.hypot(
+      (portCenterX - centerX) / halfWidth,
+      (portCenterY - centerY) / halfHeight,
+    ),
+  )
+
+  return {
+    target: {
+      x: clampValue(
+        bounds.minX + bounds.maxX - portCenterX,
+        bounds.minX + BOUNDARY_INSET,
+        bounds.maxX - BOUNDARY_INSET,
+      ),
+      y: clampValue(
+        bounds.minY + bounds.maxY - portCenterY,
+        bounds.minY + BOUNDARY_INSET,
+        bounds.maxY - BOUNDARY_INSET,
+      ),
+    },
+    strengthScale: 1 + skewMagnitude * 1.5,
+  }
+}
+
 const getViaCenterForce = (
   bounds: Bounds,
+  viaAttraction: ViaAttraction,
   element: ForceElement,
   elementX: number,
   elementY: number,
@@ -909,8 +1008,6 @@ const getViaCenterForce = (
 ): Vector => {
   if (element.fixed || element.kind !== "via") return { x: 0, y: 0 }
 
-  const centerX = (bounds.minX + bounds.maxX) * 0.5
-  const centerY = (bounds.minY + bounds.maxY) * 0.5
   const nearestBorderDistance = getNearestBorderDistance(
     bounds,
     elementX,
@@ -922,24 +1019,24 @@ const getViaCenterForce = (
       nearestBorderDistance / VIA_CENTER_EDGE_ATTRACTION_FALLOFF_DISTANCE,
     )
   const attractionStrength =
-    VIA_CENTER_ATTRACTION_STRENGTH +
-    edgePressure * VIA_CENTER_EDGE_ATTRACTION_BOOST
+    (VIA_CENTER_ATTRACTION_STRENGTH +
+      edgePressure * VIA_CENTER_EDGE_ATTRACTION_BOOST) *
+    viaAttraction.strengthScale
 
   return {
-    x: (centerX - elementX) * attractionStrength * stepDecay,
-    y: (centerY - elementY) * attractionStrength * stepDecay,
+    x: (viaAttraction.target.x - elementX) * attractionStrength * stepDecay,
+    y: (viaAttraction.target.y - elementY) * attractionStrength * stepDecay,
   }
 }
 
 const getViaCenterMove = (
   bounds: Bounds,
+  viaAttraction: ViaAttraction,
   node: MutableNode,
   stepDecay: number,
 ): Vector => {
   if (node.fixed || node.pointIndexes.length <= 1) return { x: 0, y: 0 }
 
-  const centerX = (bounds.minX + bounds.maxX) * 0.5
-  const centerY = (bounds.minY + bounds.maxY) * 0.5
   const nearestBorderDistance = getNearestBorderDistance(bounds, node.x, node.y)
   const edgePressure =
     1 -
@@ -947,15 +1044,19 @@ const getViaCenterMove = (
       nearestBorderDistance / VIA_CENTER_EDGE_ATTRACTION_FALLOFF_DISTANCE,
     )
   const attractionStrength =
-    VIA_CENTER_ATTRACTION_STRENGTH +
-    edgePressure * VIA_CENTER_EDGE_ATTRACTION_BOOST
+    (VIA_CENTER_ATTRACTION_STRENGTH +
+      edgePressure * VIA_CENTER_EDGE_ATTRACTION_BOOST) *
+    viaAttraction.strengthScale
 
   return clampVectorMagnitude(
     {
-      x: (centerX - node.x) * attractionStrength * stepDecay,
-      y: (centerY - node.y) * attractionStrength * stepDecay,
+      x: (viaAttraction.target.x - node.x) * attractionStrength * stepDecay,
+      y: (viaAttraction.target.y - node.y) * attractionStrength * stepDecay,
     },
-    MAX_VIA_CENTER_MOVE_PER_STEP * (1 + edgePressure) * stepDecay,
+    MAX_VIA_CENTER_MOVE_PER_STEP *
+      (1 + edgePressure) *
+      viaAttraction.strengthScale *
+      stepDecay,
   )
 }
 
@@ -1216,6 +1317,7 @@ export const runForceDirectedRouteReflow = (
   }
 
   const bounds = getSampleBounds(sample)
+  const viaAttractionTarget = getViaAttractionTarget(sample, bounds)
   const { mutableRoutes, totalNodeCount } = buildMutableRoutes(routes)
   const forceElements = buildForceElements(mutableRoutes)
   const segments = buildSegmentObstacles(mutableRoutes)
@@ -1412,6 +1514,7 @@ export const runForceDirectedRouteReflow = (
 
       const viaCenterForce = getViaCenterForce(
         bounds,
+        viaAttractionTarget,
         element,
         elementNode.x,
         elementNode.y,
@@ -1535,7 +1638,12 @@ export const runForceDirectedRouteReflow = (
         }
 
         if (node.pointIndexes.length > 1) {
-          const viaCenterMove = getViaCenterMove(bounds, node, stepDecay)
+          const viaCenterMove = getViaCenterMove(
+            bounds,
+            viaAttractionTarget,
+            node,
+            stepDecay,
+          )
           viaCenterMoveX = viaCenterMove.x
           viaCenterMoveY = viaCenterMove.y
         }
