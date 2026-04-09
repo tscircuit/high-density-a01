@@ -9,7 +9,7 @@ import {
   defaultParams,
 } from "../lib/default-params"
 // @ts-ignore
-import { hgProblems } from "../../high-density-dataset-z04/hg-problem/index.ts"
+import { hgProblems } from "../node_modules/high-density-dataset-z04/hg-problem/index.ts"
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,

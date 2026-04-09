@@ -1,86 +1,140 @@
-import { mkdir, readdir } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
-import dataset02Json from "@tscircuit/hypergraph/datasets/jumper-graph-solver/dataset02.json"
-import { getSvgFromGraphicsObject } from "graphics-debug"
-import { defaultA05Params } from "../lib/default-params"
 import {
-  convertDataset02SampleToNodeWithPortPoints,
-  type Dataset02Sample,
-} from "../lib/dataset02/convertDataset02SampleToNodeWithPortPoints"
-import { HighDensitySolverA05 } from "../lib/HighDensitySolverA05/HighDensitySolverA05"
-import { findSameLayerIntersections } from "../tests/fixtures/validateNoIntersections"
+  datasetZ04ProblemCount,
+  type Z04SampleResult,
+  type Z04SolverKey,
+  type Z04SolverMode,
+  type Z04WorkerOptions,
+} from "./run-dataset-z04-benchmark-common"
 
-const dataset02 = dataset02Json as Dataset02Sample[]
-
-type SolverMode = "default" | "repro"
-
-type BenchmarkOptions = {
-  limit?: number
-  sample?: number
-  mode: SolverMode
+type CliOptions = {
+  solverKeys: Z04SolverKey[]
   maxIterations: number
-  ripCost?: number
-  greedyMultiplier?: number
-  borderPenaltyStrength?: number
-  borderPenaltyFalloff?: number
+  limit?: number
+  concurrency: number
+  showStats: boolean
+  mode?: Z04SolverMode
 }
 
-type SampleMetrics = {
-  sampleNumber: number
-  status: "success" | "failed"
-  completionRate: number
-  drcIssues: number
-  durationMs: number
-  iterations: number
-  routes: number
-  expectedRoutes: number
-  solved: boolean
-  failed: boolean
-  error: string | null
-  sampleDir?: string
-  artifacts: string[]
+type WorkerRequest =
+  | {
+      type: "run"
+      sampleIndex: number
+      options: Z04WorkerOptions
+    }
+  | {
+      type: "shutdown"
+    }
+
+type SolverSummary = {
+  solverKey: Z04SolverKey
+  solverLabel: string
+  results: Z04SampleResult[]
+  processedCount: number
+  completedCount: number
+  validCount: number
+  failedCount: number
+  avgDurationMs: number
+  avgIterations: number
+  totalWallTimeMs: number
 }
 
 const HELP_TEXT = `
-Usage: ./benchmark.sh [options]
+Usage: ./benchmark.sh --solver A01,A03 [options]
 
-Runs the dataset02 benchmark for HighDensitySolverA05 and writes artifacts under
-./results/runNNN/.
+Runs the dataset Z04 benchmark for the selected solvers and reports both
+per-solver results and the union of problems solved validly by any provided
+solver.
+
+Typical flow:
+  ./benchmark.sh --solver A01,A03
+  ./benchmark.sh --solver A01,A03 --limit=100
 
 Options:
-  --help, -h                    Show this help message
-  --limit N                     Run the first N samples from dataset02
-  --sample NUM                  Run a specific 1-based sample number
-  --mode default|repro          Solver tuning preset (default: default)
-  --max-iterations N            Solver MAX_ITERATIONS (default: 10000000)
-  --rip-cost N                  Override hyperParameters.ripCost
-  --greedy-multiplier N         Override hyperParameters.greedyMultiplier
-  --border-penalty-strength N   Override A05 border penalty strength
-  --border-penalty-falloff N    Override A05 border penalty falloff
-
-Examples:
-  ./benchmark.sh
-  ./benchmark.sh --limit 20
-  ./benchmark.sh --sample 17
-  ./benchmark.sh --limit 20 --mode repro
-  ./benchmark.sh --rip-cost 8 --greedy-multiplier 1.5
+  --solver LIST         Required. Comma-separated solver list: A01,A02,A03,A05
+  --concurrency N       Number of worker loops per solver run (default: 4)
+  --limit N             Only run first N problems
+  --mode MODE           Optional shared mode: default|repro|fast|strict
+  --max-iterations N    Solver MAX_ITERATIONS (default: 1000000)
+  --stats               Print average grid stats for each solver
+  --help, -h            Show this help message
 `.trim()
 
-function parseOptionalNumber(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined
-  const parsed = Number.parseFloat(value)
-  return Number.isFinite(parsed) ? parsed : undefined
+const SOLVER_LABELS: Record<Z04SolverKey, string> = {
+  a01: "HighDensitySolverA01",
+  a02: "HighDensitySolverA02",
+  a03: "HighDensitySolverA03",
+  a05: "HighDensitySolverA05",
 }
 
-function parseArgs(argv: string[]): BenchmarkOptions | null {
+const CLI_TO_SOLVER_KEY: Record<string, Z04SolverKey> = {
+  A01: "a01",
+  A02: "a02",
+  A03: "a03",
+  A05: "a05",
+}
+
+const MODE_COMPATIBILITY: Record<Z04SolverKey, readonly Z04SolverMode[]> = {
+  a01: [],
+  a02: ["fast", "strict"],
+  a03: ["default", "repro"],
+  a05: ["default", "repro"],
+}
+
+function parsePositiveInteger(
+  rawValue: string,
+  optionName: string,
+): number {
+  const parsed = Number.parseInt(rawValue, 10)
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error(`${optionName} must be a positive integer`)
+  }
+  return parsed
+}
+
+function parseMode(value: string): Z04SolverMode {
+  if (
+    value === "default" ||
+    value === "repro" ||
+    value === "fast" ||
+    value === "strict"
+  ) {
+    return value
+  }
+  throw new Error(`Unknown mode: ${value}`)
+}
+
+function parseSolverList(value: string): Z04SolverKey[] {
+  const tokens = value
+    .split(",")
+    .map((token) => token.trim().toUpperCase())
+    .filter(Boolean)
+
+  if (tokens.length === 0) {
+    throw new Error("--solver must include at least one solver")
+  }
+
+  const solverKeys: Z04SolverKey[] = []
+  const seen = new Set<Z04SolverKey>()
+  for (const token of tokens) {
+    const solverKey = CLI_TO_SOLVER_KEY[token]
+    if (!solverKey) {
+      throw new Error(`Unknown solver: ${token}`)
+    }
+    if (!seen.has(solverKey)) {
+      seen.add(solverKey)
+      solverKeys.push(solverKey)
+    }
+  }
+  return solverKeys
+}
+
+function parseArgs(argv: string[]): CliOptions | null {
+  let solverKeys: Z04SolverKey[] | undefined
+  let maxIterations = 1_000_000
   let limit: number | undefined
-  let sample: number | undefined
-  let mode: SolverMode = "default"
-  let maxIterations = 10_000_000
-  let ripCost: number | undefined
-  let greedyMultiplier: number | undefined
-  let borderPenaltyStrength: number | undefined
-  let borderPenaltyFalloff: number | undefined
+  let concurrency = 4
+  let showStats = false
+  let mode: Z04SolverMode | undefined
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]!
@@ -98,476 +152,322 @@ function parseArgs(argv: string[]): BenchmarkOptions | null {
       return null
     }
 
+    if (arg === "--solver") {
+      solverKeys = parseSolverList(takeValue())
+      continue
+    }
+
+    if (arg.startsWith("--solver=")) {
+      solverKeys = parseSolverList(arg.slice("--solver=".length))
+      continue
+    }
+
+    if (arg === "--concurrency") {
+      concurrency = parsePositiveInteger(takeValue(), "--concurrency")
+      continue
+    }
+
+    if (arg.startsWith("--concurrency=")) {
+      concurrency = parsePositiveInteger(
+        arg.slice("--concurrency=".length),
+        "--concurrency",
+      )
+      continue
+    }
+
     if (arg === "--limit") {
-      const parsed = Number.parseInt(takeValue(), 10)
-      if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error("--limit must be a positive integer")
-      }
-      limit = parsed
+      limit = parsePositiveInteger(takeValue(), "--limit")
       continue
     }
 
     if (arg.startsWith("--limit=")) {
-      const parsed = Number.parseInt(arg.slice("--limit=".length), 10)
-      if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error("--limit must be a positive integer")
-      }
-      limit = parsed
-      continue
-    }
-
-    if (arg === "--sample") {
-      const parsed = Number.parseInt(takeValue(), 10)
-      if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error("--sample must be a positive integer")
-      }
-      sample = parsed
-      continue
-    }
-
-    if (arg.startsWith("--sample=")) {
-      const parsed = Number.parseInt(arg.slice("--sample=".length), 10)
-      if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error("--sample must be a positive integer")
-      }
-      sample = parsed
+      limit = parsePositiveInteger(arg.slice("--limit=".length), "--limit")
       continue
     }
 
     if (arg === "--mode") {
-      const value = takeValue()
-      mode = value === "repro" ? "repro" : "default"
+      mode = parseMode(takeValue())
       continue
     }
 
     if (arg.startsWith("--mode=")) {
-      const value = arg.slice("--mode=".length)
-      mode = value === "repro" ? "repro" : "default"
+      mode = parseMode(arg.slice("--mode=".length))
       continue
     }
 
     if (arg === "--max-iterations") {
-      const parsed = Number.parseInt(takeValue(), 10)
-      if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error("--max-iterations must be a positive integer")
-      }
-      maxIterations = parsed
+      maxIterations = parsePositiveInteger(takeValue(), "--max-iterations")
       continue
     }
 
     if (arg.startsWith("--max-iterations=")) {
-      const parsed = Number.parseInt(arg.slice("--max-iterations=".length), 10)
-      if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error("--max-iterations must be a positive integer")
-      }
-      maxIterations = parsed
-      continue
-    }
-
-    if (arg === "--rip-cost") {
-      ripCost = parseOptionalNumber(takeValue())
-      continue
-    }
-
-    if (arg.startsWith("--rip-cost=")) {
-      ripCost = parseOptionalNumber(arg.slice("--rip-cost=".length))
-      continue
-    }
-
-    if (arg === "--greedy-multiplier") {
-      greedyMultiplier = parseOptionalNumber(takeValue())
-      continue
-    }
-
-    if (arg.startsWith("--greedy-multiplier=")) {
-      greedyMultiplier = parseOptionalNumber(
-        arg.slice("--greedy-multiplier=".length),
+      maxIterations = parsePositiveInteger(
+        arg.slice("--max-iterations=".length),
+        "--max-iterations",
       )
       continue
     }
 
-    if (arg === "--border-penalty-strength") {
-      borderPenaltyStrength = parseOptionalNumber(takeValue())
-      continue
-    }
-
-    if (arg.startsWith("--border-penalty-strength=")) {
-      borderPenaltyStrength = parseOptionalNumber(
-        arg.slice("--border-penalty-strength=".length),
-      )
-      continue
-    }
-
-    if (arg === "--border-penalty-falloff") {
-      borderPenaltyFalloff = parseOptionalNumber(takeValue())
-      continue
-    }
-
-    if (arg.startsWith("--border-penalty-falloff=")) {
-      borderPenaltyFalloff = parseOptionalNumber(
-        arg.slice("--border-penalty-falloff=".length),
-      )
+    if (arg === "--stats") {
+      showStats = true
       continue
     }
 
     throw new Error(`Unknown argument: ${arg}`)
   }
 
+  if (!solverKeys) {
+    console.error("Missing required --solver argument.\n")
+    console.error(HELP_TEXT)
+    process.exit(1)
+  }
+
   return {
-    limit,
-    sample,
-    mode,
+    solverKeys,
     maxIterations,
-    ripCost,
-    greedyMultiplier,
-    borderPenaltyStrength,
-    borderPenaltyFalloff,
+    limit,
+    concurrency,
+    showStats,
+    mode,
   }
 }
 
-function toSampleLabel(sampleNumber: number) {
-  return `sample${sampleNumber.toString().padStart(3, "0")}`
+function getModeForSolver(
+  solverKey: Z04SolverKey,
+  mode: Z04SolverMode | undefined,
+): Z04SolverMode | undefined {
+  if (!mode) return undefined
+  return MODE_COMPATIBILITY[solverKey].includes(mode) ? mode : undefined
 }
 
-async function createRunDirectory() {
-  const resultsDir = resolve("results")
-  await mkdir(resultsDir, { recursive: true })
+function formatSolverName(solverKey: Z04SolverKey) {
+  return solverKey.toUpperCase()
+}
 
-  const entries = await readdir(resultsDir, { withFileTypes: true })
-  let highestRunNumber = 0
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const match = /^run(\d+)$/.exec(entry.name)
-    if (!match) continue
-    const parsed = Number.parseInt(match[1]!, 10)
-    if (Number.isFinite(parsed)) {
-      highestRunNumber = Math.max(highestRunNumber, parsed)
+async function runSolverBenchmark(
+  solverKey: Z04SolverKey,
+  options: CliOptions,
+  sampleCount: number,
+): Promise<SolverSummary> {
+  const sampleIndices = Array.from({ length: sampleCount }, (_, index) => index)
+  const workerCount = Math.min(options.concurrency, sampleIndices.length)
+  const results: Array<Z04SampleResult | undefined> = new Array(sampleCount)
+  const workerOptions: Z04WorkerOptions = {
+    solverKey,
+    solverMode: getModeForSolver(solverKey, options.mode),
+    maxIterations: options.maxIterations,
+    collectStats: options.showStats,
+  }
+
+  let nextJobPointer = 0
+  let processedCount = 0
+  let completedCount = 0
+  let validCount = 0
+  let failedCount = 0
+
+  const workerScriptUrl = new URL(
+    "./run-dataset-z04-benchmark.worker.ts",
+    import.meta.url,
+  )
+
+  const benchmarkStart = performance.now()
+  const workers = Array.from(
+    { length: workerCount },
+    () => new Worker(workerScriptUrl.href, { type: "module" }),
+  )
+
+  const assignJob = (worker: Worker) => {
+    const sampleIndex = sampleIndices[nextJobPointer]
+    if (sampleIndex === undefined) {
+      worker.postMessage({ type: "shutdown" } satisfies WorkerRequest)
+      return
     }
+    nextJobPointer += 1
+    worker.postMessage({
+      type: "run",
+      sampleIndex,
+      options: workerOptions,
+    } satisfies WorkerRequest)
   }
 
-  const runNumber = highestRunNumber + 1
-  const runLabel = `run${runNumber.toString().padStart(3, "0")}`
-  const runDir = join(resultsDir, runLabel)
-  await mkdir(runDir, { recursive: true })
-
-  return { runNumber, runLabel, runDir }
-}
-
-function percentile(values: number[], fraction: number) {
-  if (values.length === 0) return 0
-  const sorted = [...values].sort((a, b) => a - b)
-  const index = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.ceil(sorted.length * fraction) - 1),
+  console.log()
+  console.log(
+    `Running ${formatSolverName(solverKey)} (${SOLVER_LABELS[solverKey]}) on ${sampleCount}/${datasetZ04ProblemCount} problems`,
   )
-  return sorted[index]!
-}
-
-async function tryWritePngFromSvg(svgPath: string, pngPath: string) {
-  const outputDir = dirname(svgPath)
-  const proc = Bun.spawnSync(
-    ["qlmanage", "-t", "-s", "2048", "-o", outputDir, svgPath],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  )
-
-  if (proc.exitCode !== 0) {
-    return null
+  if (workerOptions.solverMode) {
+    console.log(`Mode: ${workerOptions.solverMode}`)
   }
+  console.log(`Workers: ${workerCount}`)
+  console.log(`Max iterations: ${options.maxIterations}`)
 
-  const renderedPngPath = `${svgPath}.png`
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      const pngFile = Bun.file(renderedPngPath)
-      if ((await pngFile.exists()) === true) {
-        const pngBuffer = await pngFile.arrayBuffer()
-        await Bun.write(pngPath, pngBuffer)
-        return pngPath
-      }
-    } catch {
-      // Keep polling briefly; qlmanage can report success before the file is readable.
-    }
+  await new Promise<void>((resolve, reject) => {
+    let done = false
 
-    await Bun.sleep(50)
-  }
+    for (let workerIndex = 0; workerIndex < workers.length; workerIndex += 1) {
+      const worker = workers[workerIndex]!
 
-  return null
-}
+      worker.onmessage = (event: MessageEvent<Z04SampleResult>) => {
+        const result = event.data
+        results[result.sampleIndex] = result
 
-async function runSample(
-  sample: Dataset02Sample,
-  sampleNumber: number,
-  options: BenchmarkOptions,
-  runDir: string,
-) {
-  const sampleLabel = toSampleLabel(sampleNumber)
+        processedCount += 1
+        if (result.solved) completedCount += 1
+        if (result.valid) validCount += 1
+        if (result.failed) failedCount += 1
 
-  const nodeWithPortPoints = convertDataset02SampleToNodeWithPortPoints(
-    sample,
-    {
-      capacityMeshNodeId: `dataset02-${sampleNumber}`,
-      availableZ: [0, 1],
-    },
-  )
+        const completedRate =
+          (completedCount / Math.max(1, processedCount)) * 100
+        const validRate = (validCount / Math.max(1, processedCount)) * 100
+        const status = result.valid
+          ? "valid"
+          : result.solved
+            ? "invalid"
+            : result.failed
+              ? "failed"
+              : "incomplete"
 
-  const hyperParameters = {
-    ...(options.mode === "repro"
-      ? {
-          ripCost: 1,
-          greedyMultiplier: 1.2,
+        console.log(
+          `[${formatSolverName(solverKey)} worker ${workerIndex + 1}] problem ${result.problemId} (${result.sampleIndex + 1}/${sampleCount}): ${status} in ${result.durationMs.toFixed(1)}ms (iterations=${result.iterations}, routes=${result.routes}, violations=${result.violationCount}) | completed=${completedCount}/${processedCount} (${completedRate.toFixed(1)}%), valid=${validCount}/${processedCount} (${validRate.toFixed(1)}%)`,
+        )
+        if (result.error) {
+          console.log(`  error: ${result.error}`)
         }
-      : {}),
-    ...(options.ripCost === undefined ? {} : { ripCost: options.ripCost }),
-    ...(options.greedyMultiplier === undefined
-      ? {}
-      : { greedyMultiplier: options.greedyMultiplier }),
-  }
 
-  const solver = new HighDensitySolverA05({
-    ...defaultA05Params,
-    nodeWithPortPoints,
-    ...(options.borderPenaltyStrength === undefined
-      ? {}
-      : { borderPenaltyStrength: options.borderPenaltyStrength }),
-    ...(options.borderPenaltyFalloff === undefined
-      ? {}
-      : { borderPenaltyFalloff: options.borderPenaltyFalloff }),
-    hyperParameters:
-      Object.keys(hyperParameters).length > 0 ? hyperParameters : undefined,
+        if (processedCount >= sampleCount && !done) {
+          done = true
+          for (const activeWorker of workers) activeWorker.terminate()
+          resolve()
+          return
+        }
+
+        assignJob(worker)
+      }
+
+      worker.onerror = (error) => {
+        if (done) return
+        done = true
+        for (const activeWorker of workers) activeWorker.terminate()
+        reject(error)
+      }
+
+      assignJob(worker)
+    }
   })
-  solver.MAX_ITERATIONS = options.maxIterations
 
-  const start = performance.now()
-  solver.solve()
-  const durationMs = performance.now() - start
+  const totalWallTimeMs = performance.now() - benchmarkStart
+  const completedResults = results.filter(
+    (result): result is Z04SampleResult => Boolean(result),
+  )
+  const avgDurationMs =
+    completedResults.reduce((sum, result) => sum + result.durationMs, 0) /
+    Math.max(1, completedResults.length)
+  const avgIterations =
+    completedResults.reduce((sum, result) => sum + result.iterations, 0) /
+    Math.max(1, completedResults.length)
 
-  const routes = solver.getOutput()
-  const drcIssues = findSameLayerIntersections(routes).length
-  const expectedRoutes = sample.connections.length
-  const completionRate =
-    expectedRoutes > 0 ? (routes.length / expectedRoutes) * 100 : 100
+  console.log(`${formatSolverName(solverKey)} summary:`)
+  console.log(`  processed=${completedResults.length}/${sampleCount}`)
+  console.log(`  completed=${completedCount}`)
+  console.log(`  valid=${validCount}`)
+  console.log(`  failed=${failedCount}`)
+  console.log(
+    `  completionRate=${((completedCount / Math.max(1, completedResults.length)) * 100).toFixed(1)}%`,
+  )
+  console.log(
+    `  validRate=${((validCount / Math.max(1, completedResults.length)) * 100).toFixed(1)}%`,
+  )
+  console.log(`  avgDuration=${avgDurationMs.toFixed(1)}ms`)
+  console.log(`  avgIterations=${avgIterations.toFixed(0)}`)
+  console.log(`  wallTime=${(totalWallTimeMs / 1000).toFixed(2)}s`)
 
-  let sampleDir: string | undefined
-  const artifacts: string[] = []
-  const shouldWriteArtifacts = solver.failed || drcIssues > 0
+  if (options.showStats && completedResults.length > 0) {
+    const average = (pick: (result: Z04SampleResult) => number) =>
+      completedResults.reduce((sum, result) => sum + pick(result), 0) /
+      Math.max(1, completedResults.length)
 
-  if (shouldWriteArtifacts) {
-    sampleDir = join(runDir, sampleLabel)
-    await mkdir(sampleDir, { recursive: true })
-
-    const graphics = solver.visualize()
-    const svgPath = join(sampleDir, "pcb.svg")
-    await Bun.write(svgPath, getSvgFromGraphicsObject(graphics))
-
-    const pngPath = join(sampleDir, "pcb.png")
-    const writtenPngPath = await tryWritePngFromSvg(svgPath, pngPath)
-
-    const sampleLog = [
-      `sample=${sampleLabel}`,
-      `status=${solver.solved && !solver.failed ? "success" : "failed"}`,
-      `solved=${solver.solved}`,
-      `failed=${solver.failed}`,
-      `error=${solver.error ?? ""}`,
-      `routes=${routes.length}`,
-      `expectedRoutes=${expectedRoutes}`,
-      `completionRate=${completionRate.toFixed(1)}%`,
-      `drcIssues=${drcIssues}`,
-      `iterations=${solver.iterations}`,
-      `duration=${(durationMs / 1000).toFixed(3)}s`,
-    ].join("\n")
-    const logsPath = join(sampleDir, "logs.txt")
-    await Bun.write(logsPath, `${sampleLog}\n`)
-
-    const metrics = {
-      sample: sampleLabel,
-      sampleNumber,
-      status: solver.solved && !solver.failed ? "success" : "failed",
-      solved: solver.solved,
-      failed: solver.failed,
-      error: solver.error,
-      routes: routes.length,
-      expectedRoutes,
-      completionRate,
-      drcIssues,
-      iterations: solver.iterations,
-      durationMs,
-      sampleConfig: sample.config,
-    }
-    const metricsPath = join(sampleDir, "metrics.json")
-    await Bun.write(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`)
-
-    artifacts.push(logsPath)
-    if (writtenPngPath) {
-      artifacts.push(writtenPngPath)
-    } else {
-      artifacts.push(svgPath)
-    }
+    console.log("  gridStats:")
+    console.log(`    cells=${average((r) => r.gridStats?.cells ?? 0).toFixed(0)}`)
+    console.log(
+      `    layers=${average((r) => r.gridStats?.layers ?? 0).toFixed(1)}`,
+    )
+    console.log(
+      `    states=${average((r) => r.gridStats?.states ?? 0).toFixed(0)}`,
+    )
+    console.log(
+      `    neighborEdges=${average((r) => r.gridStats?.neighborEdges ?? 0).toFixed(0)}`,
+    )
+    console.log(
+      `    ripStateBuckets=${average((r) => r.gridStats?.ripStateBuckets ?? 0).toFixed(1)}`,
+    )
   }
 
   return {
-    sampleNumber,
-    status: solver.solved && !solver.failed ? "success" : "failed",
-    completionRate,
-    drcIssues,
-    durationMs,
-    iterations: solver.iterations,
-    routes: routes.length,
-    expectedRoutes,
-    solved: solver.solved,
-    failed: solver.failed,
-    error: solver.error,
-    sampleDir,
-    artifacts,
-  } satisfies SampleMetrics
+    solverKey,
+    solverLabel: SOLVER_LABELS[solverKey],
+    results: completedResults,
+    processedCount: completedResults.length,
+    completedCount,
+    validCount,
+    failedCount,
+    avgDurationMs,
+    avgIterations,
+    totalWallTimeMs,
+  }
 }
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
   if (options === null) return
 
-  const requestedSamples =
-    options.sample !== undefined
-      ? [
-          {
-            sample: dataset02[options.sample - 1],
-            sampleNumber: options.sample,
-          },
-        ]
-      : dataset02
-          .slice(0, options.limit ?? dataset02.length)
-          .map((sample, index) => ({ sample, sampleNumber: index + 1 }))
+  const sampleCount =
+    options.limit === undefined
+      ? datasetZ04ProblemCount
+      : Math.min(datasetZ04ProblemCount, options.limit)
 
-  if (requestedSamples.length === 0) {
-    throw new Error("No samples selected.")
+  if (sampleCount === 0) {
+    throw new Error("No problems selected. Use --limit=N with N > 0.")
   }
 
-  const missingSample = requestedSamples.find(({ sample }) => !sample)
-  if (missingSample) {
-    throw new Error(
-      `Sample ${missingSample.sampleNumber} not found in dataset02`,
+  console.log("Dataset Z04 benchmark")
+  console.log("=".repeat(72))
+  console.log(
+    `Solvers: ${options.solverKeys.map((solverKey) => formatSolverName(solverKey)).join(", ")}`,
+  )
+  console.log(`Problems: ${sampleCount}/${datasetZ04ProblemCount}`)
+  console.log(`Typical flow: ./benchmark.sh --solver A01,A03`)
+
+  const solverSummaries: SolverSummary[] = []
+  for (const solverKey of options.solverKeys) {
+    solverSummaries.push(
+      await runSolverBenchmark(solverKey, options, sampleCount),
     )
   }
 
-  const { runLabel, runDir } = await createRunDirectory()
-  const startedAt = new Date().toISOString()
+  const unionValidProblemIds = new Set<number>()
+  const unionCompletedProblemIds = new Set<number>()
 
-  console.log(`benchmark run: ${runLabel}`)
-  console.log(`results dir: ${runDir}`)
-  console.log(`samples: ${requestedSamples.length}`)
-  console.log(`mode: ${options.mode}`)
-  console.log(`maxIterations: ${options.maxIterations}`)
-  console.log()
-
-  const runStart = performance.now()
-  const sampleLines: string[] = []
-  const results: SampleMetrics[] = []
-
-  for (const entry of requestedSamples) {
-    const result = await runSample(
-      entry.sample!,
-      entry.sampleNumber,
-      options,
-      runDir,
-    )
-    results.push(result)
-
-    const line =
-      `${toSampleLabel(result.sampleNumber).padEnd(9)} ` +
-      `${result.status.padEnd(7)} ` +
-      `cm=${result.completionRate.toFixed(1).padStart(6)}% ` +
-      `drcIssues=${String(result.drcIssues).padStart(2, "0")} ` +
-      `duration=${(result.durationMs / 1000).toFixed(3).padStart(7)}s`
-
-    console.log(line)
-    if (result.artifacts.length > 0) {
-      console.log(`# wrote ${result.artifacts.join(" ")}`)
+  for (const summary of solverSummaries) {
+    for (const result of summary.results) {
+      if (result.solved) unionCompletedProblemIds.add(result.problemId)
+      if (result.valid) unionValidProblemIds.add(result.problemId)
     }
-    sampleLines.push(line)
   }
 
-  const totalDurationMs = performance.now() - runStart
-  const durations = results.map((result) => result.durationMs / 1000)
-  const successCount = results.filter(
-    (result) => result.status === "success",
-  ).length
-  const drcValues = results.map((result) => result.drcIssues)
-  const zeroDrcCount = drcValues.filter((value) => value === 0).length
-  const avgDrcIssues =
-    drcValues.reduce((sum, value) => sum + value, 0) /
-    Math.max(1, drcValues.length)
-  const avgDuration =
-    durations.reduce((sum, value) => sum + value, 0) /
-    Math.max(1, durations.length)
-  const p50Duration = percentile(durations, 0.5)
-  const p95Duration = percentile(durations, 0.95)
-
-  const summaryLines = [
-    `success rate: ${((successCount / Math.max(1, results.length)) * 100).toFixed(1)}%`,
-    `avg DRC issues: ${avgDrcIssues.toFixed(2)}`,
-    `zero-DRC rate: ${((zeroDrcCount / Math.max(1, results.length)) * 100).toFixed(1)}%`,
-    `avg duration: ${avgDuration.toFixed(3)}s`,
-    `P50 duration: ${p50Duration.toFixed(3)}s`,
-    `P95 duration: ${p95Duration.toFixed(3)}s`,
-    `total duration: ${(totalDurationMs / 1000).toFixed(3)}s`,
-  ]
-
-  const runLog = [
-    `run=${runLabel}`,
-    `startedAt=${startedAt}`,
-    `dataset=dataset02`,
-    `solver=HighDensitySolverA05`,
-    `sampleCount=${requestedSamples.length}`,
-    `mode=${options.mode}`,
-    `maxIterations=${options.maxIterations}`,
-    ...(options.limit === undefined ? [] : [`limit=${options.limit}`]),
-    ...(options.sample === undefined ? [] : [`sample=${options.sample}`]),
-    ...(options.ripCost === undefined ? [] : [`ripCost=${options.ripCost}`]),
-    ...(options.greedyMultiplier === undefined
-      ? []
-      : [`greedyMultiplier=${options.greedyMultiplier}`]),
-    ...(options.borderPenaltyStrength === undefined
-      ? []
-      : [`borderPenaltyStrength=${options.borderPenaltyStrength}`]),
-    ...(options.borderPenaltyFalloff === undefined
-      ? []
-      : [`borderPenaltyFalloff=${options.borderPenaltyFalloff}`]),
-    "",
-    ...sampleLines,
-    "",
-    ...summaryLines,
-  ].join("\n")
-
-  await Bun.write(join(runDir, "logs.txt"), `${runLog}\n`)
-  await Bun.write(
-    join(runDir, "summary.json"),
-    `${JSON.stringify(
-      {
-        run: runLabel,
-        dataset: "dataset02",
-        solver: "HighDensitySolverA05",
-        sampleCount: requestedSamples.length,
-        startedAt,
-        options,
-        summary: {
-          successRate: successCount / Math.max(1, results.length),
-          avgDrcIssues,
-          zeroDrcRate: zeroDrcCount / Math.max(1, results.length),
-          avgDurationSeconds: avgDuration,
-          p50DurationSeconds: p50Duration,
-          p95DurationSeconds: p95Duration,
-          totalDurationSeconds: totalDurationMs / 1000,
-        },
-      },
-      null,
-      2,
-    )}\n`,
+  console.log()
+  console.log("Union summary:")
+  console.log(
+    `  validByAnySolver=${unionValidProblemIds.size}/${sampleCount} (${((unionValidProblemIds.size / sampleCount) * 100).toFixed(1)}%)`,
+  )
+  console.log(
+    `  completedByAnySolver=${unionCompletedProblemIds.size}/${sampleCount} (${((unionCompletedProblemIds.size / sampleCount) * 100).toFixed(1)}%)`,
   )
 
   console.log()
-  for (const line of summaryLines) {
-    console.log(line)
+  console.log("Per-solver valid counts:")
+  for (const summary of solverSummaries) {
+    console.log(
+      `  ${formatSolverName(summary.solverKey)}=${summary.validCount}/${sampleCount} (${((summary.validCount / sampleCount) * 100).toFixed(1)}%)`,
+    )
   }
 }
 
