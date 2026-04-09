@@ -179,3 +179,131 @@ test("runForceDirectedRouteReflow pulls vias inward from boundary-heavy routes",
   expect(via?.x).toBeLessThan(3.05)
   expect(via?.x).toBeLessThan(routes[0]!.vias[0]!.x)
 })
+
+test("runForceDirectedRouteReflow relaxes endpoint orthogonal locking near corners", () => {
+  const makeSample = (endpointY: number): NodeWithPortPoints => ({
+    capacityMeshNodeId: `route-reflow-corner-${endpointY}`,
+    center: { x: 0, y: 0 },
+    width: 8,
+    height: 8,
+    availableZ: [0],
+    portPoints: [
+      {
+        connectionName: "conn00",
+        rootConnectionName: "root00",
+        x: -4,
+        y: endpointY,
+        z: 0,
+      },
+      {
+        connectionName: "conn00",
+        rootConnectionName: "root00",
+        x: 4,
+        y: 0,
+        z: 0,
+      },
+    ],
+  })
+
+  const makeRoute = (endpointY: number): HighDensityIntraNodeRoute => ({
+    connectionName: "conn00",
+    rootConnectionName: "root00",
+    traceThickness: 0.1,
+    viaDiameter: 0.3,
+    vias: [],
+    route: [
+      { x: -4, y: endpointY, z: 0 },
+      { x: -2.6, y: endpointY + 1.2, z: 0 },
+      { x: 0.5, y: 0.8, z: 0 },
+      { x: 4, y: 0, z: 0 },
+    ],
+  })
+
+  const centerEdgeRoute = runForceDirectedRouteReflow(
+    makeSample(-2),
+    [makeRoute(-2)],
+    30,
+  )[0]
+  const cornerRoute = runForceDirectedRouteReflow(
+    makeSample(-3.8),
+    [makeRoute(-3.8)],
+    30,
+  )[0]
+
+  const centerOffset = Math.abs(
+    (centerEdgeRoute?.route[1]?.y ?? 0) - (centerEdgeRoute?.route[0]?.y ?? 0),
+  )
+  const cornerOffset = Math.abs(
+    (cornerRoute?.route[1]?.y ?? 0) - (cornerRoute?.route[0]?.y ?? 0),
+  )
+
+  expect(centerOffset).toBeLessThan(0.55)
+  expect(cornerOffset).toBeGreaterThan(centerOffset + 0.5)
+})
+
+test("runForceDirectedRouteReflow steers vias away from bottom-heavy port distributions", () => {
+  const nodeWithPortPoints: NodeWithPortPoints = {
+    capacityMeshNodeId: "route-reflow-via-gravity-shift",
+    center: { x: 0, y: 0 },
+    width: 8,
+    height: 8,
+    availableZ: [0, 1],
+    portPoints: [
+      {
+        connectionName: "conn00",
+        rootConnectionName: "root00",
+        x: -2.5,
+        y: -4,
+        z: 0,
+      },
+      {
+        connectionName: "conn00",
+        rootConnectionName: "root00",
+        x: 2.5,
+        y: -4,
+        z: 1,
+      },
+      {
+        connectionName: "dummy-left",
+        rootConnectionName: "dummy-left",
+        x: -3.5,
+        y: -4,
+        z: 0,
+      },
+      {
+        connectionName: "dummy-right",
+        rootConnectionName: "dummy-right",
+        x: 3.5,
+        y: -4,
+        z: 1,
+      },
+    ],
+  }
+
+  const routes: HighDensityIntraNodeRoute[] = [
+    {
+      connectionName: "conn00",
+      rootConnectionName: "root00",
+      traceThickness: 0.1,
+      viaDiameter: 0.3,
+      vias: [{ x: 0, y: -2.4 }],
+      route: [
+        { x: -2.5, y: -4, z: 0 },
+        { x: 0, y: -2.4, z: 0 },
+        { x: 0, y: -2.4, z: 1 },
+        { x: 2.5, y: -4, z: 1 },
+      ],
+    },
+  ]
+
+  const improvedRoutes = runForceDirectedRouteReflow(
+    nodeWithPortPoints,
+    routes,
+    30,
+  )
+  const via = improvedRoutes[0]?.vias[0]
+
+  expect(via).toBeDefined()
+  expect(via?.y).toBeGreaterThan(-2.05)
+  expect(via?.y).toBeGreaterThan(routes[0]!.vias[0]!.y)
+})
