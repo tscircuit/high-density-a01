@@ -22,6 +22,7 @@ const SOLVER_OPTIONS: Array<{ label: string; value: SolverKey }> = [
   { label: "A03", value: "a03" },
   { label: "A05", value: "a05" },
 ]
+const ALL_SOLVER_KEYS = SOLVER_OPTIONS.map((option) => option.value)
 
 const isSolverKey = (value: string | null): value is SolverKey =>
   value === "a01" || value === "a02" || value === "a03" || value === "a05"
@@ -35,6 +36,7 @@ const getInitialSolverKey = (fallback: SolverKey) => {
 type SolverDebuggerProps = {
   nodeWithPortPoints: NodeWithPortPoints
   defaultSolverKey?: SolverKey
+  solverKeys?: readonly SolverKey[]
   debugKey?: string
   maxIterations?: number
 }
@@ -42,17 +44,34 @@ type SolverDebuggerProps = {
 export function SolverDebugger({
   nodeWithPortPoints,
   defaultSolverKey = "a03",
+  solverKeys,
   debugKey,
   maxIterations = 10_000_000,
 }: SolverDebuggerProps) {
-  const [solverKey, setSolverKey] = useState<SolverKey>(() =>
-    getInitialSolverKey(defaultSolverKey),
+  const allowedSolverKeys =
+    solverKeys && solverKeys.length > 0 ? solverKeys : ALL_SOLVER_KEYS
+  const fallbackSolverKey = allowedSolverKeys.includes(defaultSolverKey)
+    ? defaultSolverKey
+    : (allowedSolverKeys[0] ?? "a03")
+  const solverOptions = SOLVER_OPTIONS.filter((option) =>
+    allowedSolverKeys.includes(option.value),
   )
+  const [solverKey, setSolverKey] = useState<SolverKey>(() => {
+    const storedSolverKey = getInitialSolverKey(fallbackSolverKey)
+    return allowedSolverKeys.includes(storedSolverKey)
+      ? storedSolverKey
+      : fallbackSolverKey
+  })
 
   useEffect(() => {
     if (typeof window === "undefined") return
     window.localStorage.setItem(STORAGE_KEY, solverKey)
   }, [solverKey])
+
+  useEffect(() => {
+    if (allowedSolverKeys.includes(solverKey)) return
+    setSolverKey(fallbackSolverKey)
+  }, [allowedSolverKeys, fallbackSolverKey, solverKey])
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -65,7 +84,7 @@ export function SolverDebugger({
             setSolverKey(event.currentTarget.value as SolverKey)
           }
         >
-          {SOLVER_OPTIONS.map((option) => (
+          {solverOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
