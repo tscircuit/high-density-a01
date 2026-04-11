@@ -80,10 +80,7 @@ const MODE_COMPATIBILITY: Record<Z04SolverKey, readonly Z04SolverMode[]> = {
   a05: ["default", "repro"],
 }
 
-function parsePositiveInteger(
-  rawValue: string,
-  optionName: string,
-): number {
+function parsePositiveInteger(rawValue: string, optionName: string): number {
   const parsed = Number.parseInt(rawValue, 10)
   if (!Number.isFinite(parsed) || parsed < 1) {
     throw new Error(`${optionName} must be a positive integer`)
@@ -355,8 +352,8 @@ async function runSolverBenchmark(
   })
 
   const totalWallTimeMs = performance.now() - benchmarkStart
-  const completedResults = results.filter(
-    (result): result is Z04SampleResult => Boolean(result),
+  const completedResults = results.filter((result): result is Z04SampleResult =>
+    Boolean(result),
   )
   const avgDurationMs =
     completedResults.reduce((sum, result) => sum + result.durationMs, 0) /
@@ -386,7 +383,9 @@ async function runSolverBenchmark(
       Math.max(1, completedResults.length)
 
     console.log("  gridStats:")
-    console.log(`    cells=${average((r) => r.gridStats?.cells ?? 0).toFixed(0)}`)
+    console.log(
+      `    cells=${average((r) => r.gridStats?.cells ?? 0).toFixed(0)}`,
+    )
     console.log(
       `    layers=${average((r) => r.gridStats?.layers ?? 0).toFixed(1)}`,
     )
