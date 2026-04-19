@@ -14,7 +14,7 @@ import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
 } from "../lib/types"
-import { findRouteGeometryViolations } from "../tests/fixtures/validateNoIntersections"
+import { findRouteGeometryViolations } from "../lib/routeGeometry"
 import type {
   Z04SampleResult,
   Z04SolverMode,

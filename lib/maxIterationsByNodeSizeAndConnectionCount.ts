@@ -4,6 +4,8 @@ export interface MaxIterationsByNodeSizeAndConnectionCountInput {
   connectionCount: number
   effort: number
   maxIterations: number
+  minimumIterationBudget?: number
+  minimumBaseSearchBudget?: number
 }
 
 export interface MaxIterationsByNodeSizeAndConnectionCountResult {
@@ -38,17 +40,29 @@ export function computeMaxIterationsByNodeSizeAndConnectionCount(
     150_000,
     2_000_000,
   )
+  const requestedMinimumIterationBudget = Math.max(
+    0,
+    Math.floor(input.minimumIterationBudget ?? 0),
+  )
   const maxIterationsIters = Math.max(
     1,
     Math.min(
       requestedMaxIterations,
-      Math.max(minIterationBudgetIters, computedMaxIters),
+      Math.max(minIterationBudgetIters, requestedMinimumIterationBudget, computedMaxIters),
     ),
   )
-  const baseSearchBudgetIters = clamp(
+  const computedBaseSearchBudgetIters = clamp(
     Math.round(states * (10 + 0.8 * connectionFactor) * input.effort),
     50_000,
     4_000_000,
+  )
+  const requestedMinimumBaseSearchBudget = Math.max(
+    0,
+    Math.floor(input.minimumBaseSearchBudget ?? 0),
+  )
+  const baseSearchBudgetIters = Math.max(
+    computedBaseSearchBudgetIters,
+    requestedMinimumBaseSearchBudget,
   )
 
   return {

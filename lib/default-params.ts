@@ -2,6 +2,8 @@ import type { HighDensitySolverA01Props } from "./HighDensitySolverA01/HighDensi
 import type { HighDensitySolverA02Props } from "./HighDensitySolverA02/HighDensitySolverA02"
 import type { HighDensitySolverA03Props } from "./HighDensitySolverA03/HighDensitySolverA03"
 import type { HighDensitySolverA05Props } from "./HighDensitySolverA05/HighDensitySolverA05"
+import type { HighDensitySolverA06Props } from "./HighDensitySolverA06/HighDensitySolverA06"
+import type { HighDensitySolverA07Props } from "./HighDensitySolverA07/HighDensitySolverA07"
 
 export const defaultParams: Pick<
   HighDensitySolverA01Props,
@@ -69,6 +71,38 @@ export const defaultA05Params: Pick<
   highResolutionCellSize: 0.1,
   highResolutionCellThickness: 8,
   lowResolutionCellSize: 0.4,
+  traceMargin: 0.15,
+  traceThickness: 0.1,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+}
+
+export const defaultA06Params: Pick<
+  HighDensitySolverA06Props,
+  | "highResolutionCellSize"
+  | "highResolutionCellThickness"
+  | "lowResolutionCellSize"
+  | "traceMargin"
+  | "traceThickness"
+  | "viaDiameter"
+  | "viaMinDistFromBorder"
+> = {
+  highResolutionCellSize: 0.1,
+  highResolutionCellThickness: 8,
+  lowResolutionCellSize: 0.4,
+  traceMargin: 0.15,
+  traceThickness: 0.1,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+}
+
+export const defaultA07Params: Pick<
+  HighDensitySolverA07Props,
+  | "traceMargin"
+  | "traceThickness"
+  | "viaDiameter"
+  | "viaMinDistFromBorder"
+> = {
   traceMargin: 0.15,
   traceThickness: 0.1,
   viaDiameter: 0.3,

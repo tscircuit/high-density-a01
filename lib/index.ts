@@ -11,4 +11,7 @@ export { HighDensitySolverA01 } from "./HighDensitySolverA01/HighDensitySolverA0
 export { HighDensitySolverA02 } from "./HighDensitySolverA02/HighDensitySolverA02"
 export { HighDensitySolverA03 } from "./HighDensitySolverA03/HighDensitySolverA03"
 export { HighDensitySolverA05 } from "./HighDensitySolverA05/HighDensitySolverA05"
+export { HighDensitySolverA06 } from "./HighDensitySolverA06/HighDensitySolverA06"
+export { HighDensitySolverA07 } from "./HighDensitySolverA07/HighDensitySolverA07"
+export * from "./routeGeometry"
 export * from "./types"
