@@ -106,6 +106,13 @@ const BREAKOUT_SEGMENT_COUNT = 2
 const BREAKOUT_MIDPOINT_INDEX = 1
 const BREAKOUT_ENDPOINT_INDEX = 2
 const BREAKOUT_MIDPOINT_INFLUENCE_FLOOR = 0.35
+const LAYER_COLORS = ["red", "blue", "orange", "green"]
+const TRACE_COLORS = [
+  "rgba(255,0,0,0.85)",
+  "rgba(0,0,255,0.85)",
+  "rgba(255,165,0,0.85)",
+  "rgba(0,128,0,0.85)",
+]
 
 export interface A08BreakoutSolverProps {
   nodeWithPortPoints: NodeWithPortPoints
@@ -1326,13 +1333,6 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
   }
 
   override visualize(): GraphicsObject {
-    const sideColors: Record<Side, string> = {
-      left: "rgba(0,128,255,0.75)",
-      right: "rgba(255,0,0,0.75)",
-      top: "rgba(0,160,0,0.75)",
-      bottom: "rgba(255,140,0,0.75)",
-    }
-
     const rects = [
       {
         center: this.nodeWithPortPoints.center,
@@ -1359,18 +1359,22 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
         label: portPoint.connectionName,
       }))
     for (const route of this.breakoutRoutes) {
+      const z = route.route[0]?.z ?? route.assigned.z ?? 0
       points.push({
         x: route.assigned.x,
         y: route.assigned.y,
-        color: sideColors[route.side],
+        color: LAYER_COLORS[z] ?? "black",
       })
     }
 
     const lines: NonNullable<GraphicsObject["lines"]> = this.breakoutRoutes.map(
-      (route) => ({
-        points: route.route.map((point) => ({ x: point.x, y: point.y })),
-        strokeColor: sideColors[route.side],
-      }),
+      (route) => {
+        const z = route.route[0]?.z ?? route.assigned.z ?? 0
+        return {
+          points: route.route.map((point) => ({ x: point.x, y: point.y })),
+          strokeColor: TRACE_COLORS[z] ?? "rgba(128,128,128,0.85)",
+        }
+      },
     )
 
     const lastSnapshotByAnchorKey = new Map(
@@ -1387,11 +1391,12 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
         const midpoint = route[BREAKOUT_MIDPOINT_INDEX]!
         const snapshot = lastSnapshotByAnchorKey.get(pathState.anchor.key)
         const isActiveSide = activeForceSide === sideState.side
+        const z = pathState.anchor.representative.z
 
         points.push({
           x: midpoint.x,
           y: midpoint.y,
-          color: sideColors[sideState.side],
+          color: LAYER_COLORS[z] ?? "black",
           label:
             isActiveSide && snapshot
               ? `${snapshot.connectionName} mid ` +
