@@ -120,7 +120,7 @@ function getMinRoutePairDistance(
   return minDistance
 }
 
-test("A08 sample010 breakout reaches A01 with an exact 1mm inset", () => {
+test("A08 sample010 shrinks the overcrowded bottom breakout before A01", () => {
   const sample = dataset02[9]
   if (!sample) {
     throw new Error("dataset02 sample010 is missing")
@@ -138,6 +138,7 @@ test("A08 sample010 breakout reaches A01 with an exact 1mm inset", () => {
     ...defaultA08Params,
     nodeWithPortPoints,
     effort: 10,
+    initialRectMarginMm: 1,
   })
   solver.MAX_ITERATIONS = 100_000_000
   solver.solveUntilStage("A01")
@@ -148,11 +149,12 @@ test("A08 sample010 breakout reaches A01 with an exact 1mm inset", () => {
   expect(solver.stage).toBe("A01")
   expect(solver.failed).toBeFalse()
   expect(innerRect).not.toBeNull()
+  expect(solver.breakoutSolver?.stats?.shrinkCount).toBeGreaterThan(0)
 
   expect(innerRect!.minX).toBeCloseTo(outerBounds.minX + 1, 6)
   expect(innerRect!.maxX).toBeCloseTo(outerBounds.maxX - 1, 6)
-  expect(innerRect!.minY).toBeCloseTo(outerBounds.minY + 1, 6)
   expect(innerRect!.maxY).toBeCloseTo(outerBounds.maxY - 1, 6)
+  expect(innerRect!.minY).toBeGreaterThan(outerBounds.minY + 1)
 
   const topAssignments = solver.spreadAssignments.filter(
     (assignment) => assignment.side === "top",

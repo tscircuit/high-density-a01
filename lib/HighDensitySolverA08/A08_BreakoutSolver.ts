@@ -102,6 +102,10 @@ type ForceIterationSnapshot = {
   snapshots: MidpointForceSnapshot[]
 }
 
+type ShrinkRectResult =
+  | { ok: true; rect: RectBounds }
+  | { ok: false; reason: "unchanged" | "collapsed" }
+
 const BREAKOUT_SEGMENT_COUNT = 2
 const BREAKOUT_MIDPOINT_INDEX = 1
 const BREAKOUT_ENDPOINT_INDEX = 2
@@ -117,6 +121,8 @@ const TRACE_COLORS = [
 export interface A08BreakoutSolverProps {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm?: number
+  maxCellCount?: number
+  traceMargin?: number
   traceThickness?: number
   effort?: number
   initialRectMarginMm?: number
@@ -306,6 +312,8 @@ function groupPathIndexesByLayer(sideState: SideState) {
 export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
+  maxCellCount?: number
+  traceMargin: number
   traceThickness: number
   effort: number
   initialRectMarginMm: number
@@ -340,10 +348,12 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     this.constructorProps = props
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.cellSizeMm = props.cellSizeMm ?? 0.1
+    this.maxCellCount = props.maxCellCount
+    this.traceMargin = props.traceMargin ?? 0.15
     this.traceThickness = props.traceThickness ?? 0.1
     this.effort = props.effort ?? 1
     this.initialRectMarginMm =
-      props.initialRectMarginMm ?? props.innerRectMarginMm ?? 1
+      props.initialRectMarginMm ?? props.innerRectMarginMm ?? 0.2
     this.rectShrinkStepMm = props.rectShrinkStepMm ?? 0.4
     this.breakoutTraceMarginMm = props.breakoutTraceMarginMm ?? 0.1
     this.breakoutBoundaryMarginMm =
@@ -391,8 +401,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       this.initialRectMarginMm,
     )
     if (!initialRect) {
-      this.error =
-        "A08_BreakoutSolver could not build the initial 1mm inset rect"
+      this.error = "A08_BreakoutSolver could not build the initial inset rect"
       this.failed = true
       return
     }
@@ -415,6 +424,10 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
 
     const nextSideIteration = this.pickNextSideStateForForceIteration()
     if (!nextSideIteration) {
+      if (this.shouldShrinkForMaxCellCount()) {
+        this.pendingShrinkSides = [...SIDE_ORDER]
+        return
+      }
       this.solved = true
       return
     }
@@ -438,6 +451,10 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       nextHardUnsolvedSides.length === 0 &&
       nextOptimizationPendingSides.length === 0
     ) {
+      if (this.shouldShrinkForMaxCellCount()) {
+        this.pendingShrinkSides = [...SIDE_ORDER]
+        return
+      }
       this.solved = true
       return
     }
@@ -447,6 +464,11 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
         this.pendingShrinkSides = nextHardUnsolvedSides.map(
           (sideState) => sideState.side,
         )
+        return
+      }
+
+      if (this.shouldShrinkForMaxCellCount()) {
+        this.pendingShrinkSides = [...SIDE_ORDER]
         return
       }
 
@@ -788,7 +810,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     const pointLists = sideState.paths.map((pathState) =>
       this.getPathPoints(pathState),
     )
-    const idealTraceSpacing = this.breakoutTraceMarginMm * 2
+    const idealTraceSpacing = this.getRequiredTraceSpacing()
 
     for (const pathIndexes of groupPathIndexesByLayer(sideState)) {
       for (
@@ -1036,7 +1058,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
   }
 
   private evaluateSideState(sideState: SideState) {
-    const idealTraceSpacing = this.breakoutTraceMarginMm * 2
+    const idealTraceSpacing = this.getRequiredTraceSpacing()
 
     if (sideState.paths.length <= 1) {
       sideState.solved = true
@@ -1097,7 +1119,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
                 pointListB[segmentIndexB + 1]!,
               ).distance
               minSegmentDistance = Math.min(minSegmentDistance, distance)
-              if (distance + EPSILON < this.breakoutTraceMarginMm) {
+              if (distance + EPSILON < idealTraceSpacing) {
                 violationCount += 1
               }
             }
@@ -1248,26 +1270,53 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     }
   }
 
-  private applyPendingShrink() {
-    if (!this.innerRect) {
-      this.error = "A08_BreakoutSolver missing rect before shrink"
-      this.failed = true
-      return false
-    }
+  private getInnerLayerCount() {
+    return (
+      this.nodeWithPortPoints.availableZ?.length ??
+      new Set(
+        this.nodeWithPortPoints.portPoints.map((portPoint) => portPoint.z),
+      ).size
+    )
+  }
 
+  private getCellCountForInnerRect(rect: Pick<RectBounds, "width" | "height">) {
+    const rows = Math.floor(rect.height / this.cellSizeMm)
+    const cols = Math.floor(rect.width / this.cellSizeMm)
+    return this.getInnerLayerCount() * rows * cols
+  }
+
+  private getRequiredTraceSpacing() {
+    return Math.max(
+      this.breakoutTraceMarginMm * 2,
+      this.traceThickness + this.traceMargin,
+    )
+  }
+
+  private shouldShrinkForMaxCellCount() {
+    return (
+      this.maxCellCount !== undefined &&
+      this.innerRect !== null &&
+      this.getCellCountForInnerRect(this.innerRect) > this.maxCellCount
+    )
+  }
+
+  private shrinkRectBySides(
+    innerRect: RectBounds,
+    sides: Side[],
+  ): ShrinkRectResult {
     const minDimension = Math.max(
       this.cellSizeMm,
       this.breakoutBoundaryMarginMm * 2,
     )
     const nextBounds = {
-      minX: this.innerRect.minX,
-      maxX: this.innerRect.maxX,
-      minY: this.innerRect.minY,
-      maxY: this.innerRect.maxY,
+      minX: innerRect.minX,
+      maxX: innerRect.maxX,
+      minY: innerRect.minY,
+      maxY: innerRect.maxY,
     }
     let changed = false
 
-    for (const side of this.pendingShrinkSides) {
+    for (const side of sides) {
       switch (side) {
         case "left":
           if (
@@ -1308,13 +1357,8 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       }
     }
 
-    this.pendingShrinkSides = []
-
     if (!changed) {
-      this.error =
-        "A08_BreakoutSolver could not shrink the inner rect any further"
-      this.failed = true
-      return false
+      return { ok: false, reason: "unchanged" }
     }
 
     const nextRect = rectFromBounds(nextBounds)
@@ -1322,13 +1366,36 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       nextRect.width <= Math.max(minDimension, EPSILON) ||
       nextRect.height <= Math.max(minDimension, EPSILON)
     ) {
-      this.error = "A08_BreakoutSolver inner rect collapsed during shrink"
+      return { ok: false, reason: "collapsed" }
+    }
+
+    return { ok: true, rect: nextRect }
+  }
+
+  private applyPendingShrink() {
+    if (!this.innerRect) {
+      this.error = "A08_BreakoutSolver missing rect before shrink"
+      this.failed = true
+      return false
+    }
+
+    const shrinkResult = this.shrinkRectBySides(
+      this.innerRect,
+      this.pendingShrinkSides,
+    )
+    this.pendingShrinkSides = []
+
+    if (!shrinkResult.ok) {
+      this.error =
+        shrinkResult.reason === "collapsed"
+          ? "A08_BreakoutSolver inner rect collapsed during shrink"
+          : "A08_BreakoutSolver could not shrink the inner rect any further"
       this.failed = true
       return false
     }
 
     this.shrinkCount += 1
-    this.reinitializeForInnerRect(nextRect)
+    this.reinitializeForInnerRect(shrinkResult.rect)
     return true
   }
 

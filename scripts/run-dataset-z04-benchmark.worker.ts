@@ -109,6 +109,8 @@ const createSolver = (
       return new HighDensitySolverA08({
         ...defaultA08Params,
         nodeWithPortPoints,
+        initialRectMarginMm:
+          options.initialRectMarginMm ?? defaultA08Params.initialRectMarginMm,
       })
   }
 }
