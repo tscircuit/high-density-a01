@@ -1,4 +1,5 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import type { GraphicsObject } from "graphics-debug"
 import type { NodeWithPortPoints } from "../types"
 import {
   type A08BreakoutRoute,
@@ -32,16 +33,23 @@ type BreakoutPoint = {
   z: number
 }
 
+type Vector2 = {
+  x: number
+  y: number
+}
+
 type BreakoutPathState = {
   anchor: SpreadAnchor
-  tangents: number[]
-  targetTangents: number[]
+  midpoint: BreakoutPoint
+  targetMidpoint: BreakoutPoint
+  assignedPoint: BreakoutPoint
 }
 
 type SideState = {
   side: Side
   paths: BreakoutPathState[]
   solved: boolean
+  idealSpacingSatisfied: boolean
   violationCount: number
   minSegmentDistance: number
   minBoundaryClearance: number
@@ -54,6 +62,50 @@ type SegmentDistanceResult = {
   pointA: { x: number; y: number }
   pointB: { x: number; y: number }
 }
+
+type ForceIterationMode = "hard" | "optimize"
+
+type MidpointForceComputation = {
+  beforeMidpoint: BreakoutPoint
+  requestedMidpoint: BreakoutPoint
+  targetMidpoint: BreakoutPoint
+  clearancePressure: number
+  repulsionForce: Vector2
+  smoothingForce: Vector2
+  attractionForce: Vector2
+  totalForce: Vector2
+  requestedDelta: Vector2
+}
+
+type MidpointForceSnapshot = {
+  anchorKey: string
+  side: Side
+  connectionName: string
+  rootConnectionName?: string
+  z: number
+  midpointBefore: BreakoutPoint
+  midpointRequested: BreakoutPoint
+  midpointAfter: BreakoutPoint
+  targetMidpoint: BreakoutPoint
+  repulsionForce: Vector2
+  smoothingForce: Vector2
+  attractionForce: Vector2
+  totalForce: Vector2
+  requestedDelta: Vector2
+  appliedDelta: Vector2
+}
+
+type ForceIterationSnapshot = {
+  side: Side
+  mode: ForceIterationMode
+  rectIteration: number
+  snapshots: MidpointForceSnapshot[]
+}
+
+const BREAKOUT_SEGMENT_COUNT = 2
+const BREAKOUT_MIDPOINT_INDEX = 1
+const BREAKOUT_ENDPOINT_INDEX = 2
+const BREAKOUT_MIDPOINT_INFLUENCE_FLOOR = 0.35
 
 export interface A08BreakoutSolverProps {
   nodeWithPortPoints: NodeWithPortPoints
@@ -88,6 +140,22 @@ function add(a: { x: number; y: number }, b: { x: number; y: number }) {
 
 function scale(point: { x: number; y: number }, scalar: number) {
   return { x: point.x * scalar, y: point.y * scalar }
+}
+
+function length(vector: Vector2) {
+  return Math.hypot(vector.x, vector.y)
+}
+
+function normalize(vector: Vector2) {
+  const magnitude = length(vector)
+  if (magnitude <= EPSILON) return { x: 0, y: 0 }
+  return scale(vector, 1 / magnitude)
+}
+
+function clampMagnitude(vector: Vector2, maxMagnitude: number) {
+  const magnitude = length(vector)
+  if (magnitude <= maxMagnitude || magnitude <= EPSILON) return vector
+  return scale(vector, maxMagnitude / magnitude)
 }
 
 function clamp01(value: number) {
@@ -160,6 +228,62 @@ function getTangentValue(side: Side, point: { x: number; y: number }) {
   return side === "left" || side === "right" ? point.y : point.x
 }
 
+function getAnchorNetName(anchor: SpreadAnchor) {
+  return (
+    anchor.representative.rootConnectionName ??
+    anchor.representative.connectionName.replace(/_mst\d+$/, "")
+  )
+}
+
+function getMidpointInfluence(segmentIndex: number, segmentWeight: number) {
+  const rawInfluence = segmentIndex === 0 ? segmentWeight : 1 - segmentWeight
+  return lerp(BREAKOUT_MIDPOINT_INFLUENCE_FLOOR, 1, rawInfluence)
+}
+
+function getOrthogonalUnitVector(side: Side) {
+  return side === "left" || side === "right" ? { x: 1, y: 0 } : { x: 0, y: 1 }
+}
+
+function formatSigned(value: number) {
+  return value >= 0 ? `+${value.toFixed(3)}` : value.toFixed(3)
+}
+
+function formatVector(vector: Vector2) {
+  return `(${formatSigned(vector.x)},${formatSigned(vector.y)})`
+}
+
+function getOrthogonalValue(side: Side, point: { x: number; y: number }) {
+  return side === "left" || side === "right" ? point.x : point.y
+}
+
+function pointFromCoordinates(
+  side: Side,
+  orthogonal: number,
+  tangent: number,
+  z: number,
+): BreakoutPoint {
+  return side === "left" || side === "right"
+    ? { x: orthogonal, y: tangent, z }
+    : { x: tangent, y: orthogonal, z }
+}
+
+function getSegmentAwayNormal(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  closestPointOnSegment: { x: number; y: number },
+  otherClosestPoint: { x: number; y: number },
+) {
+  const segmentDirection = sub(end, start)
+  const unitDirection = normalize(segmentDirection)
+  if (length(unitDirection) <= EPSILON) return { x: 0, y: 0 }
+
+  let normal = { x: -unitDirection.y, y: unitDirection.x }
+  if (dot(normal, sub(otherClosestPoint, closestPointOnSegment)) > 0) {
+    normal = scale(normal, -1)
+  }
+  return normal
+}
+
 function groupPathIndexesByLayer(sideState: SideState) {
   const groups = new Map<number, number[]>()
   for (let pathIndex = 0; pathIndex < sideState.paths.length; pathIndex++) {
@@ -197,10 +321,12 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
   sideStates: SideState[] = []
   shrinkCount = 0
   iterationsAtCurrentRect = 0
+  lastForceIteration: ForceIterationSnapshot | null = null
 
   private readonly constructorProps: A08BreakoutSolverProps
   private anchorsBySide = new Map<Side, SpreadAnchor[]>()
   private pendingShrinkSides: Side[] = []
+  private nextForceSideCursor = 0
 
   constructor(props: A08BreakoutSolverProps) {
     super()
@@ -215,7 +341,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     this.breakoutTraceMarginMm = props.breakoutTraceMarginMm ?? 0.1
     this.breakoutBoundaryMarginMm =
       props.breakoutBoundaryMarginMm ?? this.breakoutTraceMarginMm / 2
-    this.breakoutSegmentCount = Math.max(2, props.breakoutSegmentCount ?? 6)
+    this.breakoutSegmentCount = BREAKOUT_SEGMENT_COUNT
     this.breakoutMaxIterationsPerRect = Math.max(
       1,
       props.breakoutMaxIterationsPerRect ?? 60,
@@ -246,6 +372,8 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     this.pendingShrinkSides = []
     this.shrinkCount = 0
     this.iterationsAtCurrentRect = 0
+    this.lastForceIteration = null
+    this.nextForceSideCursor = 0
     this.spreadAssignments = []
     this.breakoutRoutes = []
     this.innerNodeWithPortPoints = null
@@ -272,35 +400,50 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       return
     }
 
-    if (this.sideStates.every((sideState) => sideState.solved)) {
+    if (this.pendingShrinkSides.length > 0) {
+      this.lastForceIteration = null
+      this.applyPendingShrink()
+      return
+    }
+
+    const nextSideIteration = this.pickNextSideStateForForceIteration()
+    if (!nextSideIteration) {
       this.solved = true
       return
     }
 
-    if (this.pendingShrinkSides.length > 0) {
-      if (!this.applyPendingShrink()) return
-    }
-
-    for (const sideState of this.sideStates) {
-      if (sideState.solved || sideState.paths.length <= 1) continue
-      this.runSideForceIteration(sideState)
-      this.enforceSideStateConstraints(sideState)
-    }
+    const computations = this.runSideForceIteration(nextSideIteration.sideState)
+    this.enforceSideStateConstraints(nextSideIteration.sideState)
 
     this.iterationsAtCurrentRect += 1
+    this.lastForceIteration = this.captureForceIterationSnapshot(
+      nextSideIteration.sideState,
+      nextSideIteration.mode,
+      computations,
+      this.iterationsAtCurrentRect,
+    )
     this.refreshDerivedState()
 
-    const unsolvedSides = this.sideStates
-      .filter((sideState) => !sideState.solved)
-      .map((sideState) => sideState.side)
+    const nextHardUnsolvedSides = this.getHardUnsolvedSideStates()
+    const nextOptimizationPendingSides = this.getOptimizationPendingSideStates()
 
-    if (unsolvedSides.length === 0) {
+    if (
+      nextHardUnsolvedSides.length === 0 &&
+      nextOptimizationPendingSides.length === 0
+    ) {
       this.solved = true
       return
     }
 
     if (this.iterationsAtCurrentRect >= this.breakoutMaxIterationsPerRect) {
-      this.pendingShrinkSides = unsolvedSides
+      if (nextHardUnsolvedSides.length > 0) {
+        this.pendingShrinkSides = nextHardUnsolvedSides.map(
+          (sideState) => sideState.side,
+        )
+        return
+      }
+
+      this.solved = true
     }
   }
 
@@ -318,16 +461,155 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
 
   private reinitializeForInnerRect(innerRect: RectBounds) {
     this.innerRect = innerRect
+    this.lastForceIteration = null
+    this.nextForceSideCursor = 0
     this.sideStates = SIDE_ORDER.map((side) => ({
       side,
       paths: this.createPathStatesForSide(side),
       solved: false,
+      idealSpacingSatisfied: false,
       violationCount: 0,
       minSegmentDistance: Infinity,
       minBoundaryClearance: Infinity,
     }))
     this.iterationsAtCurrentRect = 0
     this.refreshDerivedState()
+  }
+
+  private getHardUnsolvedSideStates() {
+    return this.sideStates.filter(
+      (sideState) => sideState.paths.length > 0 && !sideState.solved,
+    )
+  }
+
+  private getOptimizationPendingSideStates() {
+    return this.sideStates.filter(
+      (sideState) =>
+        sideState.paths.length > 1 &&
+        sideState.solved &&
+        !sideState.idealSpacingSatisfied,
+    )
+  }
+
+  private pickNextSideStateForForceIteration(): {
+    sideState: SideState
+    mode: ForceIterationMode
+  } | null {
+    const hardUnsolvedSides = this.getHardUnsolvedSideStates().filter(
+      (sideState) => sideState.paths.length > 1,
+    )
+    if (hardUnsolvedSides.length > 0) {
+      const index = this.nextForceSideCursor % hardUnsolvedSides.length
+      this.nextForceSideCursor =
+        (this.nextForceSideCursor + 1) % hardUnsolvedSides.length
+      return {
+        sideState: hardUnsolvedSides[index]!,
+        mode: "hard",
+      }
+    }
+
+    const optimizationPendingSides = this.getOptimizationPendingSideStates()
+    if (optimizationPendingSides.length === 0) return null
+
+    const index = this.nextForceSideCursor % optimizationPendingSides.length
+    this.nextForceSideCursor =
+      (this.nextForceSideCursor + 1) % optimizationPendingSides.length
+    return {
+      sideState: optimizationPendingSides[index]!,
+      mode: "optimize",
+    }
+  }
+
+  private getSideOrthogonalEndpoints(side: Side) {
+    if (!this.innerRect) {
+      throw new Error("A08_BreakoutSolver missing inner rect")
+    }
+
+    switch (side) {
+      case "top":
+        return { outer: this.outerBounds.maxY, inner: this.innerRect.maxY }
+      case "bottom":
+        return { outer: this.outerBounds.minY, inner: this.innerRect.minY }
+      case "left":
+        return { outer: this.outerBounds.minX, inner: this.innerRect.minX }
+      case "right":
+        return { outer: this.outerBounds.maxX, inner: this.innerRect.maxX }
+    }
+  }
+
+  private getSideUFromPoint(side: Side, point: { x: number; y: number }) {
+    const { outer, inner } = this.getSideOrthogonalEndpoints(side)
+    const denominator = inner - outer
+    if (Math.abs(denominator) <= EPSILON) return 1
+    return clamp((getOrthogonalValue(side, point) - outer) / denominator, 0, 1)
+  }
+
+  private clampPointToSidePolygon(
+    side: Side,
+    point: { x: number; y: number },
+    z: number,
+  ) {
+    const { outer, inner } = this.getSideOrthogonalEndpoints(side)
+    let orthogonalMin = Math.min(outer, inner) + this.breakoutBoundaryMarginMm
+    let orthogonalMax = Math.max(outer, inner) - this.breakoutBoundaryMarginMm
+
+    if (orthogonalMax < orthogonalMin) {
+      const midpoint = (outer + inner) / 2
+      orthogonalMin = midpoint
+      orthogonalMax = midpoint
+    }
+
+    const orthogonal = clamp(
+      getOrthogonalValue(side, point),
+      orthogonalMin,
+      orthogonalMax,
+    )
+    const u = this.getSideUFromPoint(
+      side,
+      pointFromCoordinates(side, orthogonal, getTangentValue(side, point), z),
+    )
+    const crossSection = this.getCrossSection(side, u)
+    let tangentMin = crossSection.tangentMin + this.breakoutBoundaryMarginMm
+    let tangentMax = crossSection.tangentMax - this.breakoutBoundaryMarginMm
+
+    if (tangentMax < tangentMin) {
+      const midpoint = (crossSection.tangentMin + crossSection.tangentMax) / 2
+      tangentMin = midpoint
+      tangentMax = midpoint
+    }
+
+    return pointFromCoordinates(
+      side,
+      orthogonal,
+      clamp(getTangentValue(side, point), tangentMin, tangentMax),
+      z,
+    )
+  }
+
+  private withPointTangent(side: Side, point: BreakoutPoint, tangent: number) {
+    return pointFromCoordinates(
+      side,
+      getOrthogonalValue(side, point),
+      tangent,
+      point.z,
+    )
+  }
+
+  private getBoundaryClearance(side: Side, point: BreakoutPoint) {
+    const u = this.getSideUFromPoint(side, point)
+    const crossSection = this.getCrossSection(side, u)
+    const tangent = getTangentValue(side, point)
+    const tangentClearance = Math.min(
+      tangent - crossSection.tangentMin,
+      crossSection.tangentMax - tangent,
+    )
+    const { outer, inner } = this.getSideOrthogonalEndpoints(side)
+    const orthogonal = getOrthogonalValue(side, point)
+    const orthogonalClearance = Math.min(
+      Math.abs(orthogonal - outer),
+      Math.abs(inner - orthogonal),
+    )
+    return Math.min(tangentClearance, orthogonalClearance)
   }
 
   private createPathStatesForSide(side: Side) {
@@ -395,21 +677,23 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       const outerTangent = getSortCoordinate(side, anchor.representative)
       const targetInnerTangent =
         targetInnerTangentByAnchorKey.get(anchor.key) ?? outerTangent
-
-      const tangents: number[] = []
-      for (
-        let pointIndex = 0;
-        pointIndex <= this.breakoutSegmentCount;
-        pointIndex++
-      ) {
-        const u = pointIndex / this.breakoutSegmentCount
-        tangents.push(lerp(outerTangent, targetInnerTangent, u))
+      const assignedPoint = this.pointFromTangent(
+        side,
+        1,
+        targetInnerTangent,
+        anchor.representative.z,
+      )
+      const targetMidpoint = {
+        x: (anchor.representative.x + assignedPoint.x) / 2,
+        y: (anchor.representative.y + assignedPoint.y) / 2,
+        z: anchor.representative.z,
       }
 
       return {
         anchor,
-        tangents: [...tangents],
-        targetTangents: tangents,
+        midpoint: { ...targetMidpoint },
+        targetMidpoint,
+        assignedPoint,
       }
     })
   }
@@ -468,207 +752,288 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     }
   }
 
-  private getPathPoints(
-    side: Side,
-    pathState: BreakoutPathState,
-  ): BreakoutPoint[] {
-    const points: BreakoutPoint[] = [
+  private getPathPoints(pathState: BreakoutPathState): BreakoutPoint[] {
+    return [
       {
         x: pathState.anchor.representative.x,
         y: pathState.anchor.representative.y,
         z: pathState.anchor.representative.z,
       },
+      pathState.midpoint,
+      pathState.assignedPoint,
     ]
-
-    for (
-      let pointIndex = 1;
-      pointIndex <= this.breakoutSegmentCount;
-      pointIndex++
-    ) {
-      points.push(
-        this.pointFromTangent(
-          side,
-          pointIndex / this.breakoutSegmentCount,
-          pathState.tangents[pointIndex]!,
-          pathState.anchor.representative.z,
-        ),
-      )
-    }
-
-    return points
   }
 
   private runSideForceIteration(sideState: SideState) {
-    const pointCount = this.breakoutSegmentCount + 1
-    const forces = sideState.paths.map(() => new Array(pointCount).fill(0))
-    const pointLists = sideState.paths.map((pathState) =>
-      this.getPathPoints(sideState.side, pathState),
+    const computations = sideState.paths.map<MidpointForceComputation>(
+      (pathState) => ({
+        beforeMidpoint: { ...pathState.midpoint },
+        requestedMidpoint: { ...pathState.midpoint },
+        targetMidpoint: { ...pathState.targetMidpoint },
+        clearancePressure: 0,
+        repulsionForce: { x: 0, y: 0 },
+        smoothingForce: { x: 0, y: 0 },
+        attractionForce: { x: 0, y: 0 },
+        totalForce: { x: 0, y: 0 },
+        requestedDelta: { x: 0, y: 0 },
+      }),
     )
+    const pointLists = sideState.paths.map((pathState) =>
+      this.getPathPoints(pathState),
+    )
+    const idealTraceSpacing = this.breakoutTraceMarginMm * 2
 
     for (const pathIndexes of groupPathIndexesByLayer(sideState)) {
       for (
-        let groupIndex = 0;
-        groupIndex < pathIndexes.length - 1;
-        groupIndex++
+        let groupIndexA = 0;
+        groupIndexA < pathIndexes.length - 1;
+        groupIndexA++
       ) {
-        const pathIndexA = pathIndexes[groupIndex]!
-        const pathIndexB = pathIndexes[groupIndex + 1]!
+        const pathIndexA = pathIndexes[groupIndexA]!
+        const pathStateA = sideState.paths[pathIndexA]!
         const pointListA = pointLists[pathIndexA]!
-        const pointListB = pointLists[pathIndexB]!
-        const forceA = forces[pathIndexA]!
-        const forceB = forces[pathIndexB]!
 
         for (
-          let segmentIndex = 0;
-          segmentIndex < this.breakoutSegmentCount;
-          segmentIndex++
+          let groupIndexB = groupIndexA + 1;
+          groupIndexB < pathIndexes.length;
+          groupIndexB++
         ) {
-          const distance = segmentSegmentDistance(
-            pointListA[segmentIndex]!,
-            pointListA[segmentIndex + 1]!,
-            pointListB[segmentIndex]!,
-            pointListB[segmentIndex + 1]!,
-          )
+          const pathIndexB = pathIndexes[groupIndexB]!
+          const pathStateB = sideState.paths[pathIndexB]!
 
-          if (distance.distance + EPSILON >= this.breakoutTraceMarginMm)
+          if (
+            getAnchorNetName(pathStateA.anchor) ===
+            getAnchorNetName(pathStateB.anchor)
+          ) {
             continue
+          }
 
-          const shortfall =
-            this.breakoutTraceMarginMm -
-            Math.max(distance.distance, POINT_EPSILON)
-          const strength = shortfall * this.breakoutRepulsionStrength
-          forceA[segmentIndex] -= strength * (1 - distance.aWeight)
-          forceA[segmentIndex + 1] -= strength * distance.aWeight
-          forceB[segmentIndex] += strength * (1 - distance.bWeight)
-          forceB[segmentIndex + 1] += strength * distance.bWeight
+          const pointListB = pointLists[pathIndexB]!
+
+          for (
+            let segmentIndexA = 0;
+            segmentIndexA < this.breakoutSegmentCount;
+            segmentIndexA++
+          ) {
+            for (
+              let segmentIndexB = 0;
+              segmentIndexB < this.breakoutSegmentCount;
+              segmentIndexB++
+            ) {
+              const distance = segmentSegmentDistance(
+                pointListA[segmentIndexA]!,
+                pointListA[segmentIndexA + 1]!,
+                pointListB[segmentIndexB]!,
+                pointListB[segmentIndexB + 1]!,
+              )
+
+              if (distance.distance + EPSILON >= idealTraceSpacing) continue
+
+              const shortfall =
+                idealTraceSpacing - Math.max(distance.distance, POINT_EPSILON)
+              const strength = shortfall * this.breakoutRepulsionStrength
+              const midpointInfluenceA = getMidpointInfluence(
+                segmentIndexA,
+                distance.aWeight,
+              )
+              const midpointInfluenceB = getMidpointInfluence(
+                segmentIndexB,
+                distance.bWeight,
+              )
+              const awayNormalA = getSegmentAwayNormal(
+                pointListA[segmentIndexA]!,
+                pointListA[segmentIndexA + 1]!,
+                distance.pointA,
+                distance.pointB,
+              )
+              const awayNormalB = getSegmentAwayNormal(
+                pointListB[segmentIndexB]!,
+                pointListB[segmentIndexB + 1]!,
+                distance.pointB,
+                distance.pointA,
+              )
+
+              computations[pathIndexA]!.repulsionForce = add(
+                computations[pathIndexA]!.repulsionForce,
+                scale(awayNormalA, strength * midpointInfluenceA),
+              )
+              computations[pathIndexA]!.clearancePressure +=
+                shortfall * midpointInfluenceA
+              computations[pathIndexB]!.repulsionForce = add(
+                computations[pathIndexB]!.repulsionForce,
+                scale(awayNormalB, strength * midpointInfluenceB),
+              )
+              computations[pathIndexB]!.clearancePressure +=
+                shortfall * midpointInfluenceB
+            }
+          }
         }
       }
     }
 
     for (let pathIndex = 0; pathIndex < sideState.paths.length; pathIndex++) {
       const pathState = sideState.paths[pathIndex]!
-      const pathForces = forces[pathIndex]!
+      const computation = computations[pathIndex]!
+      const startPoint = pointLists[pathIndex]![0]!
+      const endPoint = pointLists[pathIndex]![BREAKOUT_ENDPOINT_INDEX]!
+      const stabilizationScale =
+        computation.clearancePressure > POINT_EPSILON ? 0.2 : 1
 
-      for (
-        let pointIndex = 1;
-        pointIndex < this.breakoutSegmentCount;
-        pointIndex++
-      ) {
-        const previous = pathState.tangents[pointIndex - 1]!
-        const current = pathState.tangents[pointIndex]!
-        const next = pathState.tangents[pointIndex + 1]!
-        pathForces[pointIndex] +=
-          ((previous + next) / 2 - current) * this.breakoutSmoothingStrength
+      computation.smoothingForce = scale(
+        sub(
+          {
+            x: (startPoint.x + endPoint.x) / 2,
+            y: (startPoint.y + endPoint.y) / 2,
+          },
+          computation.beforeMidpoint,
+        ),
+        this.breakoutSmoothingStrength * stabilizationScale,
+      )
+      computation.attractionForce = scale(
+        sub(computation.targetMidpoint, computation.beforeMidpoint),
+        this.breakoutAttractionStrength * stabilizationScale,
+      )
+      computation.totalForce = add(
+        add(computation.repulsionForce, computation.smoothingForce),
+        computation.attractionForce,
+      )
+      computation.requestedDelta = clampMagnitude(
+        scale(computation.totalForce, this.breakoutForceStepSize),
+        this.rectShrinkStepMm,
+      )
+      computation.requestedMidpoint = {
+        x: computation.beforeMidpoint.x + computation.requestedDelta.x,
+        y: computation.beforeMidpoint.y + computation.requestedDelta.y,
+        z: computation.beforeMidpoint.z,
       }
+      pathState.midpoint = { ...computation.requestedMidpoint }
+    }
 
-      for (
-        let pointIndex = 1;
-        pointIndex <= this.breakoutSegmentCount;
-        pointIndex++
-      ) {
-        pathForces[pointIndex] +=
-          (pathState.targetTangents[pointIndex]! -
-            pathState.tangents[pointIndex]!) *
-          this.breakoutAttractionStrength
-      }
+    return computations
+  }
 
-      for (
-        let pointIndex = 1;
-        pointIndex <= this.breakoutSegmentCount;
-        pointIndex++
-      ) {
-        const delta = clamp(
-          pathForces[pointIndex]! * this.breakoutForceStepSize,
-          -this.rectShrinkStepMm,
-          this.rectShrinkStepMm,
-        )
-        pathState.tangents[pointIndex] = pathState.tangents[pointIndex]! + delta
-      }
+  private captureForceIterationSnapshot(
+    sideState: SideState,
+    mode: ForceIterationMode,
+    computations: MidpointForceComputation[],
+    rectIteration: number,
+  ): ForceIterationSnapshot {
+    return {
+      side: sideState.side,
+      mode,
+      rectIteration,
+      snapshots: sideState.paths.map((pathState, pathIndex) => {
+        const computation = computations[pathIndex]!
+        const z = pathState.anchor.representative.z
+        return {
+          anchorKey: pathState.anchor.key,
+          side: sideState.side,
+          connectionName: pathState.anchor.representative.connectionName,
+          rootConnectionName:
+            pathState.anchor.representative.rootConnectionName,
+          z,
+          midpointBefore: { ...computation.beforeMidpoint },
+          midpointRequested: { ...computation.requestedMidpoint },
+          midpointAfter: { ...pathState.midpoint },
+          targetMidpoint: { ...computation.targetMidpoint },
+          repulsionForce: computation.repulsionForce,
+          smoothingForce: computation.smoothingForce,
+          attractionForce: computation.attractionForce,
+          totalForce: computation.totalForce,
+          requestedDelta: { ...computation.requestedDelta },
+          appliedDelta: sub(pathState.midpoint, computation.beforeMidpoint),
+        }
+      }),
     }
   }
 
   private enforceSideStateConstraints(sideState: SideState) {
     const pathCount = sideState.paths.length
-    for (
-      let pointIndex = 1;
-      pointIndex <= this.breakoutSegmentCount;
-      pointIndex++
-    ) {
-      const u = pointIndex / this.breakoutSegmentCount
-      const crossSection = this.getCrossSection(sideState.side, u)
-      let min = crossSection.tangentMin + this.breakoutBoundaryMarginMm
-      let max = crossSection.tangentMax - this.breakoutBoundaryMarginMm
 
-      if (max < min) {
-        const midpoint = (crossSection.tangentMin + crossSection.tangentMax) / 2
-        min = midpoint
-        max = midpoint
-      }
+    for (const pathState of sideState.paths) {
+      pathState.midpoint = this.clampPointToSidePolygon(
+        sideState.side,
+        pathState.midpoint,
+        pathState.midpoint.z,
+      )
+    }
 
-      for (const pathState of sideState.paths) {
-        pathState.tangents[pointIndex] = clamp(
-          pathState.tangents[pointIndex]!,
-          min,
-          max,
+    if (pathCount <= 1) return
+
+    for (const pathIndexes of groupPathIndexesByLayer(sideState)) {
+      if (pathIndexes.length <= 1) continue
+      const gap = POINT_EPSILON
+
+      for (let groupIndex = 1; groupIndex < pathIndexes.length; groupIndex++) {
+        const previousIndex = pathIndexes[groupIndex - 1]!
+        const currentIndex = pathIndexes[groupIndex]!
+        const previous = getTangentValue(
+          sideState.side,
+          sideState.paths[previousIndex]!.midpoint,
         )
-      }
-
-      if (pathCount <= 1) continue
-
-      for (const pathIndexes of groupPathIndexesByLayer(sideState)) {
-        if (pathIndexes.length <= 1) continue
-        const maxGap = Math.max(
-          POINT_EPSILON,
-          (max - min) / (pathIndexes.length - 1),
+        const current = getTangentValue(
+          sideState.side,
+          sideState.paths[currentIndex]!.midpoint,
         )
-        const gap = Math.min(POINT_EPSILON, maxGap)
-
-        for (
-          let groupIndex = 1;
-          groupIndex < pathIndexes.length;
-          groupIndex++
-        ) {
-          const previousIndex = pathIndexes[groupIndex - 1]!
-          const currentIndex = pathIndexes[groupIndex]!
-          const previous = sideState.paths[previousIndex]!.tangents[pointIndex]!
-          if (
-            sideState.paths[currentIndex]!.tangents[pointIndex]! <
-            previous + gap
-          ) {
-            sideState.paths[currentIndex]!.tangents[pointIndex] = previous + gap
-          }
-        }
-
-        for (
-          let groupIndex = pathIndexes.length - 2;
-          groupIndex >= 0;
-          groupIndex--
-        ) {
-          const currentIndex = pathIndexes[groupIndex]!
-          const nextIndex = pathIndexes[groupIndex + 1]!
-          const next = sideState.paths[nextIndex]!.tangents[pointIndex]!
-          if (
-            sideState.paths[currentIndex]!.tangents[pointIndex]! >
-            next - gap
-          ) {
-            sideState.paths[currentIndex]!.tangents[pointIndex] = next - gap
-          }
+        if (current < previous + gap) {
+          sideState.paths[currentIndex]!.midpoint =
+            this.clampPointToSidePolygon(
+              sideState.side,
+              this.withPointTangent(
+                sideState.side,
+                sideState.paths[currentIndex]!.midpoint,
+                previous + gap,
+              ),
+              sideState.paths[currentIndex]!.midpoint.z,
+            )
         }
       }
 
-      for (const pathState of sideState.paths) {
-        pathState.tangents[pointIndex] = clamp(
-          pathState.tangents[pointIndex]!,
-          min,
-          max,
+      for (
+        let groupIndex = pathIndexes.length - 2;
+        groupIndex >= 0;
+        groupIndex--
+      ) {
+        const currentIndex = pathIndexes[groupIndex]!
+        const nextIndex = pathIndexes[groupIndex + 1]!
+        const next = getTangentValue(
+          sideState.side,
+          sideState.paths[nextIndex]!.midpoint,
         )
+        const current = getTangentValue(
+          sideState.side,
+          sideState.paths[currentIndex]!.midpoint,
+        )
+        if (current > next - gap) {
+          sideState.paths[currentIndex]!.midpoint =
+            this.clampPointToSidePolygon(
+              sideState.side,
+              this.withPointTangent(
+                sideState.side,
+                sideState.paths[currentIndex]!.midpoint,
+                next - gap,
+              ),
+              sideState.paths[currentIndex]!.midpoint.z,
+            )
+        }
       }
+    }
+
+    for (const pathState of sideState.paths) {
+      pathState.midpoint = this.clampPointToSidePolygon(
+        sideState.side,
+        pathState.midpoint,
+        pathState.midpoint.z,
+      )
     }
   }
 
   private evaluateSideState(sideState: SideState) {
+    const idealTraceSpacing = this.breakoutTraceMarginMm * 2
+
     if (sideState.paths.length <= 1) {
       sideState.solved = true
+      sideState.idealSpacingSatisfied = true
       sideState.violationCount = 0
       sideState.minSegmentDistance = Infinity
       sideState.minBoundaryClearance = Infinity
@@ -676,7 +1041,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     }
 
     const pointLists = sideState.paths.map((pathState) =>
-      this.getPathPoints(sideState.side, pathState),
+      this.getPathPoints(pathState),
     )
     let minSegmentDistance = Infinity
     let minBoundaryClearance = Infinity
@@ -684,52 +1049,71 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
 
     for (const pathIndexes of groupPathIndexesByLayer(sideState)) {
       for (
-        let groupIndex = 0;
-        groupIndex < pathIndexes.length - 1;
-        groupIndex++
+        let groupIndexA = 0;
+        groupIndexA < pathIndexes.length - 1;
+        groupIndexA++
       ) {
-        const pointListA = pointLists[pathIndexes[groupIndex]!]!
-        const pointListB = pointLists[pathIndexes[groupIndex + 1]!]!
+        const pathIndexA = pathIndexes[groupIndexA]!
+        const pathStateA = sideState.paths[pathIndexA]!
+        const pointListA = pointLists[pathIndexA]!
+
         for (
-          let segmentIndex = 0;
-          segmentIndex < this.breakoutSegmentCount;
-          segmentIndex++
+          let groupIndexB = groupIndexA + 1;
+          groupIndexB < pathIndexes.length;
+          groupIndexB++
         ) {
-          const distance = segmentSegmentDistance(
-            pointListA[segmentIndex]!,
-            pointListA[segmentIndex + 1]!,
-            pointListB[segmentIndex]!,
-            pointListB[segmentIndex + 1]!,
-          ).distance
-          minSegmentDistance = Math.min(minSegmentDistance, distance)
-          if (distance + EPSILON < this.breakoutTraceMarginMm) {
-            violationCount += 1
+          const pathIndexB = pathIndexes[groupIndexB]!
+          const pathStateB = sideState.paths[pathIndexB]!
+
+          if (
+            getAnchorNetName(pathStateA.anchor) ===
+            getAnchorNetName(pathStateB.anchor)
+          ) {
+            continue
+          }
+
+          const pointListB = pointLists[pathIndexB]!
+          for (
+            let segmentIndexA = 0;
+            segmentIndexA < this.breakoutSegmentCount;
+            segmentIndexA++
+          ) {
+            for (
+              let segmentIndexB = 0;
+              segmentIndexB < this.breakoutSegmentCount;
+              segmentIndexB++
+            ) {
+              const distance = segmentSegmentDistance(
+                pointListA[segmentIndexA]!,
+                pointListA[segmentIndexA + 1]!,
+                pointListB[segmentIndexB]!,
+                pointListB[segmentIndexB + 1]!,
+              ).distance
+              minSegmentDistance = Math.min(minSegmentDistance, distance)
+              if (distance + EPSILON < this.breakoutTraceMarginMm) {
+                violationCount += 1
+              }
+            }
           }
         }
       }
     }
 
     for (const pathState of sideState.paths) {
-      for (
-        let pointIndex = 1;
-        pointIndex <= this.breakoutSegmentCount;
-        pointIndex++
-      ) {
-        const u = pointIndex / this.breakoutSegmentCount
-        const crossSection = this.getCrossSection(sideState.side, u)
-        const tangent = pathState.tangents[pointIndex]!
-        const boundaryClearance = Math.min(
-          tangent - crossSection.tangentMin,
-          crossSection.tangentMax - tangent,
-        )
-        minBoundaryClearance = Math.min(minBoundaryClearance, boundaryClearance)
-        if (boundaryClearance + EPSILON < this.breakoutBoundaryMarginMm) {
-          violationCount += 1
-        }
+      const boundaryClearance = this.getBoundaryClearance(
+        sideState.side,
+        pathState.midpoint,
+      )
+      minBoundaryClearance = Math.min(minBoundaryClearance, boundaryClearance)
+      if (boundaryClearance + EPSILON < this.breakoutBoundaryMarginMm) {
+        violationCount += 1
       }
     }
 
     sideState.solved = violationCount === 0
+    sideState.idealSpacingSatisfied =
+      !Number.isFinite(minSegmentDistance) ||
+      minSegmentDistance + EPSILON >= idealTraceSpacing
     sideState.violationCount = violationCount
     sideState.minSegmentDistance = minSegmentDistance
     sideState.minBoundaryClearance = minBoundaryClearance
@@ -752,26 +1136,42 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     const populatedSideStates = this.sideStates.filter(
       (sideState) => sideState.paths.length > 0,
     )
-    const solvedSideCount = populatedSideStates.filter(
-      (sideState) => sideState.solved,
+    const completedSideCount = populatedSideStates.filter(
+      (sideState) => sideState.solved && sideState.idealSpacingSatisfied,
     ).length
 
     this.progress =
       populatedSideStates.length === 0
         ? 1
-        : solvedSideCount / populatedSideStates.length
+        : completedSideCount / populatedSideStates.length
     this.stats = {
       shrinkCount: this.shrinkCount,
       iterationsAtCurrentRect: this.iterationsAtCurrentRect,
       innerRect: this.innerRect,
-      unsolvedSides: populatedSideStates
-        .filter((sideState) => !sideState.solved)
+      unsolvedSides: this.getHardUnsolvedSideStates().map(
+        (sideState) => sideState.side,
+      ),
+      optimizationSides: this.getOptimizationPendingSideStates().map(
+        (sideState) => sideState.side,
+      ),
+      completedSides: populatedSideStates
+        .filter(
+          (sideState) => sideState.solved && sideState.idealSpacingSatisfied,
+        )
         .map((sideState) => sideState.side),
+      lastForceSide: this.lastForceIteration?.side ?? null,
+      lastForceMode: this.lastForceIteration?.mode ?? null,
+      lastForceRectIteration: this.lastForceIteration?.rectIteration ?? null,
+      lastForceMovedPaths:
+        this.lastForceIteration?.snapshots.filter(
+          (snapshot) => length(snapshot.appliedDelta) > POINT_EPSILON,
+        ).length ?? 0,
       sides: Object.fromEntries(
         this.sideStates.map((sideState) => [
           sideState.side,
           {
             solved: sideState.solved,
+            idealSpacingSatisfied: sideState.idealSpacingSatisfied,
             paths: sideState.paths.length,
             violationCount: sideState.violationCount,
             minSegmentDistance: Number.isFinite(sideState.minSegmentDistance)
@@ -792,7 +1192,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     const routes: A08BreakoutRoute[] = []
     for (const sideState of this.sideStates) {
       for (const pathState of sideState.paths) {
-        const route = this.getPathPoints(sideState.side, pathState)
+        const route = this.getPathPoints(pathState)
         const assigned = route[route.length - 1]!
         routes.push({
           anchorKey: pathState.anchor.key,
@@ -925,7 +1325,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     return true
   }
 
-  override visualize() {
+  override visualize(): GraphicsObject {
     const sideColors: Record<Side, string> = {
       left: "rgba(0,128,255,0.75)",
       right: "rgba(255,0,0,0.75)",
@@ -951,33 +1351,144 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       })
     }
 
-    const points = this.nodeWithPortPoints.portPoints.map((portPoint) => ({
-      x: portPoint.x,
-      y: portPoint.y,
-      color: "black",
-      label: portPoint.connectionName,
-    }))
+    const points: NonNullable<GraphicsObject["points"]> =
+      this.nodeWithPortPoints.portPoints.map((portPoint) => ({
+        x: portPoint.x,
+        y: portPoint.y,
+        color: "black",
+        label: portPoint.connectionName,
+      }))
+    for (const route of this.breakoutRoutes) {
+      points.push({
+        x: route.assigned.x,
+        y: route.assigned.y,
+        color: sideColors[route.side],
+      })
+    }
 
-    const circles = this.breakoutRoutes.map((route) => ({
-      center: { x: route.assigned.x, y: route.assigned.y },
-      radius: Math.max(0.05, this.traceThickness / 2),
-      fill: sideColors[route.side],
-      stroke: "black",
-    }))
+    const lines: NonNullable<GraphicsObject["lines"]> = this.breakoutRoutes.map(
+      (route) => ({
+        points: route.route.map((point) => ({ x: point.x, y: point.y })),
+        strokeColor: sideColors[route.side],
+      }),
+    )
 
-    const lines = this.breakoutRoutes.map((route) => ({
-      points: route.route.map((point) => ({ x: point.x, y: point.y })),
-      strokeColor: sideColors[route.side],
-      strokeWidth: this.traceThickness,
-    }))
+    const lastSnapshotByAnchorKey = new Map(
+      this.lastForceIteration?.snapshots.map((snapshot) => [
+        snapshot.anchorKey,
+        snapshot,
+      ]) ?? [],
+    )
+    const activeForceSide = this.lastForceIteration?.side ?? null
+
+    for (const sideState of this.sideStates) {
+      for (const pathState of sideState.paths) {
+        const route = this.getPathPoints(pathState)
+        const midpoint = route[BREAKOUT_MIDPOINT_INDEX]!
+        const snapshot = lastSnapshotByAnchorKey.get(pathState.anchor.key)
+        const isActiveSide = activeForceSide === sideState.side
+
+        points.push({
+          x: midpoint.x,
+          y: midpoint.y,
+          color: sideColors[sideState.side],
+          label:
+            isActiveSide && snapshot
+              ? `${snapshot.connectionName} mid ` +
+                `Δ=${formatVector(snapshot.appliedDelta)} ` +
+                `rep=${formatVector(snapshot.repulsionForce)} ` +
+                `sm=${formatVector(snapshot.smoothingForce)} ` +
+                `att=${formatVector(snapshot.attractionForce)}`
+              : undefined,
+        })
+
+        if (!snapshot || !isActiveSide) continue
+
+        points.push({
+          x: snapshot.midpointBefore.x,
+          y: snapshot.midpointBefore.y,
+          color: "rgba(96,96,96,0.75)",
+        })
+        points.push({
+          x: snapshot.targetMidpoint.x,
+          y: snapshot.targetMidpoint.y,
+          color: "rgba(0,0,0,0.35)",
+        })
+      }
+    }
+
+    if (this.lastForceIteration) {
+      const orthogonalVector = getOrthogonalUnitVector(
+        this.lastForceIteration.side,
+      )
+      const forceLineSpecs = [
+        {
+          key: "repulsion" as const,
+          color: "rgba(255,0,0,0.65)",
+          offset: -0.12,
+          scaleFactor: this.breakoutForceStepSize,
+          strokeDash: [1.5, 1.5] as number[],
+        },
+        {
+          key: "smoothing" as const,
+          color: "rgba(160,32,240,0.65)",
+          offset: 0,
+          scaleFactor: this.breakoutForceStepSize,
+          strokeDash: [1.5, 1.5] as number[],
+        },
+        {
+          key: "attraction" as const,
+          color: "rgba(96,96,96,0.65)",
+          offset: 0.12,
+          scaleFactor: this.breakoutForceStepSize,
+          strokeDash: [1.5, 1.5] as number[],
+        },
+        {
+          key: "applied" as const,
+          color: "rgba(0,0,0,0.85)",
+          offset: 0.24,
+          scaleFactor: 1,
+          strokeDash: undefined,
+        },
+      ]
+
+      for (const snapshot of this.lastForceIteration.snapshots) {
+        for (const lineSpec of forceLineSpecs) {
+          const vector =
+            lineSpec.key === "repulsion"
+              ? scale(snapshot.repulsionForce, lineSpec.scaleFactor)
+              : lineSpec.key === "smoothing"
+                ? scale(snapshot.smoothingForce, lineSpec.scaleFactor)
+                : lineSpec.key === "attraction"
+                  ? scale(snapshot.attractionForce, lineSpec.scaleFactor)
+                  : snapshot.appliedDelta
+
+          if (length(vector) <= POINT_EPSILON) continue
+
+          const start = add(
+            snapshot.midpointBefore,
+            scale(orthogonalVector, lineSpec.offset),
+          )
+          lines.push({
+            points: [start, add(start, vector)],
+            strokeColor: lineSpec.color,
+            strokeDash: lineSpec.strokeDash,
+          })
+        }
+      }
+    }
 
     return {
       points,
       lines,
-      circles,
       rects,
       coordinateSystem: "cartesian" as const,
-      title: `A08_BreakoutSolver [rect=${this.shrinkCount}, unsolved=${this.sideStates.filter((sideState) => !sideState.solved).length}]`,
+      title:
+        `A08_BreakoutSolver ` +
+        `[rect=${this.shrinkCount}, unsolved=${this.getHardUnsolvedSideStates().length}, ` +
+        `optimize=${this.getOptimizationPendingSideStates().length}, ` +
+        `iter=${this.iterationsAtCurrentRect}, ` +
+        `last=${this.lastForceIteration?.side ?? "none"}/${this.lastForceIteration?.mode ?? "none"}]`,
     }
   }
 }

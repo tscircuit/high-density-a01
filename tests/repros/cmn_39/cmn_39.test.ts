@@ -59,13 +59,13 @@ function getA08Solver() {
   return solver
 }
 
-test("cmn_39 A08 exact inset fails without fallback", () => {
+test("cmn_39 A08 reaches inner A01 and then exhausts iterations", () => {
   const solver = getA08Solver()
 
   expect(solver.solved).toBeFalse()
   expect(solver.failed).toBeTrue()
-  expect(solver.stage).toBe("A08_BreakoutSolver")
-  expect(solver.error).toContain("A08_BreakoutSolver")
+  expect(solver.stage).toBe("A01")
+  expect(solver.error).toContain("HighDensitySolverA01 ran out of iterations")
 })
 
 test("cmn_39 A08 starts with the breakout pipeline stage", () => {

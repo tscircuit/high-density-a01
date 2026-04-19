@@ -53,6 +53,10 @@ test("A08 breakout spaces inner-rect ports independently per layer", () => {
   expect(solver.solved).toBeTrue()
   expect(solver.failed).toBeFalse()
 
+  for (const route of solver.breakoutRoutes) {
+    expect(route.route).toHaveLength(3)
+  }
+
   const rightAssignments = solver.spreadAssignments
     .filter((assignment) => assignment.side === "right")
     .sort(
