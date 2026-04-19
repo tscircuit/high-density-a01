@@ -16,6 +16,14 @@ export type NodeWithPortPoints = {
   availableZ?: number[]
 }
 
+export type HighDensityRoutePoint = {
+  x: number
+  y: number
+  z: number
+  insideJumperPad?: boolean
+  portPointId?: string
+}
+
 /**
  * A path for a wire in high-density intra-node routing.
  *
@@ -35,7 +43,7 @@ export type HighDensityIntraNodeRoute = {
   rootConnectionName?: string
   traceThickness: number
   viaDiameter: number
-  route: Array<{ x: number; y: number; z: number; insideJumperPad?: boolean }>
+  route: HighDensityRoutePoint[]
   vias: Array<{ x: number; y: number }>
   jumpers?: Jumper[]
 }

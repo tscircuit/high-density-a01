@@ -248,36 +248,40 @@ export function addPointIfDistinct(
   route.push(point)
 }
 
+function getConnectionPointKey(
+  connectionName: string,
+  point: { x: number; y: number; z: number },
+) {
+  return `${connectionName}|${point.z}|${point.x.toFixed(6)}|${point.y.toFixed(6)}`
+}
+
 export function combineBreakoutAndInnerRoutes(params: {
   originalNodeWithPortPoints: NodeWithPortPoints
   breakoutOutput: A08BreakoutSolverOutput | null | undefined
   innerRoutes: HighDensityIntraNodeRoute[]
 }) {
-  const { originalNodeWithPortPoints, breakoutOutput, innerRoutes } = params
+  const { breakoutOutput, innerRoutes } = params
   if (!breakoutOutput) return innerRoutes
 
-  const breakoutRouteByAnchorKey = new Map(
-    breakoutOutput.breakoutRoutes.map((route) => [route.anchorKey, route]),
+  const breakoutRouteByAssignedPoint = new Map(
+    breakoutOutput.breakoutRoutes.map((route) => [
+      getConnectionPointKey(route.connectionName, route.assigned),
+      route,
+    ]),
   )
 
-  const originalPointsByConnection = new Map<string, PortPoint[]>()
-  for (const portPoint of originalNodeWithPortPoints.portPoints) {
-    if (!originalPointsByConnection.has(portPoint.connectionName)) {
-      originalPointsByConnection.set(portPoint.connectionName, [])
-    }
-    originalPointsByConnection.get(portPoint.connectionName)!.push(portPoint)
-  }
-
   return innerRoutes.map((innerRoute) => {
-    const originalPoints =
-      originalPointsByConnection.get(innerRoute.connectionName) ?? []
-    const firstOriginalPoint = originalPoints[0]
-    const lastOriginalPoint = originalPoints[originalPoints.length - 1]
-    const firstBreakoutRoute = firstOriginalPoint
-      ? breakoutRouteByAnchorKey.get(getAnchorKey(firstOriginalPoint))
+    const firstInnerPoint = innerRoute.route[0]
+    const lastInnerPoint = innerRoute.route[innerRoute.route.length - 1]
+    const firstBreakoutRoute = firstInnerPoint
+      ? breakoutRouteByAssignedPoint.get(
+          getConnectionPointKey(innerRoute.connectionName, firstInnerPoint),
+        )
       : undefined
-    const lastBreakoutRoute = lastOriginalPoint
-      ? breakoutRouteByAnchorKey.get(getAnchorKey(lastOriginalPoint))
+    const lastBreakoutRoute = lastInnerPoint
+      ? breakoutRouteByAssignedPoint.get(
+          getConnectionPointKey(innerRoute.connectionName, lastInnerPoint),
+        )
       : undefined
 
     const combinedRoute: Array<{ x: number; y: number; z: number }> = []
@@ -286,12 +290,8 @@ export function combineBreakoutAndInnerRoutes(params: {
       for (const point of firstBreakoutRoute.route) {
         addPointIfDistinct(combinedRoute, point)
       }
-    } else if (firstOriginalPoint) {
-      addPointIfDistinct(combinedRoute, {
-        x: firstOriginalPoint.x,
-        y: firstOriginalPoint.y,
-        z: firstOriginalPoint.z,
-      })
+    } else if (firstInnerPoint) {
+      addPointIfDistinct(combinedRoute, firstInnerPoint)
     }
 
     for (const point of innerRoute.route) {
@@ -302,17 +302,16 @@ export function combineBreakoutAndInnerRoutes(params: {
       for (const point of [...lastBreakoutRoute.route].reverse()) {
         addPointIfDistinct(combinedRoute, point)
       }
-    } else if (lastOriginalPoint) {
-      addPointIfDistinct(combinedRoute, {
-        x: lastOriginalPoint.x,
-        y: lastOriginalPoint.y,
-        z: lastOriginalPoint.z,
-      })
+    } else if (lastInnerPoint) {
+      addPointIfDistinct(combinedRoute, lastInnerPoint)
     }
 
     return {
       ...innerRoute,
-      rootConnectionName: firstOriginalPoint?.rootConnectionName,
+      rootConnectionName:
+        firstBreakoutRoute?.rootConnectionName ??
+        lastBreakoutRoute?.rootConnectionName ??
+        innerRoute.rootConnectionName,
       route: combinedRoute,
     }
   })

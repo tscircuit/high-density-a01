@@ -15,4 +15,5 @@ export {
   HighDensitySolverA08,
   HighDensitySolverA08BreakoutSolver,
 } from "./HighDensitySolverA08/HighDensitySolverA08"
+export * from "./routeGeometryValidation"
 export * from "./types"
