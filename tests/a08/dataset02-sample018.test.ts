@@ -24,7 +24,8 @@ test("A08 sample018 shrinks the tight left-side breakouts until they clear the r
   )
 
   const requiredTraceSpacing =
-    defaultA08Params.traceMargin + defaultA08Params.traceThickness
+    (defaultA08Params.traceMargin ?? 0.15) +
+    (defaultA08Params.traceThickness ?? 0.1)
 
   const solver = new HighDensitySolverA08({
     ...defaultA08Params,

@@ -10,7 +10,8 @@ test("A08 shrinks dataset-fails03 sample 1 until breakout trace spacing clears t
   }
 
   const requiredTraceSpacing =
-    defaultA08Params.traceMargin + defaultA08Params.traceThickness
+    (defaultA08Params.traceMargin ?? 0.15) +
+    (defaultA08Params.traceThickness ?? 0.1)
 
   const solver = new HighDensitySolverA08({
     ...defaultA08Params,
