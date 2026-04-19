@@ -14,6 +14,7 @@ import {
   HighDensitySolverA08BreakoutSolver,
   type A08BreakoutSolverProps,
 } from "./A08_BreakoutSolver"
+import { getSameLayerIntersectionError } from "../routeGeometryValidation"
 import {
   type A08BreakoutRoute,
   type A08BreakoutSolverOutput,
@@ -138,12 +139,24 @@ export class HighDensitySolverA08 extends BasePipelineSolver<HighDensitySolverA0
     const previousSubSolver = this.activeSubSolver
     super._step()
 
-    if (this.failed || this.solved) return
+    if (this.failed) return
+    if (this.solved) {
+      this.validateSolvedOutputOrFail()
+      return
+    }
 
     const currentSubSolver = this.activeSubSolver
     if (currentSubSolver && currentSubSolver !== previousSubSolver) {
       currentSubSolver.MAX_ITERATIONS = Math.max(1, this.MAX_ITERATIONS)
     }
+  }
+
+  private validateSolvedOutputOrFail(): void {
+    const error = getSameLayerIntersectionError(this.getOutput())
+    if (!error) return
+    this.error = `A08 output validation failed: ${error}`
+    this.failed = true
+    this.solved = false
   }
 
   get stage() {
