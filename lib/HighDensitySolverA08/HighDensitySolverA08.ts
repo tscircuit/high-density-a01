@@ -55,6 +55,7 @@ function toBreakoutSolverProps(
     nodeWithPortPoints: props.nodeWithPortPoints,
     cellSizeMm: props.cellSizeMm,
     maxCellCount: props.maxCellCount,
+    traceMargin: props.traceMargin,
     traceThickness: props.traceThickness,
     effort: props.effort,
     initialRectMarginMm: props.initialRectMarginMm,

@@ -36,6 +36,7 @@ export type Z04WorkerOptions = {
   solverMode?: Z04SolverMode
   maxIterations: number
   collectStats: boolean
+  initialRectMarginMm?: number
 }
 
 type WorkerRequest =
@@ -62,6 +63,9 @@ export const runDatasetZ04Benchmark = async (config: BenchmarkConfig) => {
   const limitArg = args.find((arg) => arg.startsWith("--limit="))
   const modeArg = args.find((arg) => arg.startsWith("--mode="))
   const iterationsArg = args.find((arg) => arg.startsWith("--max-iterations="))
+  const initialRectMarginArg = args.find((arg) =>
+    arg.startsWith("--initial-rect-margin-mm="),
+  )
   const showStats = args.includes("--stats")
   const showHelp = args.includes("--help") || args.includes("-h")
 
@@ -80,6 +84,8 @@ Options:
   --concurrency=N      Number of worker loops (default: 4)
   --limit=N            Only run first N problems
 ${modeLines}  --max-iterations=N   Solver MAX_ITERATIONS (default: 1000000)
+  --initial-rect-margin-mm=N
+                        Override A08 initialRectMarginMm for this run
   --stats              Print average grid stats
   --help, -h           Show this help message
 
@@ -107,6 +113,14 @@ Examples:
   const maxIterations = Number.isFinite(parsedMaxIterations)
     ? Math.max(1, parsedMaxIterations)
     : 1_000_000
+  const parsedInitialRectMarginMm = initialRectMarginArg
+    ? Number.parseFloat(initialRectMarginArg.split("=")[1] ?? "")
+    : undefined
+  const initialRectMarginMm =
+    parsedInitialRectMarginMm !== undefined &&
+    Number.isFinite(parsedInitialRectMarginMm)
+      ? parsedInitialRectMarginMm
+      : undefined
 
   const sampleCount = Number.isFinite(limit)
     ? Math.max(0, Math.min(datasetZ04ProblemCount, limit ?? 0))
@@ -125,6 +139,7 @@ Examples:
     solverMode,
     maxIterations,
     collectStats: showStats,
+    initialRectMarginMm,
   }
 
   let nextJobPointer = 0
@@ -222,6 +237,9 @@ Examples:
   console.log(`Workers: ${workerCount}`)
   if (solverMode) console.log(`Mode: ${solverMode}`)
   console.log(`Max iterations: ${maxIterations}`)
+  if (initialRectMarginMm !== undefined) {
+    console.log(`Initial rect margin mm: ${initialRectMarginMm}`)
+  }
   console.log(`Grid stats: ${showStats ? "on" : "off"}`)
   console.log()
 

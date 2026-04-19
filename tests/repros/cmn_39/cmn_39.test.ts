@@ -52,6 +52,7 @@ function getA08Solver() {
     ...defaultA08Params,
     nodeWithPortPoints: cmn39,
     effort: TEST_EFFORT,
+    initialRectMarginMm: 1,
   })
   solver.MAX_ITERATIONS = TEST_MAX_ITERATIONS
   solver.solve()
@@ -59,13 +60,15 @@ function getA08Solver() {
   return solver
 }
 
-test("cmn_39 A08 reaches inner A01 and then exhausts iterations", () => {
+test("cmn_39 A08 can fail in breakout after exhausting rect shrink", () => {
   const solver = getA08Solver()
 
   expect(solver.solved).toBeFalse()
   expect(solver.failed).toBeTrue()
-  expect(solver.stage).toBe("A01")
-  expect(solver.error).toContain("HighDensitySolverA01 ran out of iterations")
+  expect(solver.stage).toBe("A08_BreakoutSolver")
+  expect(solver.error).toContain(
+    "A08_BreakoutSolver could not shrink the inner rect any further",
+  )
 })
 
 test("cmn_39 A08 starts with the breakout pipeline stage", () => {
@@ -73,6 +76,7 @@ test("cmn_39 A08 starts with the breakout pipeline stage", () => {
     ...defaultA08Params,
     nodeWithPortPoints: cmn39,
     effort: TEST_EFFORT,
+    initialRectMarginMm: 1,
   })
   solver.MAX_ITERATIONS = TEST_MAX_ITERATIONS
 

@@ -94,7 +94,7 @@ export const defaultA08Params: Pick<
   traceThickness: 0.1,
   viaDiameter: 0.3,
   viaMinDistFromBorder: 0.15,
-  initialRectMarginMm: 1,
+  initialRectMarginMm: 0.2,
   rectShrinkStepMm: 0.4,
   breakoutTraceMarginMm: 0.1,
   breakoutSegmentCount: 2,
