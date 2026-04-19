@@ -9,19 +9,6 @@ import { HighDensitySolverA08 } from "../../lib/HighDensitySolverA08/HighDensity
 
 const dataset02 = dataset02Json as Dataset02Sample[]
 
-function getNodeBounds(nodeWithPortPoints: {
-  center: { x: number; y: number }
-  width: number
-  height: number
-}) {
-  return {
-    minX: nodeWithPortPoints.center.x - nodeWithPortPoints.width / 2,
-    maxX: nodeWithPortPoints.center.x + nodeWithPortPoints.width / 2,
-    minY: nodeWithPortPoints.center.y - nodeWithPortPoints.height / 2,
-    maxY: nodeWithPortPoints.center.y + nodeWithPortPoints.height / 2,
-  }
-}
-
 function dot(a: { x: number; y: number }, b: { x: number; y: number }) {
   return a.x * b.x + a.y * b.y
 }
@@ -120,16 +107,40 @@ function getMinRoutePairDistance(
   return minDistance
 }
 
-test("A08 sample010 breakout reaches A01 with an exact 1mm inset", () => {
-  const sample = dataset02[9]
+function getMidpointOffset(route: Array<{ x: number; y: number }>) {
+  const start = route[0]!
+  const midpoint = route[1]!
+  const end = route[2]!
+  return {
+    dx: midpoint.x - (start.x + end.x) / 2,
+    dy: midpoint.y - (start.y + end.y) / 2,
+  }
+}
+
+function toStraightRoute(route: Array<{ x: number; y: number; z: number }>) {
+  const start = route[0]!
+  const end = route[2]!
+  return [
+    start,
+    {
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+      z: start.z,
+    },
+    end,
+  ]
+}
+
+test("A08 sample018 force-improves the tight left-side A/F breakouts", () => {
+  const sample = dataset02[17]
   if (!sample) {
-    throw new Error("dataset02 sample010 is missing")
+    throw new Error("dataset02 sample018 is missing")
   }
 
   const nodeWithPortPoints = convertDataset02SampleToNodeWithPortPoints(
     sample,
     {
-      capacityMeshNodeId: "dataset02-10",
+      capacityMeshNodeId: "dataset02-18",
       availableZ: [0, 1],
     },
   )
@@ -142,53 +153,45 @@ test("A08 sample010 breakout reaches A01 with an exact 1mm inset", () => {
   solver.MAX_ITERATIONS = 100_000_000
   solver.solveUntilStage("A01")
 
-  const outerBounds = getNodeBounds(nodeWithPortPoints)
-  const innerRect = solver.innerRect
-
   expect(solver.stage).toBe("A01")
   expect(solver.failed).toBeFalse()
-  expect(innerRect).not.toBeNull()
+  expect(solver.breakoutSolver?.iterations).toBeGreaterThan(0)
 
-  expect(innerRect!.minX).toBeCloseTo(outerBounds.minX + 1, 6)
-  expect(innerRect!.maxX).toBeCloseTo(outerBounds.maxX - 1, 6)
-  expect(innerRect!.minY).toBeCloseTo(outerBounds.minY + 1, 6)
-  expect(innerRect!.maxY).toBeCloseTo(outerBounds.maxY - 1, 6)
-
-  const topAssignments = solver.spreadAssignments.filter(
-    (assignment) => assignment.side === "top",
+  const leftRoutes = solver.breakoutRoutes.filter(
+    (route) => route.side === "left",
   )
-  expect(topAssignments).toHaveLength(3)
-  const topAssignedXs = topAssignments
-    .map((assignment) => assignment.assigned.x)
-    .sort((a, b) => a - b)
+  const leftARoute = leftRoutes.find(
+    (route) => route.connectionName === "A" && route.original.y > -10,
+  )
+  const leftFRoute = leftRoutes.find((route) => route.connectionName === "F")
 
-  const topRoutes = solver.breakoutRoutes
-    .filter((route) => route.side === "top")
-    .map((route) => route.route.map((point) => ({ x: point.x, y: point.y })))
-  expect(topRoutes).toHaveLength(3)
-  for (const route of topRoutes) {
-    expect(route).toHaveLength(3)
-  }
+  expect(leftARoute).toBeDefined()
+  expect(leftFRoute).toBeDefined()
 
-  for (const assignment of topAssignments) {
-    expect(
-      assignment.original.y - assignment.assigned.y,
-    ).toBeGreaterThanOrEqual(0.999)
-  }
-  expect(topAssignedXs[0]! - innerRect!.minX).toBeGreaterThan(1)
-  expect(innerRect!.maxX - topAssignedXs[2]!).toBeGreaterThan(1)
-  expect(topAssignedXs[1]! - topAssignedXs[0]!).toBeGreaterThan(2)
-  expect(topAssignedXs[2]! - topAssignedXs[1]!).toBeGreaterThan(2)
+  const aOffset = getMidpointOffset(
+    leftARoute!.route.map((point) => ({ x: point.x, y: point.y })),
+  )
+  const fOffset = getMidpointOffset(
+    leftFRoute!.route.map((point) => ({ x: point.x, y: point.y })),
+  )
 
-  expect(
-    getMinRoutePairDistance(topRoutes[0]!, topRoutes[1]!),
-  ).toBeGreaterThanOrEqual(0.1)
-  expect(
-    getMinRoutePairDistance(topRoutes[1]!, topRoutes[2]!),
-  ).toBeGreaterThanOrEqual(0.1)
+  expect(Math.hypot(aOffset.dx, aOffset.dy)).toBeGreaterThan(0.03)
+  expect(Math.hypot(fOffset.dx, fOffset.dy)).toBeGreaterThan(0.02)
 
-  solver.solve()
-  expect(solver.solved).toBeTrue()
-  expect(solver.failed).toBeFalse()
-  expect(solver.getOutput().length).toBeGreaterThan(0)
+  const initialDistance = getMinRoutePairDistance(
+    toStraightRoute(leftARoute!.route).map((point) => ({
+      x: point.x,
+      y: point.y,
+    })),
+    toStraightRoute(leftFRoute!.route).map((point) => ({
+      x: point.x,
+      y: point.y,
+    })),
+  )
+  const finalDistance = getMinRoutePairDistance(
+    leftARoute!.route.map((point) => ({ x: point.x, y: point.y })),
+    leftFRoute!.route.map((point) => ({ x: point.x, y: point.y })),
+  )
+
+  expect(finalDistance).toBeGreaterThan(initialDistance + 0.01)
 })
