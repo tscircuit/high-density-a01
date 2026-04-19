@@ -1076,6 +1076,9 @@ export class HighDensitySolverA01 extends BaseSolver {
       }
     }
 
+    const firstCell = cells[0]!
+    const lastCell = cells[cells.length - 1]!
+
     const connId = this.activeConnId
 
     // Collect ripped traces from goal node's persistent list
@@ -1229,13 +1232,13 @@ export class HighDensitySolverA01 extends BaseSolver {
     const solvedRoutes = this.solvedRoutes.get(connId) ?? []
     solvedRoutes.push({
       connId,
-      startZ: this.activeConnSeg!.startZ,
-      startRow: this.activeConnSeg!.startRow,
-      startCol: this.activeConnSeg!.startCol,
+      startZ: firstCell.z,
+      startRow: firstCell.row,
+      startCol: firstCell.col,
       startPoint: this.activeConnSeg!.startPoint,
-      endZ: this.activeConnSeg!.endZ,
-      endRow: this.activeConnSeg!.endRow,
-      endCol: this.activeConnSeg!.endCol,
+      endZ: lastCell.z,
+      endRow: lastCell.row,
+      endCol: lastCell.col,
       endPoint: this.activeConnSeg!.endPoint,
       cells,
       viaCells,

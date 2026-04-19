@@ -1,4 +1,4 @@
-import type { HighDensityIntraNodeRoute } from "./types"
+import type { HighDensityIntraNodeRoute, HighDensityRoutePoint } from "./types"
 
 interface Point {
   x: number
@@ -122,6 +122,76 @@ function pointDistance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
+function pointsShareLocation(
+  a: Point,
+  b: Point,
+  tolerance = POINT_TOLERANCE,
+): boolean {
+  return Math.abs(a.x - b.x) < tolerance && Math.abs(a.y - b.y) < tolerance
+}
+
+function getEndpointPortPointIdsAt(
+  route: HighDensityIntraNodeRoute,
+  z: number,
+  point: Point,
+): Set<string> {
+  const ids = new Set<string>()
+  const endpoints: Array<HighDensityRoutePoint | undefined> = [
+    route.route[0],
+    route.route[route.route.length - 1],
+  ]
+
+  for (const endpoint of endpoints) {
+    if (!endpoint) continue
+    if (endpoint.z !== z) continue
+    if (!endpoint.portPointId) continue
+    if (!pointsShareLocation(endpoint, point)) continue
+    ids.add(endpoint.portPointId)
+  }
+
+  return ids
+}
+
+function isAllowedSharedEndpointPoint(
+  route1: HighDensityIntraNodeRoute,
+  route2: HighDensityIntraNodeRoute,
+  z: number,
+  point: Point,
+): boolean {
+  const ids1 = getEndpointPortPointIdsAt(route1, z, point)
+  if (ids1.size === 0) return false
+
+  const ids2 = getEndpointPortPointIdsAt(route2, z, point)
+  if (ids2.size === 0) return false
+
+  for (const id of ids1) {
+    if (ids2.has(id)) return true
+  }
+
+  return false
+}
+
+function segmentsMeetAtAllowedSharedEndpoint(
+  route1: HighDensityIntraNodeRoute,
+  seg1: SegmentOnLayer,
+  route2: HighDensityIntraNodeRoute,
+  seg2: SegmentOnLayer,
+): boolean {
+  const seg1Endpoints = [seg1.a, seg1.b]
+  const seg2Endpoints = [seg2.a, seg2.b]
+
+  for (const p1 of seg1Endpoints) {
+    for (const p2 of seg2Endpoints) {
+      if (!pointsShareLocation(p1, p2)) continue
+      if (isAllowedSharedEndpointPoint(route1, route2, seg1.z, p1)) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
+
 function pointToSegmentDistance(p: Point, a: Point, b: Point): number {
   const abx = b.x - a.x
   const aby = b.y - a.y
@@ -188,10 +258,10 @@ export function findSameLayerIntersections(
         const seen = new Set<string>()
         for (const p1 of pts1) {
           for (const p2 of pts2) {
-            if (
-              Math.abs(p1.x - p2.x) < POINT_TOLERANCE &&
-              Math.abs(p1.y - p2.y) < POINT_TOLERANCE
-            ) {
+            if (pointsShareLocation(p1, p2)) {
+              if (isAllowedSharedEndpointPoint(route1, route2, z, p1)) {
+                continue
+              }
               const key = `${p1.x.toFixed(2)},${p1.y.toFixed(2)}`
               if (seen.has(key)) continue
               seen.add(key)
@@ -319,6 +389,17 @@ export function findRouteGeometryViolations(
           for (const seg2 of segs2) {
             const distance = segmentDistance(seg1.a, seg1.b, seg2.a, seg2.b)
             if (distance + CLEARANCE_TOLERANCE >= traceClearance) continue
+            if (
+              distance <= POINT_TOLERANCE &&
+              segmentsMeetAtAllowedSharedEndpoint(
+                route1.route,
+                seg1,
+                route2.route,
+                seg2,
+              )
+            ) {
+              continue
+            }
             pushViolation(violations, {
               trace1: route1.route.connectionName,
               trace2: route2.route.connectionName,
@@ -339,6 +420,12 @@ export function findRouteGeometryViolations(
           for (const p2 of points2) {
             const distance = pointDistance(p1, p2)
             if (distance + CLEARANCE_TOLERANCE >= traceClearance) continue
+            if (
+              distance <= POINT_TOLERANCE &&
+              isAllowedSharedEndpointPoint(route1.route, route2.route, z, p1)
+            ) {
+              continue
+            }
             pushViolation(violations, {
               trace1: route1.route.connectionName,
               trace2: route2.route.connectionName,

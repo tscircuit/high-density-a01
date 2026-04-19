@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test"
 import type { HighDensityIntraNodeRoute } from "../lib/types"
 import {
+  findSameLayerIntersections,
   findRouteGeometryViolations,
+  validateNoIntersections,
   validateRouteGeometry,
 } from "./fixtures/validateNoIntersections"
 
@@ -94,4 +96,34 @@ test("route geometry validator catches via clearance violations", () => {
   expect(
     violations.some((violation) => violation.type === "via_trace_clearance"),
   ).toBe(true)
+})
+
+test("route geometry validator ignores declared shared endpoints", () => {
+  const routes: HighDensityIntraNodeRoute[] = [
+    {
+      connectionName: "net_a",
+      traceThickness: 0.1,
+      viaDiameter: 0.2,
+      route: [
+        { x: 0, y: 0, z: 0, portPointId: "shared-port" },
+        { x: -1, y: 1, z: 0 },
+      ],
+      vias: [],
+    },
+    {
+      connectionName: "net_b",
+      traceThickness: 0.1,
+      viaDiameter: 0.2,
+      route: [
+        { x: 0, y: 0, z: 0, portPointId: "shared-port" },
+        { x: 1, y: 1, z: 0 },
+      ],
+      vias: [],
+    },
+  ]
+
+  expect(findSameLayerIntersections(routes)).toHaveLength(0)
+  expect(findRouteGeometryViolations(routes)).toHaveLength(0)
+  expect(() => validateNoIntersections(routes)).not.toThrow()
+  expect(() => validateRouteGeometry(routes)).not.toThrow()
 })
