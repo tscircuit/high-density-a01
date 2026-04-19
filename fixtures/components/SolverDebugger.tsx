@@ -4,15 +4,17 @@ import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensity
 import { HighDensitySolverA02 } from "../../lib/HighDensitySolverA02/HighDensitySolverA02"
 import { HighDensitySolverA03 } from "../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import { HighDensitySolverA05 } from "../../lib/HighDensitySolverA05/HighDensitySolverA05"
+import { HighDensitySolverA08 } from "../../lib/HighDensitySolverA08/HighDensitySolverA08"
 import {
   defaultA02Params,
   defaultA03Params,
   defaultA05Params,
+  defaultA08Params,
   defaultParams,
 } from "../../lib/default-params"
 import type { NodeWithPortPoints } from "../../lib/types"
 
-type SolverKey = "a01" | "a02" | "a03" | "a05"
+type SolverKey = "a01" | "a02" | "a03" | "a05" | "a08"
 
 const STORAGE_KEY = "high-density:selected-solver"
 
@@ -21,11 +23,16 @@ const SOLVER_OPTIONS: Array<{ label: string; value: SolverKey }> = [
   { label: "A02", value: "a02" },
   { label: "A03", value: "a03" },
   { label: "A05", value: "a05" },
+  { label: "A08", value: "a08" },
 ]
 const ALL_SOLVER_KEYS = SOLVER_OPTIONS.map((option) => option.value)
 
 const isSolverKey = (value: string | null): value is SolverKey =>
-  value === "a01" || value === "a02" || value === "a03" || value === "a05"
+  value === "a01" ||
+  value === "a02" ||
+  value === "a03" ||
+  value === "a05" ||
+  value === "a08"
 
 const getInitialSolverKey = (fallback: SolverKey) => {
   if (typeof window === "undefined") return fallback
@@ -100,6 +107,7 @@ export function SolverDebugger({
             | HighDensitySolverA02
             | HighDensitySolverA03
             | HighDensitySolverA05
+            | HighDensitySolverA08
 
           switch (solverKey) {
             case "a01":
@@ -123,6 +131,12 @@ export function SolverDebugger({
             case "a05":
               solver = new HighDensitySolverA05({
                 ...defaultA05Params,
+                nodeWithPortPoints,
+              })
+              break
+            case "a08":
+              solver = new HighDensitySolverA08({
+                ...defaultA08Params,
                 nodeWithPortPoints,
               })
               break

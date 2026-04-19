@@ -3,7 +3,7 @@ import { hgProblems } from "../node_modules/high-density-dataset-z04/hg-problem/
 
 export const datasetZ04ProblemCount = hgProblems.length
 
-export type Z04SolverKey = "a01" | "a02" | "a03" | "a05"
+export type Z04SolverKey = "a01" | "a02" | "a03" | "a05" | "a08"
 
 export type Z04SolverMode = "fast" | "strict" | "default" | "repro"
 
