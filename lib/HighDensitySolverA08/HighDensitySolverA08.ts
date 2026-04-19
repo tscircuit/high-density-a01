@@ -219,12 +219,14 @@ export class HighDensitySolverA08 extends BasePipelineSolver<HighDensitySolverA0
     const LAYER_COLORS = ["red", "blue", "orange", "green"]
 
     return {
-      points: this.inputProblem.nodeWithPortPoints.portPoints.map((portPoint) => ({
-        x: portPoint.x,
-        y: portPoint.y,
-        color: LAYER_COLORS[portPoint.z] ?? "black",
-        label: portPoint.connectionName,
-      })),
+      points: this.inputProblem.nodeWithPortPoints.portPoints.map(
+        (portPoint) => ({
+          x: portPoint.x,
+          y: portPoint.y,
+          color: LAYER_COLORS[portPoint.z] ?? "black",
+          label: portPoint.connectionName,
+        }),
+      ),
       rects: [
         {
           center: this.inputProblem.nodeWithPortPoints.center,
