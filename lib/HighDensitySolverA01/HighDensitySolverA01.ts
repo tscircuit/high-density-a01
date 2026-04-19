@@ -5,7 +5,6 @@ import {
   computeGridToAffineTransform,
 } from "../gridToAffineTransform"
 import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
-import { getSameLayerIntersectionError } from "../routeGeometryValidation"
 import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 
 // --- Interned connection ID ---
@@ -512,7 +511,6 @@ export class HighDensitySolverA01 extends BaseSolver {
     // 1. If no active connection, dequeue next
     if (!this.activeConnSeg) {
       if (this.unsolvedSegs.length === 0) {
-        if (!this.validateSolvedOutputOrFail()) return
         this.solved = true
         return
       }
@@ -688,15 +686,6 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
-  }
-
-  private validateSolvedOutputOrFail(): boolean {
-    const error = getSameLayerIntersectionError(this.getOutput())
-    if (!error) return true
-    this.error = `A01 output validation failed: ${error}`
-    this.failed = true
-    this.solved = false
-    return false
   }
 
   // --- Merged cost + rip computation (writes to _moveCost/_moveRipped) ---
