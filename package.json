@@ -20,6 +20,8 @@
     "benchmark:dataset-z04:a01": "bun run scripts/run-dataset-z04-benchmark-a01.ts --concurrency=4",
     "benchmark:dataset-z04:a02": "bun run scripts/run-dataset-z04-benchmark-a02.ts --concurrency=4",
     "benchmark:dataset-z04:a03": "bun run scripts/run-dataset-z04-benchmark-a03.ts --concurrency=4",
+    "benchmark:dataset-z04:a08": "bun run scripts/run-dataset-z04-benchmark-a08.ts --concurrency=4",
+    "compare:cmn39": "bun run scripts/compare-a01-vs-a08-cmn_39.ts",
     "profile:a02": "bun run scripts/profile-a02.ts",
     "format": "biome format --write .",
     "format:check": "biome format ."
