@@ -64,11 +64,11 @@ test("cmn_39 A08 exact inset fails without fallback", () => {
 
   expect(solver.solved).toBeFalse()
   expect(solver.failed).toBeTrue()
-  expect(solver.innerRectStrategy).toBe("exact-side-inset")
-  expect(solver.error).toContain("Convergence failure")
+  expect(solver.stage).toBe("A08_BreakoutSolver")
+  expect(solver.error).toContain("A08_BreakoutSolver")
 })
 
-test("cmn_39 A08 advances one operation per step", () => {
+test("cmn_39 A08 starts with the breakout pipeline stage", () => {
   const solver = new HighDensitySolverA08({
     ...defaultA08Params,
     nodeWithPortPoints: cmn39,
@@ -77,24 +77,26 @@ test("cmn_39 A08 advances one operation per step", () => {
   solver.MAX_ITERATIONS = TEST_MAX_ITERATIONS
 
   solver.step()
-  expect(solver.stage).toBe("create-inner-solver")
+  expect(solver.stage).toBe("A08_BreakoutSolver")
+  expect(solver.solved).toBeFalse()
+  expect(solver.failed).toBeFalse()
+  expect(solver.breakoutSolver).not.toBeNull()
+  expect(solver.breakoutSolver?.iterations).toBe(0)
+  expect(solver.innerSolver).toBeNull()
+  expect(solver.innerRect).toBeNull()
+
+  solver.step()
+  expect(solver.stage).toBe("A08_BreakoutSolver")
+  expect(solver.breakoutSolver?.iterations).toBe(1)
   expect(solver.solved).toBeFalse()
   expect(solver.failed).toBeFalse()
   expect(solver.innerRect).not.toBeNull()
   expect(solver.innerSolver).toBeNull()
 
   solver.step()
-  expect(solver.stage).toBe("step-inner-solver")
-  expect(solver.innerSolver).not.toBeNull()
-  expect(solver.innerSolver?.iterations).toBe(0)
-  expect(solver.solved).toBeFalse()
-  expect(solver.failed).toBeFalse()
-
-  solver.step()
-  expect(solver.stage).toBe("step-inner-solver")
-  expect(solver.innerSolver?.iterations).toBe(1)
-  expect(solver.solved).toBeFalse()
-  expect(solver.failed).toBeFalse()
+  expect(solver.stage).toBe("A08_BreakoutSolver")
+  expect(solver.breakoutSolver?.iterations).toBe(2)
+  expect(solver.innerSolver).toBeNull()
 })
 
 test("cmn_39 A08 inner rect maintains 1mm clearance", () => {

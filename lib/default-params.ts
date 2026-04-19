@@ -83,12 +83,20 @@ export const defaultA08Params: Pick<
   | "traceThickness"
   | "viaDiameter"
   | "viaMinDistFromBorder"
-  | "innerRectMarginMm"
+  | "initialRectMarginMm"
+  | "rectShrinkStepMm"
+  | "breakoutTraceMarginMm"
+  | "breakoutSegmentCount"
+  | "innerPortSpreadFactor"
 > = {
   cellSizeMm: 0.1,
   traceMargin: 0.15,
   traceThickness: 0.1,
   viaDiameter: 0.3,
   viaMinDistFromBorder: 0.15,
-  innerRectMarginMm: 1,
+  initialRectMarginMm: 1,
+  rectShrinkStepMm: 0.4,
+  breakoutTraceMarginMm: 0.1,
+  breakoutSegmentCount: 6,
+  innerPortSpreadFactor: 0.4,
 }
