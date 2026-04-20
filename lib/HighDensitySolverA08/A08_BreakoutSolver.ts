@@ -14,6 +14,7 @@ import {
   buildSpreadAnchors,
   clamp,
   getNodeBounds,
+  getAnchorKey,
   getSortCoordinate,
   lerp,
   pickExactSideInsetRect,
@@ -31,6 +32,7 @@ type BreakoutPoint = {
   x: number
   y: number
   z: number
+  portPointId?: string
 }
 
 type Vector2 = {
@@ -245,6 +247,47 @@ function getAnchorNetName(anchor: SpreadAnchor) {
   return (
     anchor.representative.rootConnectionName ??
     anchor.representative.connectionName.replace(/_mst\d+$/, "")
+  )
+}
+
+function pointsShareLocation(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  tolerance = POINT_EPSILON,
+) {
+  return Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance
+}
+
+function anchorsShareOriginalEndpoint(
+  anchorA: SpreadAnchor,
+  anchorB: SpreadAnchor,
+) {
+  const portPointIdA = anchorA.representative.portPointId
+  const portPointIdB = anchorB.representative.portPointId
+
+  return (
+    portPointIdA !== undefined &&
+    portPointIdA === portPointIdB &&
+    anchorA.representative.z === anchorB.representative.z &&
+    pointsShareLocation(anchorA.representative, anchorB.representative)
+  )
+}
+
+function isAllowedSharedOriginalEndpoint(
+  pathStateA: BreakoutPathState,
+  segmentIndexA: number,
+  pathStateB: BreakoutPathState,
+  segmentIndexB: number,
+  distance: SegmentDistanceResult,
+) {
+  return (
+    segmentIndexA === 0 &&
+    segmentIndexB === 0 &&
+    distance.aWeight <= POINT_EPSILON &&
+    distance.bWeight <= POINT_EPSILON &&
+    anchorsShareOriginalEndpoint(pathStateA.anchor, pathStateB.anchor) &&
+    pointsShareLocation(distance.pointA, pathStateA.anchor.representative) &&
+    pointsShareLocation(distance.pointB, pathStateB.anchor.representative)
   )
 }
 
@@ -712,6 +755,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
         targetInnerTangent,
         anchor.representative.z,
       )
+      assignedPoint.portPointId = anchor.representative.portPointId
       const targetMidpoint = {
         x: (anchor.representative.x + assignedPoint.x) / 2,
         y: (anchor.representative.y + assignedPoint.y) / 2,
@@ -787,6 +831,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
         x: pathState.anchor.representative.x,
         y: pathState.anchor.representative.y,
         z: pathState.anchor.representative.z,
+        portPointId: pathState.anchor.representative.portPointId,
       },
       pathState.midpoint,
       pathState.assignedPoint,
@@ -855,6 +900,18 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
                 pointListB[segmentIndexB]!,
                 pointListB[segmentIndexB + 1]!,
               )
+
+              if (
+                isAllowedSharedOriginalEndpoint(
+                  pathStateA,
+                  segmentIndexA,
+                  pathStateB,
+                  segmentIndexB,
+                  distance,
+                )
+              ) {
+                continue
+              }
 
               if (distance.distance + EPSILON >= idealTraceSpacing) continue
 
@@ -1119,9 +1176,25 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
                 pointListA[segmentIndexA + 1]!,
                 pointListB[segmentIndexB]!,
                 pointListB[segmentIndexB + 1]!,
-              ).distance
-              minSegmentDistance = Math.min(minSegmentDistance, distance)
-              if (distance + EPSILON < acceptedTraceSpacing) {
+              )
+
+              if (
+                isAllowedSharedOriginalEndpoint(
+                  pathStateA,
+                  segmentIndexA,
+                  pathStateB,
+                  segmentIndexB,
+                  distance,
+                )
+              ) {
+                continue
+              }
+
+              minSegmentDistance = Math.min(
+                minSegmentDistance,
+                distance.distance,
+              )
+              if (distance.distance + EPSILON < acceptedTraceSpacing) {
                 violationCount += 1
               }
             }
@@ -1258,10 +1331,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       height: this.innerRect.height,
       availableZ: this.nodeWithPortPoints.availableZ,
       portPoints: this.nodeWithPortPoints.portPoints.map((portPoint) => {
-        const assigned = assignedByAnchorKey.get(
-          portPoint.portPointId ??
-            `${portPoint.z}:${portPoint.x.toFixed(6)}:${portPoint.y.toFixed(6)}`,
-        )
+        const assigned = assignedByAnchorKey.get(getAnchorKey(portPoint))
         if (!assigned) return portPoint
         return {
           ...portPoint,

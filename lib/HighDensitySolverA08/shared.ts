@@ -1,5 +1,6 @@
 import type {
   HighDensityIntraNodeRoute,
+  HighDensityRoutePoint,
   NodeWithPortPoints,
   PortPoint,
 } from "../types"
@@ -26,8 +27,8 @@ export type SpreadAnchor = {
 export type A08SpreadAssignment = {
   anchorKey: string
   side: Side
-  original: { x: number; y: number; z: number }
-  assigned: { x: number; y: number; z: number }
+  original: HighDensityRoutePoint
+  assigned: HighDensityRoutePoint
 }
 
 export type A08BreakoutRoute = {
@@ -35,9 +36,9 @@ export type A08BreakoutRoute = {
   side: Side
   connectionName: string
   rootConnectionName?: string
-  original: { x: number; y: number; z: number }
-  assigned: { x: number; y: number; z: number }
-  route: Array<{ x: number; y: number; z: number }>
+  original: HighDensityRoutePoint
+  assigned: HighDensityRoutePoint
+  route: HighDensityRoutePoint[]
 }
 
 export type A08BreakoutSolverOutput = {
@@ -135,10 +136,13 @@ export function chooseSide(
 }
 
 export function getAnchorKey(portPoint: PortPoint) {
-  return (
+  const rootNetName =
+    portPoint.rootConnectionName ??
+    portPoint.connectionName.replace(/_mst\d+$/, "")
+  const baseKey =
     portPoint.portPointId ??
     `${portPoint.z}:${portPoint.x.toFixed(6)}:${portPoint.y.toFixed(6)}`
-  )
+  return `${baseKey}|${rootNetName}`
 }
 
 export function getSortCoordinate(
@@ -250,7 +254,7 @@ export function addPointIfDistinct(
 
 function getConnectionPointKey(
   connectionName: string,
-  point: { x: number; y: number; z: number },
+  point: HighDensityRoutePoint,
 ) {
   return `${connectionName}|${point.z}|${point.x.toFixed(6)}|${point.y.toFixed(6)}`
 }
@@ -284,7 +288,7 @@ export function combineBreakoutAndInnerRoutes(params: {
         )
       : undefined
 
-    const combinedRoute: Array<{ x: number; y: number; z: number }> = []
+    const combinedRoute: HighDensityRoutePoint[] = []
 
     if (firstBreakoutRoute) {
       for (const point of firstBreakoutRoute.route) {
