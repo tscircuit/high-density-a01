@@ -1,10 +1,25 @@
 import { GenericSolverDebugger } from "@tscircuit/solver-utils/react"
 import { useEffect, useState } from "react"
-import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
-import { HighDensitySolverA02 } from "../../lib/HighDensitySolverA02/HighDensitySolverA02"
-import { HighDensitySolverA03 } from "../../lib/HighDensitySolverA03/HighDensitySolverA03"
-import { HighDensitySolverA05 } from "../../lib/HighDensitySolverA05/HighDensitySolverA05"
-import { HighDensitySolverA08 } from "../../lib/HighDensitySolverA08/HighDensitySolverA08"
+import {
+  HighDensitySolverA01,
+  type HighDensitySolverA01Props,
+} from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
+import {
+  HighDensitySolverA02,
+  type HighDensitySolverA02Props,
+} from "../../lib/HighDensitySolverA02/HighDensitySolverA02"
+import {
+  HighDensitySolverA03,
+  type HighDensitySolverA03Props,
+} from "../../lib/HighDensitySolverA03/HighDensitySolverA03"
+import {
+  HighDensitySolverA05,
+  type HighDensitySolverA05Props,
+} from "../../lib/HighDensitySolverA05/HighDensitySolverA05"
+import {
+  HighDensitySolverA08,
+  type HighDensitySolverA08Props,
+} from "../../lib/HighDensitySolverA08/HighDensitySolverA08"
 import {
   defaultA02Params,
   defaultA03Params,
@@ -15,6 +30,13 @@ import {
 import type { NodeWithPortPoints } from "../../lib/types"
 
 type SolverKey = "a01" | "a02" | "a03" | "a05" | "a08"
+type SolverPropsByKey = {
+  a01: Partial<Omit<HighDensitySolverA01Props, "nodeWithPortPoints">>
+  a02: Partial<Omit<HighDensitySolverA02Props, "nodeWithPortPoints">>
+  a03: Partial<Omit<HighDensitySolverA03Props, "nodeWithPortPoints">>
+  a05: Partial<Omit<HighDensitySolverA05Props, "nodeWithPortPoints">>
+  a08: Partial<Omit<HighDensitySolverA08Props, "nodeWithPortPoints">>
+}
 
 const STORAGE_KEY = "high-density:selected-solver"
 
@@ -44,6 +66,7 @@ type SolverDebuggerProps = {
   nodeWithPortPoints: NodeWithPortPoints
   defaultSolverKey?: SolverKey
   solverKeys?: readonly SolverKey[]
+  solverPropOverrides?: Partial<SolverPropsByKey>
   debugKey?: string
   maxIterations?: number
 }
@@ -52,6 +75,7 @@ export function SolverDebugger({
   nodeWithPortPoints,
   defaultSolverKey = "a03",
   solverKeys,
+  solverPropOverrides,
   debugKey,
   maxIterations = 10_000_000,
 }: SolverDebuggerProps) {
@@ -80,6 +104,17 @@ export function SolverDebugger({
     setSolverKey(fallbackSolverKey)
   }, [allowedSolverKeys, fallbackSolverKey, solverKey])
 
+  const prepareSolver = <TSolver extends object>(solver: TSolver) => {
+    const configuredSolver = solver as TSolver & {
+      MAX_ITERATIONS: number
+      setup: () => void
+    }
+
+    configuredSolver.MAX_ITERATIONS = maxIterations
+    configuredSolver.setup()
+    return configuredSolver
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -102,49 +137,50 @@ export function SolverDebugger({
       <GenericSolverDebugger
         key={`${debugKey ?? nodeWithPortPoints.capacityMeshNodeId}-${solverKey}`}
         createSolver={() => {
-          let solver:
-            | HighDensitySolverA01
-            | HighDensitySolverA02
-            | HighDensitySolverA03
-            | HighDensitySolverA05
-            | HighDensitySolverA08
-
           switch (solverKey) {
             case "a01":
-              solver = new HighDensitySolverA01({
-                ...defaultParams,
-                nodeWithPortPoints,
-              })
-              break
+              return prepareSolver(
+                new HighDensitySolverA01({
+                  ...defaultParams,
+                  nodeWithPortPoints,
+                  ...solverPropOverrides?.a01,
+                }),
+              )
             case "a02":
-              solver = new HighDensitySolverA02({
-                ...defaultA02Params,
-                nodeWithPortPoints,
-              })
-              break
+              return prepareSolver(
+                new HighDensitySolverA02({
+                  ...defaultA02Params,
+                  nodeWithPortPoints,
+                  ...solverPropOverrides?.a02,
+                }),
+              )
             case "a03":
-              solver = new HighDensitySolverA03({
-                ...defaultA03Params,
-                nodeWithPortPoints,
-              })
-              break
+              return prepareSolver(
+                new HighDensitySolverA03({
+                  ...defaultA03Params,
+                  nodeWithPortPoints,
+                  ...solverPropOverrides?.a03,
+                }),
+              )
             case "a05":
-              solver = new HighDensitySolverA05({
-                ...defaultA05Params,
-                nodeWithPortPoints,
-              })
-              break
+              return prepareSolver(
+                new HighDensitySolverA05({
+                  ...defaultA05Params,
+                  nodeWithPortPoints,
+                  ...solverPropOverrides?.a05,
+                }),
+              )
             case "a08":
-              solver = new HighDensitySolverA08({
-                ...defaultA08Params,
-                nodeWithPortPoints,
-              })
-              break
+              return prepareSolver(
+                new HighDensitySolverA08({
+                  ...defaultA08Params,
+                  nodeWithPortPoints,
+                  ...solverPropOverrides?.a08,
+                }),
+              )
           }
 
-          solver.MAX_ITERATIONS = maxIterations
-          solver.setup()
-          return solver
+          throw new Error(`Unsupported solver key: ${solverKey}`)
         }}
       />
     </div>
