@@ -855,7 +855,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     const pointLists = sideState.paths.map((pathState) =>
       this.getPathPoints(pathState),
     )
-    const idealTraceSpacing = this.getRequiredTraceSpacing()
+    const idealTraceSpacing = this.getIdealTraceSpacing()
 
     for (const pathIndexes of groupPathIndexesByLayer(sideState)) {
       for (
@@ -1115,7 +1115,9 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
   }
 
   private evaluateSideState(sideState: SideState) {
-    const idealTraceSpacing = this.getRequiredTraceSpacing()
+    const idealTraceSpacing = this.getIdealTraceSpacing()
+    const acceptedTraceSpacing = this.getAcceptedTraceSpacing()
+    const acceptedBoundaryClearance = this.getAcceptedBoundaryClearance()
 
     if (sideState.paths.length <= 1) {
       sideState.solved = true
@@ -1192,7 +1194,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
                 minSegmentDistance,
                 distance.distance,
               )
-              if (distance.distance + EPSILON < idealTraceSpacing) {
+              if (distance.distance + EPSILON < acceptedTraceSpacing) {
                 violationCount += 1
               }
             }
@@ -1207,7 +1209,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
         pathState.midpoint,
       )
       minBoundaryClearance = Math.min(minBoundaryClearance, boundaryClearance)
-      if (boundaryClearance + EPSILON < this.breakoutBoundaryMarginMm) {
+      if (boundaryClearance + EPSILON < acceptedBoundaryClearance) {
         violationCount += 1
       }
     }
@@ -1355,11 +1357,16 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     return this.getInnerLayerCount() * rows * cols
   }
 
-  private getRequiredTraceSpacing() {
-    return Math.max(
-      this.breakoutTraceMarginMm * 2,
-      this.traceThickness + this.traceMargin,
-    )
+  private getIdealTraceSpacing() {
+    return this.traceThickness + this.breakoutTraceMarginMm
+  }
+
+  private getAcceptedTraceSpacing() {
+    return this.traceThickness + this.breakoutTraceMarginMm / 2
+  }
+
+  private getAcceptedBoundaryClearance() {
+    return this.breakoutBoundaryMarginMm + this.traceThickness / 2
   }
 
   private shouldShrinkForMaxCellCount() {
@@ -1529,6 +1536,10 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
         const snapshot = lastSnapshotByAnchorKey.get(pathState.anchor.key)
         const isActiveSide = activeForceSide === sideState.side
         const z = pathState.anchor.representative.z
+        const netName = getAnchorNetName(pathState.anchor)
+        const portName =
+          pathState.anchor.representative.portPointId ?? pathState.anchor.key
+        const midpointLabel = `${netName} / ${portName}`
 
         points.push({
           x: midpoint.x,
@@ -1536,12 +1547,12 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
           color: LAYER_COLORS[z] ?? "black",
           label:
             isActiveSide && snapshot
-              ? `${snapshot.connectionName} mid ` +
+              ? `${midpointLabel} ` +
                 `Δ=${formatVector(snapshot.appliedDelta)} ` +
                 `rep=${formatVector(snapshot.repulsionForce)} ` +
                 `sm=${formatVector(snapshot.smoothingForce)} ` +
                 `att=${formatVector(snapshot.attractionForce)}`
-              : undefined,
+              : midpointLabel,
         })
 
         if (!snapshot || !isActiveSide) continue
