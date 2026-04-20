@@ -4,13 +4,20 @@ import type { HighDensitySolverA03Props } from "./HighDensitySolverA03/HighDensi
 import type { HighDensitySolverA05Props } from "./HighDensitySolverA05/HighDensitySolverA05"
 import type { HighDensitySolverA08Props } from "./HighDensitySolverA08/HighDensitySolverA08"
 
-export const defaultParams: Pick<
-  HighDensitySolverA01Props,
-  | "cellSizeMm"
-  | "traceMargin"
-  | "traceThickness"
-  | "viaDiameter"
-  | "viaMinDistFromBorder"
+type A08BreakoutMarginProps = Pick<
+  HighDensitySolverA08Props,
+  "breakoutBoundaryMarginMm" | "breakoutTraceMarginMm"
+>
+
+export const defaultParams: Required<
+  Pick<
+    HighDensitySolverA01Props,
+    | "cellSizeMm"
+    | "traceMargin"
+    | "traceThickness"
+    | "viaDiameter"
+    | "viaMinDistFromBorder"
+  >
 > = {
   cellSizeMm: 0.1,
   traceMargin: 0.15,
@@ -19,15 +26,17 @@ export const defaultParams: Pick<
   viaMinDistFromBorder: 0.15,
 }
 
-export const defaultA02Params: Pick<
-  HighDensitySolverA02Props,
-  | "outerGridCellSize"
-  | "outerGridCellThickness"
-  | "innerGridCellSize"
-  | "traceMargin"
-  | "traceThickness"
-  | "viaDiameter"
-  | "viaMinDistFromBorder"
+export const defaultA02Params: Required<
+  Pick<
+    HighDensitySolverA02Props,
+    | "outerGridCellSize"
+    | "outerGridCellThickness"
+    | "innerGridCellSize"
+    | "traceMargin"
+    | "traceThickness"
+    | "viaDiameter"
+    | "viaMinDistFromBorder"
+  >
 > = {
   outerGridCellSize: 0.1,
   outerGridCellThickness: 1,
@@ -38,15 +47,17 @@ export const defaultA02Params: Pick<
   viaMinDistFromBorder: 0.15,
 }
 
-export const defaultA03Params: Pick<
-  HighDensitySolverA03Props,
-  | "highResolutionCellSize"
-  | "highResolutionCellThickness"
-  | "lowResolutionCellSize"
-  | "traceMargin"
-  | "traceThickness"
-  | "viaDiameter"
-  | "viaMinDistFromBorder"
+export const defaultA03Params: Required<
+  Pick<
+    HighDensitySolverA03Props,
+    | "highResolutionCellSize"
+    | "highResolutionCellThickness"
+    | "lowResolutionCellSize"
+    | "traceMargin"
+    | "traceThickness"
+    | "viaDiameter"
+    | "viaMinDistFromBorder"
+  >
 > = {
   highResolutionCellSize: 0.1,
   highResolutionCellThickness: 8,
@@ -57,15 +68,17 @@ export const defaultA03Params: Pick<
   viaMinDistFromBorder: 0.15,
 }
 
-export const defaultA05Params: Pick<
-  HighDensitySolverA05Props,
-  | "highResolutionCellSize"
-  | "highResolutionCellThickness"
-  | "lowResolutionCellSize"
-  | "traceMargin"
-  | "traceThickness"
-  | "viaDiameter"
-  | "viaMinDistFromBorder"
+export const defaultA05Params: Required<
+  Pick<
+    HighDensitySolverA05Props,
+    | "highResolutionCellSize"
+    | "highResolutionCellThickness"
+    | "lowResolutionCellSize"
+    | "traceMargin"
+    | "traceThickness"
+    | "viaDiameter"
+    | "viaMinDistFromBorder"
+  >
 > = {
   highResolutionCellSize: 0.1,
   highResolutionCellThickness: 8,
@@ -76,27 +89,55 @@ export const defaultA05Params: Pick<
   viaMinDistFromBorder: 0.15,
 }
 
-export const defaultA08Params: Pick<
-  HighDensitySolverA08Props,
-  | "cellSizeMm"
-  | "traceMargin"
-  | "traceThickness"
-  | "viaDiameter"
-  | "viaMinDistFromBorder"
-  | "initialRectMarginMm"
-  | "rectShrinkStepMm"
-  | "breakoutTraceMarginMm"
-  | "breakoutSegmentCount"
-  | "innerPortSpreadFactor"
+export const defaultA08Params: Required<
+  Pick<
+    HighDensitySolverA08Props,
+    | "cellSizeMm"
+    | "traceMargin"
+    | "traceThickness"
+    | "viaDiameter"
+    | "viaMinDistFromBorder"
+    | "stepMultiplier"
+    | "showPenaltyMap"
+    | "showUsedCellMap"
+    | "effort"
+    | "initialRectMarginMm"
+    | "rectShrinkStepMm"
+    | "breakoutTraceMarginMm"
+    | "breakoutSegmentCount"
+    | "breakoutMaxIterationsPerRect"
+    | "breakoutForceStepSize"
+    | "breakoutRepulsionStrength"
+    | "breakoutSmoothingStrength"
+    | "breakoutAttractionStrength"
+    | "innerPortSpreadFactor"
+  >
 > = {
-  cellSizeMm: 0.1,
-  traceMargin: 0.15,
-  traceThickness: 0.1,
-  viaDiameter: 0.3,
-  viaMinDistFromBorder: 0.15,
+  ...defaultParams,
+  stepMultiplier: 1,
+  showPenaltyMap: false,
+  showUsedCellMap: false,
+  effort: 1,
   initialRectMarginMm: 0.2,
   rectShrinkStepMm: 0.1,
   breakoutTraceMarginMm: 0.1,
   breakoutSegmentCount: 2,
+  breakoutMaxIterationsPerRect: 60,
+  breakoutForceStepSize: 0.2,
+  breakoutRepulsionStrength: 1.8,
+  breakoutSmoothingStrength: 0.16,
+  breakoutAttractionStrength: 0.06,
   innerPortSpreadFactor: 1,
+}
+
+export function getDefaultA08BreakoutBoundaryMarginMm(
+  props: A08BreakoutMarginProps,
+) {
+  if (props.breakoutBoundaryMarginMm !== undefined) {
+    return props.breakoutBoundaryMarginMm
+  }
+  if (props.breakoutTraceMarginMm !== undefined) {
+    return props.breakoutTraceMarginMm / 2
+  }
+  return defaultA08Params.breakoutTraceMarginMm / 2
 }
