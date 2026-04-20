@@ -1,4 +1,6 @@
 import { expect, setDefaultTimeout, test } from "bun:test"
+import "bun-match-svg"
+import "graphics-debug/matcher"
 import { defaultA08Params, defaultParams } from "../../../lib/default-params"
 import { HighDensitySolverA01 } from "../../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import { HighDensitySolverA08 } from "../../../lib/HighDensitySolverA08/HighDensitySolverA08"
@@ -64,6 +66,15 @@ function getTightInsetA08Solver() {
   cachedTightInsetA08Solver = solver
   return solver
 }
+
+test("cmn_39 A08 snapshot", async () => {
+  const solver = getA08Solver()
+  const graphics = solver.visualize()
+
+  await expect(graphics).toMatchGraphicsSvg(import.meta.path)
+  expect(solver.solved).toBeTrue()
+  expect(solver.failed).toBeFalse()
+})
 
 test("cmn_39 A08 solves with breakout spreading before A01", () => {
   const solver = getA08Solver()
