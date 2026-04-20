@@ -10,12 +10,12 @@ import {
   validateNoIntersections,
   validateRouteGeometry,
 } from "../../fixtures/validateNoIntersections"
-import sample007 from "./sample007.json"
+import sample008 from "./sample008.json"
 
 function createSolver() {
   const solver = new HighDensitySolverA08({
     ...defaultA08Params,
-    nodeWithPortPoints: sample007,
+    nodeWithPortPoints: sample008,
     effort: 10,
   })
   solver.MAX_ITERATIONS = 100_000_000
@@ -23,7 +23,7 @@ function createSolver() {
   return solver
 }
 
-test("sample007 A08 solve", () => {
+test("sample008 A08 solve", () => {
   const solver = createSolver()
 
   console.log(
