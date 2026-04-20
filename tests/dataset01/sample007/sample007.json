@@ -196,7 +196,7 @@
   "viaDiameter": 0.3,
   "viaMinDistFromBorder": 0.15,
   "traceMargin": 0.1,
-  "traceThickness": 0.15,
+  "traceThickness": 0.1,
   "effort": 1,
   "hyperParameters": {
     "shuffleSeed": 0

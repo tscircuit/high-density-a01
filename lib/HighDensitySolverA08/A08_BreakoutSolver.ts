@@ -1060,6 +1060,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
   private evaluateSideState(sideState: SideState) {
     const idealTraceSpacing = this.getIdealTraceSpacing()
     const acceptedTraceSpacing = this.getAcceptedTraceSpacing()
+    const acceptedBoundaryClearance = this.getAcceptedBoundaryClearance()
 
     if (sideState.paths.length <= 1) {
       sideState.solved = true
@@ -1135,7 +1136,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
         pathState.midpoint,
       )
       minBoundaryClearance = Math.min(minBoundaryClearance, boundaryClearance)
-      if (boundaryClearance + EPSILON < this.breakoutBoundaryMarginMm) {
+      if (boundaryClearance + EPSILON < acceptedBoundaryClearance) {
         violationCount += 1
       }
     }
@@ -1292,6 +1293,10 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
 
   private getAcceptedTraceSpacing() {
     return this.traceThickness + this.breakoutTraceMarginMm / 2
+  }
+
+  private getAcceptedBoundaryClearance() {
+    return this.breakoutBoundaryMarginMm + this.traceThickness / 2
   }
 
   private shouldShrinkForMaxCellCount() {
