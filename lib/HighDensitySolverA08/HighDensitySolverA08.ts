@@ -23,6 +23,10 @@ import {
   combineBreakoutAndInnerRoutes,
   getNodeBounds,
 } from "./shared"
+import {
+  defaultA08Params,
+  getDefaultA08BreakoutBoundaryMarginMm,
+} from "../default-params"
 
 export interface HighDensitySolverA08Props extends HighDensitySolverA01Props {
   initialRectMarginMm?: number
@@ -42,9 +46,47 @@ export interface HighDensitySolverA08Props extends HighDensitySolverA01Props {
 function normalizeA08Props(
   props: HighDensitySolverA08Props,
 ): HighDensitySolverA08Props {
+  const breakoutTraceMarginMm =
+    props.breakoutTraceMarginMm ?? defaultA08Params.breakoutTraceMarginMm
+
   return {
     ...props,
-    initialRectMarginMm: props.initialRectMarginMm ?? props.innerRectMarginMm,
+    cellSizeMm: props.cellSizeMm ?? defaultA08Params.cellSizeMm,
+    viaDiameter: props.viaDiameter ?? defaultA08Params.viaDiameter,
+    traceMargin: props.traceMargin ?? defaultA08Params.traceMargin,
+    traceThickness: props.traceThickness ?? defaultA08Params.traceThickness,
+    viaMinDistFromBorder:
+      props.viaMinDistFromBorder ?? defaultA08Params.viaMinDistFromBorder,
+    stepMultiplier: props.stepMultiplier ?? defaultA08Params.stepMultiplier,
+    showPenaltyMap: props.showPenaltyMap ?? defaultA08Params.showPenaltyMap,
+    showUsedCellMap: props.showUsedCellMap ?? defaultA08Params.showUsedCellMap,
+    effort: props.effort ?? defaultA08Params.effort,
+    initialRectMarginMm:
+      props.initialRectMarginMm ??
+      props.innerRectMarginMm ??
+      defaultA08Params.initialRectMarginMm,
+    rectShrinkStepMm:
+      props.rectShrinkStepMm ?? defaultA08Params.rectShrinkStepMm,
+    breakoutTraceMarginMm,
+    breakoutBoundaryMarginMm: getDefaultA08BreakoutBoundaryMarginMm(props),
+    breakoutSegmentCount:
+      props.breakoutSegmentCount ?? defaultA08Params.breakoutSegmentCount,
+    breakoutMaxIterationsPerRect:
+      props.breakoutMaxIterationsPerRect ??
+      defaultA08Params.breakoutMaxIterationsPerRect,
+    breakoutForceStepSize:
+      props.breakoutForceStepSize ?? defaultA08Params.breakoutForceStepSize,
+    breakoutRepulsionStrength:
+      props.breakoutRepulsionStrength ??
+      defaultA08Params.breakoutRepulsionStrength,
+    breakoutSmoothingStrength:
+      props.breakoutSmoothingStrength ??
+      defaultA08Params.breakoutSmoothingStrength,
+    breakoutAttractionStrength:
+      props.breakoutAttractionStrength ??
+      defaultA08Params.breakoutAttractionStrength,
+    innerPortSpreadFactor:
+      props.innerPortSpreadFactor ?? defaultA08Params.innerPortSpreadFactor,
   }
 }
 

@@ -21,6 +21,10 @@ import {
   rectFromBounds,
   sortAnchorsForSide,
 } from "./shared"
+import {
+  defaultA08Params,
+  getDefaultA08BreakoutBoundaryMarginMm,
+} from "../default-params"
 
 type CrossSection = {
   tangentMin: number
@@ -108,7 +112,6 @@ type ShrinkRectResult =
   | { ok: true; rect: RectBounds }
   | { ok: false; reason: "unchanged" | "collapsed" }
 
-const BREAKOUT_SEGMENT_COUNT = 2
 const BREAKOUT_MIDPOINT_INDEX = 1
 const BREAKOUT_ENDPOINT_INDEX = 2
 const BREAKOUT_MIDPOINT_INFLUENCE_FLOOR = 0.35
@@ -388,29 +391,44 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
 
   constructor(props: A08BreakoutSolverProps) {
     super()
+    const breakoutTraceMarginMm =
+      props.breakoutTraceMarginMm ?? defaultA08Params.breakoutTraceMarginMm
     this.constructorProps = props
     this.nodeWithPortPoints = props.nodeWithPortPoints
-    this.cellSizeMm = props.cellSizeMm ?? 0.1
+    this.cellSizeMm = props.cellSizeMm ?? defaultA08Params.cellSizeMm
     this.maxCellCount = props.maxCellCount
-    this.traceMargin = props.traceMargin ?? 0.15
-    this.traceThickness = props.traceThickness ?? 0.1
-    this.effort = props.effort ?? 1
+    this.traceMargin = props.traceMargin ?? defaultA08Params.traceMargin
+    this.traceThickness =
+      props.traceThickness ?? defaultA08Params.traceThickness
+    this.effort = props.effort ?? defaultA08Params.effort
     this.initialRectMarginMm =
-      props.initialRectMarginMm ?? props.innerRectMarginMm ?? 0.2
-    this.rectShrinkStepMm = props.rectShrinkStepMm ?? 0.1
-    this.breakoutTraceMarginMm = props.breakoutTraceMarginMm ?? 0.1
-    this.breakoutBoundaryMarginMm =
-      props.breakoutBoundaryMarginMm ?? this.breakoutTraceMarginMm / 2
-    this.breakoutSegmentCount = BREAKOUT_SEGMENT_COUNT
+      props.initialRectMarginMm ??
+      props.innerRectMarginMm ??
+      defaultA08Params.initialRectMarginMm
+    this.rectShrinkStepMm =
+      props.rectShrinkStepMm ?? defaultA08Params.rectShrinkStepMm
+    this.breakoutTraceMarginMm = breakoutTraceMarginMm
+    this.breakoutBoundaryMarginMm = getDefaultA08BreakoutBoundaryMarginMm(props)
+    // The breakout path is implemented as a single midpoint, so this stays fixed.
+    this.breakoutSegmentCount = defaultA08Params.breakoutSegmentCount
     this.breakoutMaxIterationsPerRect = Math.max(
       1,
-      props.breakoutMaxIterationsPerRect ?? 60,
+      props.breakoutMaxIterationsPerRect ??
+        defaultA08Params.breakoutMaxIterationsPerRect,
     )
-    this.breakoutForceStepSize = props.breakoutForceStepSize ?? 0.2
-    this.breakoutRepulsionStrength = props.breakoutRepulsionStrength ?? 1.8
-    this.breakoutSmoothingStrength = props.breakoutSmoothingStrength ?? 0.16
-    this.breakoutAttractionStrength = props.breakoutAttractionStrength ?? 0.06
-    this.innerPortSpreadFactor = props.innerPortSpreadFactor ?? 1
+    this.breakoutForceStepSize =
+      props.breakoutForceStepSize ?? defaultA08Params.breakoutForceStepSize
+    this.breakoutRepulsionStrength =
+      props.breakoutRepulsionStrength ??
+      defaultA08Params.breakoutRepulsionStrength
+    this.breakoutSmoothingStrength =
+      props.breakoutSmoothingStrength ??
+      defaultA08Params.breakoutSmoothingStrength
+    this.breakoutAttractionStrength =
+      props.breakoutAttractionStrength ??
+      defaultA08Params.breakoutAttractionStrength
+    this.innerPortSpreadFactor =
+      props.innerPortSpreadFactor ?? defaultA08Params.innerPortSpreadFactor
     this.MAX_ITERATIONS = 100_000
   }
 
