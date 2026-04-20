@@ -95,8 +95,8 @@ export const defaultA08Params: Pick<
   viaDiameter: 0.3,
   viaMinDistFromBorder: 0.15,
   initialRectMarginMm: 0.2,
-  rectShrinkStepMm: 0.4,
+  rectShrinkStepMm: 0.1,
   breakoutTraceMarginMm: 0.1,
   breakoutSegmentCount: 2,
-  innerPortSpreadFactor: 0.4,
+  innerPortSpreadFactor: 1,
 }

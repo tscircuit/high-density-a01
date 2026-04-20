@@ -52,6 +52,7 @@ test("A08 breakout spaces inner-rect ports independently per layer", () => {
 
   expect(solver.solved).toBeTrue()
   expect(solver.failed).toBeFalse()
+  expect(solver.innerRect).not.toBeNull()
 
   for (const route of solver.breakoutRoutes) {
     expect(route.route).toHaveLength(3)
@@ -81,5 +82,15 @@ test("A08 breakout spaces inner-rect ports independently per layer", () => {
   expect(z1AssignedYs).toHaveLength(2)
   expect(z0AssignedYs[0]!).toBeCloseTo(z1AssignedYs[0]!, 6)
   expect(z0AssignedYs[1]!).toBeCloseTo(z1AssignedYs[1]!, 6)
-  expect(z0AssignedYs[1]! - z0AssignedYs[0]!).toBeGreaterThan(5)
+
+  const breakoutBoundaryMarginMm =
+    (defaultA08Params.breakoutTraceMarginMm ?? 0.1) / 2
+  const expectedGap =
+    (solver.innerRect!.height - breakoutBoundaryMarginMm * 2) / 3
+
+  expect(z0AssignedYs[1]! - z0AssignedYs[0]!).toBeCloseTo(expectedGap, 6)
+  expect(z0AssignedYs[1]! - z0AssignedYs[0]!).toBeGreaterThan(
+    (defaultA08Params.traceMargin ?? 0.15) +
+      (defaultA08Params.traceThickness ?? 0.1),
+  )
 })

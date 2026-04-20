@@ -354,7 +354,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     this.effort = props.effort ?? 1
     this.initialRectMarginMm =
       props.initialRectMarginMm ?? props.innerRectMarginMm ?? 0.2
-    this.rectShrinkStepMm = props.rectShrinkStepMm ?? 0.4
+    this.rectShrinkStepMm = props.rectShrinkStepMm ?? 0.1
     this.breakoutTraceMarginMm = props.breakoutTraceMarginMm ?? 0.1
     this.breakoutBoundaryMarginMm =
       props.breakoutBoundaryMarginMm ?? this.breakoutTraceMarginMm / 2
@@ -367,7 +367,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     this.breakoutRepulsionStrength = props.breakoutRepulsionStrength ?? 1.8
     this.breakoutSmoothingStrength = props.breakoutSmoothingStrength ?? 0.16
     this.breakoutAttractionStrength = props.breakoutAttractionStrength ?? 0.06
-    this.innerPortSpreadFactor = props.innerPortSpreadFactor ?? 0.4
+    this.innerPortSpreadFactor = props.innerPortSpreadFactor ?? 1
     this.MAX_ITERATIONS = 100_000
   }
 
