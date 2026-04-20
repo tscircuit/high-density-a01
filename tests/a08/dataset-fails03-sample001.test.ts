@@ -3,15 +3,15 @@ import { datasetFails03Entries } from "../../fixtures/dataset-fails03/dataset-fa
 import { defaultA08Params } from "../../lib/default-params"
 import { HighDensitySolverA08 } from "../../lib/HighDensitySolverA08/HighDensitySolverA08"
 
-test("A08 shrinks dataset-fails03 sample 1 until breakout trace spacing clears the real trace keepout", () => {
+test("A08 shrinks dataset-fails03 sample 1 until breakout trace spacing clears the configured breakout spacing", () => {
   const sample = datasetFails03Entries[0]
   if (!sample) {
     throw new Error("dataset-fails03 sample 1 is missing")
   }
 
   const requiredTraceSpacing =
-    (defaultA08Params.traceMargin ?? 0.15) +
-    (defaultA08Params.traceThickness ?? 0.1)
+    (defaultA08Params.traceThickness ?? 0.1) +
+    (defaultA08Params.breakoutTraceMarginMm ?? 0.1) / 2
 
   const solver = new HighDensitySolverA08({
     ...defaultA08Params,

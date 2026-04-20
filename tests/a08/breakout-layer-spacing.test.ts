@@ -85,12 +85,12 @@ test("A08 breakout spaces inner-rect ports independently per layer", () => {
 
   const breakoutBoundaryMarginMm =
     (defaultA08Params.breakoutTraceMarginMm ?? 0.1) / 2
+  const idealTraceSpacing =
+    (defaultA08Params.traceThickness ?? 0.1) +
+    (defaultA08Params.breakoutTraceMarginMm ?? 0.1)
   const expectedGap =
     (solver.innerRect!.height - breakoutBoundaryMarginMm * 2) / 3
 
   expect(z0AssignedYs[1]! - z0AssignedYs[0]!).toBeCloseTo(expectedGap, 6)
-  expect(z0AssignedYs[1]! - z0AssignedYs[0]!).toBeGreaterThan(
-    (defaultA08Params.traceMargin ?? 0.15) +
-      (defaultA08Params.traceThickness ?? 0.1),
-  )
+  expect(z0AssignedYs[1]! - z0AssignedYs[0]!).toBeGreaterThan(idealTraceSpacing)
 })

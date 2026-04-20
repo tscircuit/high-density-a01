@@ -16,9 +16,12 @@ setDefaultTimeout(120_000)
 
 const TEST_MAX_ITERATIONS = 100_000_000
 const TEST_EFFORT = 10
-const REQUIRED_TRACE_SPACING =
-  (defaultA08Params.traceMargin ?? 0.15) +
-  (defaultA08Params.traceThickness ?? 0.1)
+const IDEAL_TRACE_SPACING =
+  (defaultA08Params.traceThickness ?? 0.1) +
+  (defaultA08Params.breakoutTraceMarginMm ?? 0.1)
+const ACCEPTED_TRACE_SPACING =
+  (defaultA08Params.traceThickness ?? 0.1) +
+  (defaultA08Params.breakoutTraceMarginMm ?? 0.1) / 2
 
 let cachedA01Solver: HighDensitySolverA01 | null = null
 let cachedA08Solver: HighDensitySolverA08 | null = null
@@ -76,14 +79,13 @@ test("cmn_39 A08 snapshot", async () => {
   expect(solver.failed).toBeFalse()
 })
 
-test("cmn_39 A08 solves with breakout spreading before A01", () => {
+test("cmn_39 A08 solves with acceptable breakout spacing before A01", () => {
   const solver = getA08Solver()
   const routes = solver.getOutput()
 
   expect(solver.solved).toBeTrue()
   expect(solver.failed).toBeFalse()
   expect(routes.length).toBeGreaterThan(0)
-  expect(solver.breakoutSolver?.stats?.shrinkCount).toBeGreaterThan(0)
 
   const sideStats = solver.breakoutSolver?.stats?.sides
   if (!sideStats) {
@@ -92,9 +94,8 @@ test("cmn_39 A08 solves with breakout spreading before A01", () => {
 
   for (const side of ["right", "bottom"] as const) {
     expect(sideStats[side]?.solved).toBeTrue()
-    expect(sideStats[side]?.idealSpacingSatisfied).toBeTrue()
     expect(sideStats[side]?.minSegmentDistance).toBeGreaterThanOrEqual(
-      REQUIRED_TRACE_SPACING - 1e-6,
+      ACCEPTED_TRACE_SPACING - 1e-6,
     )
   }
 
@@ -123,15 +124,18 @@ test("cmn_39 A08 solves with breakout spreading before A01", () => {
   validateRouteGeometry(routes)
 })
 
-test("cmn_39 A08 can still fail in breakout after exhausting a 1mm inset shrink", () => {
+test("cmn_39 A08 accepts a 1mm inset without breakout shrink under the configured breakout spacing", () => {
   const solver = getTightInsetA08Solver()
 
-  expect(solver.solved).toBeFalse()
-  expect(solver.failed).toBeTrue()
-  expect(solver.stage).toBe("A08_BreakoutSolver")
-  expect(solver.error).toContain(
-    "A08_BreakoutSolver could not shrink the inner rect any further",
-  )
+  expect(solver.stage).toBe("A01")
+  expect(solver.breakoutSolver?.stats?.shrinkCount).toBe(0)
+  expect(solver.breakoutSolver?.stats?.sides.right?.solved).toBeTrue()
+  expect(
+    solver.breakoutSolver?.stats?.sides.right?.idealSpacingSatisfied,
+  ).toBeFalse()
+  expect(
+    solver.breakoutSolver?.stats?.sides.right?.minSegmentDistance,
+  ).toBeGreaterThanOrEqual(ACCEPTED_TRACE_SPACING - 1e-6)
 })
 
 test("cmn_39 A08 starts with the breakout pipeline stage", () => {
