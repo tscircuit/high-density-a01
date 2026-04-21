@@ -22,7 +22,7 @@ function createSolver() {
   return solver
 }
 
-test("sample009 A09 solve", () => {
+test("sample009 A09 solve", async () => {
   const solver = createSolver()
 
   console.log(
@@ -37,6 +37,9 @@ test("sample009 A09 solve", () => {
 
   const graphics = solver.visualize()
   expect(graphics).toBeTruthy()
+  await expect(graphics).toMatchGraphicsSvg(import.meta.path, {
+    svgName: "sample009-a09",
+  })
 
   const routes = solver.getOutput()
   const intersections = findSameLayerIntersections(routes)
