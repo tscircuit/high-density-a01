@@ -103,6 +103,7 @@ export const defaultA08Params: Required<
     | "effort"
     | "initialRectMarginMm"
     | "rectShrinkStepMm"
+    | "maxShrinkMargin"
     | "breakoutTraceMarginMm"
     | "breakoutSegmentCount"
     | "breakoutMaxIterationsPerRect"
@@ -120,6 +121,7 @@ export const defaultA08Params: Required<
   effort: 1,
   initialRectMarginMm: 0.2,
   rectShrinkStepMm: 0.1,
+  maxShrinkMargin: 2.4,
   breakoutTraceMarginMm: 0.1,
   breakoutSegmentCount: 2,
   breakoutMaxIterationsPerRect: 60,
