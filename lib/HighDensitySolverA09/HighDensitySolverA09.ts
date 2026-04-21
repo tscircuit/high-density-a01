@@ -306,7 +306,8 @@ export class HighDensitySolverA09 extends BaseSolver {
                 .slice(segmentStart, index)
                 .map((point) => ({ x: point.x, y: point.y })),
               strokeColor:
-                TRACE_COLORS[segmentZ % TRACE_COLORS.length] ?? "rgba(0,0,0,0.8)",
+                TRACE_COLORS[segmentZ % TRACE_COLORS.length] ??
+                "rgba(0,0,0,0.8)",
               strokeWidth: route.traceThickness,
             })
           }
@@ -452,7 +453,11 @@ export class HighDensitySolverA09 extends BaseSolver {
           y: via.y,
           z: fallbackZ,
         })
-        for (let layerIndex = 0; layerIndex < internals.layers; layerIndex += 1) {
+        for (
+          let layerIndex = 0;
+          layerIndex < internals.layers;
+          layerIndex += 1
+        ) {
           blockedFlatIndices.add(layerIndex * internals.planeSize + cell.cellId)
         }
       }
@@ -468,8 +473,10 @@ export class HighDensitySolverA09 extends BaseSolver {
     let penalty = 0
     const tangentSigmaSq =
       2 * this.portShadowTangentSigma * this.portShadowTangentSigma
-    const depthSigmaSq = 2 * this.portShadowDepthSigma * this.portShadowDepthSigma
-    const boundarySigmaSq = 2 * this.boundaryBonusSigma * this.boundaryBonusSigma
+    const depthSigmaSq =
+      2 * this.portShadowDepthSigma * this.portShadowDepthSigma
+    const boundarySigmaSq =
+      2 * this.boundaryBonusSigma * this.boundaryBonusSigma
 
     for (const portPoint of this.sidePortPoints) {
       const tangential =
@@ -500,8 +507,7 @@ export class HighDensitySolverA09 extends BaseSolver {
     ]) {
       if (depth < 0) continue
       penalty -=
-        this.boundaryBonus *
-        Math.exp(-(depth * depth) / boundarySigmaSq)
+        this.boundaryBonus * Math.exp(-(depth * depth) / boundarySigmaSq)
     }
 
     return penalty
@@ -522,7 +528,10 @@ export class HighDensitySolverA09 extends BaseSolver {
       const rootName =
         connection.rootConnectionName ??
         connection.connectionName.replace(/_mst\d+$/, "")
-      rootSiblingCounts.set(rootName, (rootSiblingCounts.get(rootName) ?? 0) + 1)
+      rootSiblingCounts.set(
+        rootName,
+        (rootSiblingCounts.get(rootName) ?? 0) + 1,
+      )
     }
 
     const sorted = [...this.connections].sort((left, right) => {
@@ -543,10 +552,7 @@ export class HighDensitySolverA09 extends BaseSolver {
       return rightScore - leftScore
     })
 
-    const headSize = Math.min(
-      Math.max(1, this.priorityHeadSize),
-      sorted.length,
-    )
+    const headSize = Math.min(Math.max(1, this.priorityHeadSize), sorted.length)
     const head = sorted.slice(0, headSize)
     const tail = sorted.slice(headSize)
     const orders: ConnectionInfo[][] = []
@@ -620,7 +626,10 @@ export class HighDensitySolverA09 extends BaseSolver {
     if (Number(candidate.complete) !== Number(currentBest.complete)) {
       return Number(candidate.complete) > Number(currentBest.complete)
     }
-    if (!candidate.complete && candidate.routes.length !== currentBest.routes.length) {
+    if (
+      !candidate.complete &&
+      candidate.routes.length !== currentBest.routes.length
+    ) {
       return candidate.routes.length > currentBest.routes.length
     }
     if (candidate.violations !== currentBest.violations) {
