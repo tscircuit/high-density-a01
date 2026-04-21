@@ -406,7 +406,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     const maxShrinkMargin =
       props.maxShrinkMargin === undefined ||
       !Number.isFinite(props.maxShrinkMargin)
-        ? undefined
+        ? defaultA08Params.maxShrinkMargin
         : Math.max(0, props.maxShrinkMargin)
     this.constructorProps = {
       ...props,

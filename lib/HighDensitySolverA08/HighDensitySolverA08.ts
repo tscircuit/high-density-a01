@@ -52,7 +52,7 @@ function normalizeA08Props(
   const maxShrinkMargin =
     props.maxShrinkMargin === undefined ||
     !Number.isFinite(props.maxShrinkMargin)
-      ? undefined
+      ? defaultA08Params.maxShrinkMargin
       : Math.max(0, props.maxShrinkMargin)
 
   return {
