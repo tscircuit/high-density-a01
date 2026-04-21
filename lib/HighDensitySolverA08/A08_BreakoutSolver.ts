@@ -108,8 +108,10 @@ type ForceIterationSnapshot = {
   snapshots: MidpointForceSnapshot[]
 }
 
+type ShrinkAmountBySide = Partial<Record<Side, number>>
+
 type ShrinkRectResult =
-  | { ok: true; rect: RectBounds }
+  | { ok: true; rect: RectBounds; appliedShrinkBySide: ShrinkAmountBySide }
   | { ok: false; reason: "unchanged" | "collapsed" }
 
 const BREAKOUT_MIDPOINT_INDEX = 1
@@ -133,6 +135,7 @@ export interface A08BreakoutSolverProps {
   initialRectMarginMm?: number
   innerRectMarginMm?: number
   rectShrinkStepMm?: number
+  maxShrinkMargin?: number
   breakoutTraceMarginMm?: number
   breakoutBoundaryMarginMm?: number
   breakoutSegmentCount?: number
@@ -364,6 +367,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
   effort: number
   initialRectMarginMm: number
   rectShrinkStepMm: number
+  maxShrinkMargin?: number
   breakoutTraceMarginMm: number
   breakoutBoundaryMarginMm: number
   breakoutSegmentCount: number
@@ -388,12 +392,26 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
   private anchorsBySide = new Map<Side, SpreadAnchor[]>()
   private pendingShrinkSides: Side[] = []
   private nextForceSideCursor = 0
+  private shrinkMarginBySide: Record<Side, number> = {
+    left: 0,
+    right: 0,
+    bottom: 0,
+    top: 0,
+  }
 
   constructor(props: A08BreakoutSolverProps) {
     super()
     const breakoutTraceMarginMm =
       props.breakoutTraceMarginMm ?? defaultA08Params.breakoutTraceMarginMm
-    this.constructorProps = props
+    const maxShrinkMargin =
+      props.maxShrinkMargin === undefined ||
+      !Number.isFinite(props.maxShrinkMargin)
+        ? undefined
+        : Math.max(0, props.maxShrinkMargin)
+    this.constructorProps = {
+      ...props,
+      maxShrinkMargin,
+    }
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.cellSizeMm = props.cellSizeMm ?? defaultA08Params.cellSizeMm
     this.maxCellCount = props.maxCellCount
@@ -407,6 +425,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       defaultA08Params.initialRectMarginMm
     this.rectShrinkStepMm =
       props.rectShrinkStepMm ?? defaultA08Params.rectShrinkStepMm
+    this.maxShrinkMargin = maxShrinkMargin
     this.breakoutTraceMarginMm = breakoutTraceMarginMm
     this.breakoutBoundaryMarginMm = getDefaultA08BreakoutBoundaryMarginMm(props)
     // The breakout path is implemented as a single midpoint, so this stays fixed.
@@ -452,6 +471,12 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     this.iterationsAtCurrentRect = 0
     this.lastForceIteration = null
     this.nextForceSideCursor = 0
+    this.shrinkMarginBySide = {
+      left: 0,
+      right: 0,
+      bottom: 0,
+      top: 0,
+    }
     this.spreadAssignments = []
     this.breakoutRoutes = []
     this.innerNodeWithPortPoints = null
@@ -1395,9 +1420,29 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
     )
   }
 
+  private getShrinkAmountsBySide(sides: Side[]): ShrinkAmountBySide {
+    const shrinkBySide: ShrinkAmountBySide = {}
+
+    for (const side of sides) {
+      const remainingShrinkMargin =
+        this.maxShrinkMargin === undefined
+          ? this.rectShrinkStepMm
+          : Math.max(0, this.maxShrinkMargin - this.shrinkMarginBySide[side])
+      const shrinkAmount = Math.min(
+        this.rectShrinkStepMm,
+        remainingShrinkMargin,
+      )
+      if (shrinkAmount > EPSILON) {
+        shrinkBySide[side] = shrinkAmount
+      }
+    }
+
+    return shrinkBySide
+  }
+
   private shrinkRectBySides(
     innerRect: RectBounds,
-    sides: Side[],
+    shrinkBySide: ShrinkAmountBySide,
   ): ShrinkRectResult {
     const minDimension = Math.max(
       this.cellSizeMm,
@@ -1409,43 +1454,45 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       minY: innerRect.minY,
       maxY: innerRect.maxY,
     }
+    const appliedShrinkBySide: ShrinkAmountBySide = {}
     let changed = false
 
-    for (const side of sides) {
+    for (const side of SIDE_ORDER) {
+      const shrinkAmount = shrinkBySide[side] ?? 0
+      if (shrinkAmount <= EPSILON) continue
+
       switch (side) {
         case "left":
           if (
-            nextBounds.maxX - (nextBounds.minX + this.rectShrinkStepMm) >
+            nextBounds.maxX - (nextBounds.minX + shrinkAmount) >
             minDimension
           ) {
-            nextBounds.minX += this.rectShrinkStepMm
+            nextBounds.minX += shrinkAmount
+            appliedShrinkBySide.left = shrinkAmount
             changed = true
           }
           break
         case "right":
-          if (
-            nextBounds.maxX - this.rectShrinkStepMm - nextBounds.minX >
-            minDimension
-          ) {
-            nextBounds.maxX -= this.rectShrinkStepMm
+          if (nextBounds.maxX - shrinkAmount - nextBounds.minX > minDimension) {
+            nextBounds.maxX -= shrinkAmount
+            appliedShrinkBySide.right = shrinkAmount
             changed = true
           }
           break
         case "bottom":
           if (
-            nextBounds.maxY - (nextBounds.minY + this.rectShrinkStepMm) >
+            nextBounds.maxY - (nextBounds.minY + shrinkAmount) >
             minDimension
           ) {
-            nextBounds.minY += this.rectShrinkStepMm
+            nextBounds.minY += shrinkAmount
+            appliedShrinkBySide.bottom = shrinkAmount
             changed = true
           }
           break
         case "top":
-          if (
-            nextBounds.maxY - this.rectShrinkStepMm - nextBounds.minY >
-            minDimension
-          ) {
-            nextBounds.maxY -= this.rectShrinkStepMm
+          if (nextBounds.maxY - shrinkAmount - nextBounds.minY > minDimension) {
+            nextBounds.maxY -= shrinkAmount
+            appliedShrinkBySide.top = shrinkAmount
             changed = true
           }
           break
@@ -1464,7 +1511,7 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       return { ok: false, reason: "collapsed" }
     }
 
-    return { ok: true, rect: nextRect }
+    return { ok: true, rect: nextRect, appliedShrinkBySide }
   }
 
   private applyPendingShrink() {
@@ -1474,13 +1521,19 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       return false
     }
 
-    const shrinkResult = this.shrinkRectBySides(
-      this.innerRect,
-      this.pendingShrinkSides,
-    )
+    const shrinkBySide = this.getShrinkAmountsBySide(this.pendingShrinkSides)
     this.pendingShrinkSides = []
 
+    if (Object.keys(shrinkBySide).length === 0) {
+      return this.acceptCurrentInnerRectForA01()
+    }
+
+    const shrinkResult = this.shrinkRectBySides(this.innerRect, shrinkBySide)
+
     if (!shrinkResult.ok) {
+      if (this.maxShrinkMargin !== undefined) {
+        return this.acceptCurrentInnerRectForA01()
+      }
       this.error =
         shrinkResult.reason === "collapsed"
           ? "A08_BreakoutSolver inner rect collapsed during shrink"
@@ -1489,8 +1542,19 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       return false
     }
 
+    for (const side of SIDE_ORDER) {
+      this.shrinkMarginBySide[side] +=
+        shrinkResult.appliedShrinkBySide[side] ?? 0
+    }
     this.shrinkCount += 1
     this.reinitializeForInnerRect(shrinkResult.rect)
+    return true
+  }
+
+  private acceptCurrentInnerRectForA01() {
+    this.lastForceIteration = null
+    this.solved = true
+    this.progress = 1
     return true
   }
 

@@ -32,6 +32,7 @@ export interface HighDensitySolverA08Props extends HighDensitySolverA01Props {
   initialRectMarginMm?: number
   innerRectMarginMm?: number
   rectShrinkStepMm?: number
+  maxShrinkMargin?: number
   breakoutTraceMarginMm?: number
   breakoutBoundaryMarginMm?: number
   breakoutSegmentCount?: number
@@ -48,6 +49,11 @@ function normalizeA08Props(
 ): HighDensitySolverA08Props {
   const breakoutTraceMarginMm =
     props.breakoutTraceMarginMm ?? defaultA08Params.breakoutTraceMarginMm
+  const maxShrinkMargin =
+    props.maxShrinkMargin === undefined ||
+    !Number.isFinite(props.maxShrinkMargin)
+      ? undefined
+      : Math.max(0, props.maxShrinkMargin)
 
   return {
     ...props,
@@ -67,6 +73,7 @@ function normalizeA08Props(
       defaultA08Params.initialRectMarginMm,
     rectShrinkStepMm:
       props.rectShrinkStepMm ?? defaultA08Params.rectShrinkStepMm,
+    maxShrinkMargin,
     breakoutTraceMarginMm,
     breakoutBoundaryMarginMm: getDefaultA08BreakoutBoundaryMarginMm(props),
     breakoutSegmentCount:
@@ -103,6 +110,7 @@ function toBreakoutSolverProps(
     initialRectMarginMm: props.initialRectMarginMm,
     innerRectMarginMm: props.innerRectMarginMm,
     rectShrinkStepMm: props.rectShrinkStepMm,
+    maxShrinkMargin: props.maxShrinkMargin,
     breakoutTraceMarginMm: props.breakoutTraceMarginMm,
     breakoutBoundaryMarginMm: props.breakoutBoundaryMarginMm,
     breakoutSegmentCount: props.breakoutSegmentCount,
