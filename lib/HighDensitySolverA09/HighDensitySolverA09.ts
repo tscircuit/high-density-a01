@@ -165,7 +165,7 @@ export class HighDensitySolverA09 extends BaseSolver {
     this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 0.15
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
-    this.effort = props.effort ?? 20
+    this.effort = props.effort ?? 1
     this.hyperParameters = props.hyperParameters
     this.boundaryBonus = props.boundaryBonus ?? 0.18
     this.boundaryBonusSigma = props.boundaryBonusSigma ?? 0.22

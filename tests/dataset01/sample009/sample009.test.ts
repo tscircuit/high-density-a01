@@ -31,6 +31,7 @@ test("sample009 A09 solve", async () => {
   console.log(`routes=${solver.getOutput().length}`)
 
   expect(solver.iterations).toBeGreaterThan(0)
+  expect(solver.effort).toBe(1)
   expect(solver.solved).toBeTrue()
   expect(solver.failed).toBeFalse()
   expect(solver.getOutput()).toHaveLength(6)

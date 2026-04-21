@@ -153,7 +153,7 @@ export const defaultA09Params: Required<
   >
 > = {
   ...defaultA03Params,
-  effort: 20,
+  effort: 1,
   boundaryBonus: 0.18,
   boundaryBonusSigma: 0.22,
   portShadowStrength: 0.55,
