@@ -440,6 +440,7 @@ export class HighDensitySolverA02 extends BaseSolver {
 
   private planeSize!: number
   private usedCellsFlat!: Int32Array
+  private sharedCellsFlat!: Array<number[] | undefined>
   private portOwnerFlat!: Int32Array
   private penalty2d!: Float64Array
   private visitedStamp!: Uint32Array
@@ -466,6 +467,7 @@ export class HighDensitySolverA02 extends BaseSolver {
   private seqCounter = 0
 
   private _viaOccs: ConnId[] = []
+  private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
   private totalRipEvents = 0
@@ -688,6 +690,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     }
 
     this.usedCellsFlat = new Int32Array(totalCells).fill(-1)
+    this.sharedCellsFlat = new Array(totalCells)
     this.portOwnerFlat = new Int32Array(totalCells).fill(-1)
     this.visitedStamp = new Uint32Array(totalCells)
     this.bestGStamp = new Uint32Array(totalCells)
@@ -1342,9 +1345,9 @@ export class HighDensitySolverA02 extends BaseSolver {
         return
       }
 
-      const occ = this.usedCellsFlat[toFlatIdx]!
-      const allowSameRootOverlap = this.allowSharedUse(activeConn, occ)
-      if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
+      this.fillTraceKeepoutOccupants(toZ, toCellId, activeConn, this._cellOccs)
+      for (let i = 0; i < this._cellOccs.length; i++) {
+        const occ = this._cellOccs[i]!
         if (!this.ripChain.contains(head, occ)) {
           cost += this.hyperParameters.ripCost
           head = this.ripChain.append(head, occ)
@@ -1367,13 +1370,99 @@ export class HighDensitySolverA02 extends BaseSolver {
       const zBase = z * this.planeSize
       for (let i = start; i < end; i++) {
         const occCellId = this.viaFootprintIds[i]!
-        const occ = this.usedCellsFlat[zBase + occCellId]!
-        if (occ === -1 || occ === activeConn) continue
-        if (this.allowSharedUse(activeConn, occ)) {
-          continue
-        }
-        pushUnique(occs, occ)
+        this.pushFlatOccupants(zBase + occCellId, activeConn, occs)
       }
+    }
+  }
+
+  private fillTraceOccupants(
+    flatIdx: number,
+    activeConn: ConnId,
+    out: ConnId[],
+  ): void {
+    out.length = 0
+    this.pushFlatOccupants(flatIdx, activeConn, out)
+  }
+
+  private fillTraceKeepoutOccupants(
+    z: number,
+    cellId: number,
+    activeConn: ConnId,
+    out: ConnId[],
+  ): void {
+    out.length = 0
+    const keepoutStart = this.traceKeepoutOffset[cellId]!
+    const keepoutEnd = this.traceKeepoutOffset[cellId + 1]!
+    const zBase = z * this.planeSize
+    for (let i = keepoutStart; i < keepoutEnd; i++) {
+      this.pushFlatOccupants(
+        zBase + this.traceKeepoutIds[i]!,
+        activeConn,
+        out,
+      )
+    }
+  }
+
+  private pushFlatOccupants(
+    flatIdx: number,
+    activeConn: ConnId,
+    out: ConnId[],
+  ): void {
+    const primaryOcc = this.usedCellsFlat[flatIdx]!
+    if (
+      primaryOcc !== -1 &&
+      primaryOcc !== activeConn &&
+      !this.allowSharedUse(activeConn, primaryOcc)
+    ) {
+      pushUnique(out, primaryOcc)
+    }
+
+    const sharedOccs = this.sharedCellsFlat[flatIdx]
+    if (!sharedOccs) return
+    for (let i = 0; i < sharedOccs.length; i++) {
+      const occ = sharedOccs[i]!
+      if (occ === activeConn) continue
+      if (this.allowSharedUse(activeConn, occ)) continue
+      pushUnique(out, occ)
+    }
+  }
+
+  private addSharedOccupant(flatIdx: number, connId: ConnId): void {
+    const primaryOcc = this.usedCellsFlat[flatIdx]!
+    if (primaryOcc === connId) return
+    let sharedOccs = this.sharedCellsFlat[flatIdx]
+    if (!sharedOccs) {
+      sharedOccs = []
+      this.sharedCellsFlat[flatIdx] = sharedOccs
+    }
+    pushUnique(sharedOccs, connId)
+  }
+
+  private replaceOccupants(flatIdx: number, connId: ConnId): void {
+    this.usedCellsFlat[flatIdx] = connId
+    this.sharedCellsFlat[flatIdx] = undefined
+  }
+
+  private removeOccupant(flatIdx: number, connId: ConnId): void {
+    const sharedOccs = this.sharedCellsFlat[flatIdx]
+    if (this.usedCellsFlat[flatIdx] === connId) {
+      if (sharedOccs && sharedOccs.length > 0) {
+        this.usedCellsFlat[flatIdx] = sharedOccs.pop()!
+        if (sharedOccs.length === 0) {
+          this.sharedCellsFlat[flatIdx] = undefined
+        }
+      } else {
+        this.usedCellsFlat[flatIdx] = -1
+      }
+      return
+    }
+
+    if (!sharedOccs) return
+    const idx = sharedOccs.indexOf(connId)
+    if (idx === -1) return
+    sharedOccs.splice(idx, 1)
+    if (sharedOccs.length === 0) {
+      this.sharedCellsFlat[flatIdx] = undefined
     }
   }
 
@@ -1633,7 +1722,11 @@ export class HighDensitySolverA02 extends BaseSolver {
           }
           continue
         }
-        this.usedCellsFlat[flatIdx] = connId
+        if (existing !== -1 && existing !== connId) {
+          this.addSharedOccupant(flatIdx, connId)
+        } else {
+          this.usedCellsFlat[flatIdx] = connId
+        }
         indices.push(flatIdx)
       }
     }
@@ -1648,16 +1741,31 @@ export class HighDensitySolverA02 extends BaseSolver {
         for (let j = footprintStart; j < footprintEnd; j++) {
           const occCellId = this.viaFootprintIds[j]!
           const flatIdx = zBase + occCellId
-          const existing = this.usedCellsFlat[flatIdx]!
-          const allowSameRootOverlap = this.allowSharedUse(connId, existing)
-          if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
+          this.fillTraceOccupants(flatIdx, connId, this._cellOccs)
+          if (this._cellOccs.length > 0) {
             if (deferRipup) {
-              this.recordDeferredConflict(connId, existing, viaCellId)
+              for (let k = 0; k < this._cellOccs.length; k++) {
+                this.recordDeferredConflict(
+                  connId,
+                  this._cellOccs[k]!,
+                  viaCellId,
+                )
+              }
             } else {
-              pushUnique(displacedByVias, existing)
+              for (let k = 0; k < this._cellOccs.length; k++) {
+                pushUnique(displacedByVias, this._cellOccs[k]!)
+              }
             }
+            this.replaceOccupants(flatIdx, connId)
+            indices.push(flatIdx)
+            continue
           }
-          this.usedCellsFlat[flatIdx] = connId
+          const existing = this.usedCellsFlat[flatIdx]!
+          if (existing !== -1 && existing !== connId) {
+            this.addSharedOccupant(flatIdx, connId)
+          } else {
+            this.usedCellsFlat[flatIdx] = connId
+          }
           indices.push(flatIdx)
         }
       }
@@ -1682,7 +1790,10 @@ export class HighDensitySolverA02 extends BaseSolver {
       }
     }
 
-    if (!deferRipup && (rippedIds.length > 0 || displacedByVias.length > 0)) {
+    if (
+      !deferRipup &&
+      (rippedIds.length > 0 || displacedByVias.length > 0)
+    ) {
       const pen = this.penalty2d
       const cap = this.penaltyCap
       if (this.totalRipEvents > 50) {
@@ -1828,13 +1939,9 @@ export class HighDensitySolverA02 extends BaseSolver {
           const state = route.states[i]!
           const z = Math.floor(state / this.planeSize)
           const cellId = state - z * this.planeSize
-          const existing = this.usedCellsFlat[state]!
-          if (
-            existing !== -1 &&
-            existing !== connId &&
-            !this.allowSharedUse(connId, existing)
-          ) {
-            this.recordDeferredConflict(connId, existing, cellId)
+          this.fillTraceOccupants(state, connId, this._cellOccs)
+          for (let j = 0; j < this._cellOccs.length; j++) {
+            this.recordDeferredConflict(connId, this._cellOccs[j]!, cellId)
           }
 
           const keepoutStart = this.traceKeepoutOffset[cellId]!
@@ -1842,13 +1949,9 @@ export class HighDensitySolverA02 extends BaseSolver {
           const zBase = z * this.planeSize
           for (let j = keepoutStart; j < keepoutEnd; j++) {
             const occCellId = this.traceKeepoutIds[j]!
-            const occ = this.usedCellsFlat[zBase + occCellId]!
-            if (
-              occ !== -1 &&
-              occ !== connId &&
-              !this.allowSharedUse(connId, occ)
-            ) {
-              this.recordDeferredConflict(connId, occ, cellId)
+            this.fillTraceOccupants(zBase + occCellId, connId, this._cellOccs)
+            for (let k = 0; k < this._cellOccs.length; k++) {
+              this.recordDeferredConflict(connId, this._cellOccs[k]!, cellId)
             }
           }
         }
@@ -1861,13 +1964,17 @@ export class HighDensitySolverA02 extends BaseSolver {
             const zBase = z * this.planeSize
             for (let j = footprintStart; j < footprintEnd; j++) {
               const occCellId = this.viaFootprintIds[j]!
-              const occ = this.usedCellsFlat[zBase + occCellId]!
-              if (
-                occ !== -1 &&
-                occ !== connId &&
-                !this.allowSharedUse(connId, occ)
-              ) {
-                this.recordDeferredConflict(connId, occ, viaCellId)
+              this.fillTraceOccupants(
+                zBase + occCellId,
+                connId,
+                this._cellOccs,
+              )
+              for (let k = 0; k < this._cellOccs.length; k++) {
+                this.recordDeferredConflict(
+                  connId,
+                  this._cellOccs[k]!,
+                  viaCellId,
+                )
               }
             }
           }
@@ -1948,10 +2055,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     const indices = this.usedIndicesByConn[connId]
     if (indices) {
       for (let i = 0; i < indices.length; i++) {
-        const flatIdx = indices[i]!
-        if (this.usedCellsFlat[flatIdx] === connId) {
-          this.usedCellsFlat[flatIdx] = -1
-        }
+        this.removeOccupant(indices[i]!, connId)
       }
       this.usedIndicesByConn[connId] = undefined
     }
