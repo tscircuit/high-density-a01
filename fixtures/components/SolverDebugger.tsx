@@ -21,21 +21,27 @@ import {
   type HighDensitySolverA08Props,
 } from "../../lib/HighDensitySolverA08/HighDensitySolverA08"
 import {
+  HighDensitySolverA09,
+  type HighDensitySolverA09Props,
+} from "../../lib/HighDensitySolverA09/HighDensitySolverA09"
+import {
   defaultA02Params,
   defaultA03Params,
   defaultA05Params,
   defaultA08Params,
+  defaultA09Params,
   defaultParams,
 } from "../../lib/default-params"
 import type { NodeWithPortPoints } from "../../lib/types"
 
-type SolverKey = "a01" | "a02" | "a03" | "a05" | "a08"
+type SolverKey = "a01" | "a02" | "a03" | "a05" | "a08" | "a09"
 type SolverPropsByKey = {
   a01: Partial<Omit<HighDensitySolverA01Props, "nodeWithPortPoints">>
   a02: Partial<Omit<HighDensitySolverA02Props, "nodeWithPortPoints">>
   a03: Partial<Omit<HighDensitySolverA03Props, "nodeWithPortPoints">>
   a05: Partial<Omit<HighDensitySolverA05Props, "nodeWithPortPoints">>
   a08: Partial<Omit<HighDensitySolverA08Props, "nodeWithPortPoints">>
+  a09: Partial<Omit<HighDensitySolverA09Props, "nodeWithPortPoints">>
 }
 
 const STORAGE_KEY = "high-density:selected-solver"
@@ -46,6 +52,7 @@ const SOLVER_OPTIONS: Array<{ label: string; value: SolverKey }> = [
   { label: "A03", value: "a03" },
   { label: "A05", value: "a05" },
   { label: "A08", value: "a08" },
+  { label: "A09", value: "a09" },
 ]
 const ALL_SOLVER_KEYS = SOLVER_OPTIONS.map((option) => option.value)
 
@@ -54,7 +61,8 @@ const isSolverKey = (value: string | null): value is SolverKey =>
   value === "a02" ||
   value === "a03" ||
   value === "a05" ||
-  value === "a08"
+  value === "a08" ||
+  value === "a09"
 
 const getInitialSolverKey = (fallback: SolverKey) => {
   if (typeof window === "undefined") return fallback
@@ -176,6 +184,14 @@ export function SolverDebugger({
                   ...defaultA08Params,
                   nodeWithPortPoints,
                   ...solverPropOverrides?.a08,
+                }),
+              )
+            case "a09":
+              return prepareSolver(
+                new HighDensitySolverA09({
+                  ...defaultA09Params,
+                  nodeWithPortPoints,
+                  ...solverPropOverrides?.a09,
                 }),
               )
           }

@@ -5,7 +5,7 @@ export default function Sample009Fixture() {
   return (
     <SolverDebugger
       nodeWithPortPoints={sample009.nodeWithPortPoints}
-      defaultSolverKey="a08"
+      defaultSolverKey="a09"
       debugKey="dataset01-sample009"
     />
   )
