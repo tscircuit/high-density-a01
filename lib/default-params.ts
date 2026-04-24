@@ -3,6 +3,7 @@ import type { HighDensitySolverA02Props } from "./HighDensitySolverA02/HighDensi
 import type { HighDensitySolverA03Props } from "./HighDensitySolverA03/HighDensitySolverA03"
 import type { HighDensitySolverA05Props } from "./HighDensitySolverA05/HighDensitySolverA05"
 import type { HighDensitySolverA08Props } from "./HighDensitySolverA08/HighDensitySolverA08"
+import type { HighDensitySolverA09Props } from "./HighDensitySolverA09/HighDensitySolverA09"
 
 type A08BreakoutMarginProps = Pick<
   HighDensitySolverA08Props,
@@ -128,6 +129,39 @@ export const defaultA08Params: Required<
   breakoutSmoothingStrength: 0.16,
   breakoutAttractionStrength: 0.06,
   innerPortSpreadFactor: 1,
+}
+
+export const defaultA09Params: Required<
+  Pick<
+    HighDensitySolverA09Props,
+    | "highResolutionCellSize"
+    | "highResolutionCellThickness"
+    | "lowResolutionCellSize"
+    | "traceMargin"
+    | "traceThickness"
+    | "viaDiameter"
+    | "viaMinDistFromBorder"
+    | "effort"
+    | "boundaryBonus"
+    | "boundaryBonusSigma"
+    | "portShadowStrength"
+    | "portShadowTangentSigma"
+    | "portShadowDepthSigma"
+    | "fullOrderSearchConnectionCountLimit"
+    | "priorityHeadSize"
+    | "maxCandidateOrders"
+  >
+> = {
+  ...defaultA03Params,
+  effort: 1,
+  boundaryBonus: 0.18,
+  boundaryBonusSigma: 0.22,
+  portShadowStrength: 0.55,
+  portShadowTangentSigma: 0.18,
+  portShadowDepthSigma: 0.5,
+  fullOrderSearchConnectionCountLimit: 6,
+  priorityHeadSize: 4,
+  maxCandidateOrders: 720,
 }
 
 export function getDefaultA08BreakoutBoundaryMarginMm(
