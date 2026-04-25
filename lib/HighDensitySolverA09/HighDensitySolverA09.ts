@@ -150,7 +150,14 @@ export class HighDensitySolverA09 extends BaseSolver {
   private candidateOrders: ConnectionInfo[][] = []
   private outputRoutes: HighDensityIntraNodeRoute[] = []
   private bestCandidate: CandidateSolution | null = null
-  private searchRan = false
+  private searchComplete = false
+  private candidateOrderIndex = 0
+  private candidateOrdersTried = 0
+  private activeOrder: ConnectionInfo[] | null = null
+  private activeOrderRoutes: HighDensityIntraNodeRoute[] = []
+  private activeOrderConnectionIndex = 0
+  private activeConnection: ConnectionInfo | null = null
+  private activeConnectionSolver: HighDensitySolverA03 | null = null
 
   constructor(props: HighDensitySolverA09Props) {
     super()
@@ -221,6 +228,17 @@ export class HighDensitySolverA09 extends BaseSolver {
     }))
     this.connections = this.getConnections()
     this.candidateOrders = this.generateCandidateOrders()
+    this.outputRoutes = []
+    this.bestCandidate = null
+    this.searchComplete = false
+    this.candidateOrderIndex = 0
+    this.candidateOrdersTried = 0
+    this.activeOrder = null
+    this.activeOrderRoutes = []
+    this.activeOrderConnectionIndex = 0
+    this.activeConnection = null
+    this.activeConnectionSolver = null
+    this.activeSubSolver = null
 
     if (this.connections.length === 0) {
       this.solved = true
@@ -228,44 +246,24 @@ export class HighDensitySolverA09 extends BaseSolver {
   }
 
   override _step(): void {
-    if (this.searchRan || this.solved || this.failed) return
-    this.searchRan = true
+    if (this.searchComplete || this.solved || this.failed) return
 
-    const bestCandidate = this.searchCandidateOrders()
-    this.bestCandidate = bestCandidate
-    this.outputRoutes = bestCandidate?.routes ?? []
-
-    this.stats = {
-      candidateOrdersTried: this.candidateOrders.length,
-      bestOrder: bestCandidate?.order ?? [],
-      bestRouteCount: bestCandidate?.routes.length ?? 0,
-      bestViolations: bestCandidate?.violations ?? 0,
-      bestIntersections: bestCandidate?.intersections ?? 0,
-    }
-
-    if (
-      bestCandidate &&
-      bestCandidate.complete &&
-      bestCandidate.violations === 0 &&
-      bestCandidate.intersections === 0
-    ) {
-      this.solved = true
+    if (this.activeConnectionSolver) {
+      this.stepActiveConnectionSolver()
       return
     }
 
-    if (!bestCandidate) {
-      this.error = "A09 could not route any sample order"
-      this.failed = true
+    if (!this.activeOrder) {
+      this.startNextCandidateOrder()
       return
     }
 
-    const status = bestCandidate.complete ? "complete" : "partial"
-    this.error =
-      `A09 best ${status} candidate still invalid: ` +
-      `${bestCandidate.routes.length} routed, ` +
-      `${bestCandidate.intersections} intersections, ` +
-      `${bestCandidate.violations} geometry violations`
-    this.failed = true
+    if (this.activeOrderConnectionIndex < this.activeOrder.length) {
+      this.startNextActiveOrderConnection()
+      return
+    }
+
+    this.finishActiveCandidateOrder()
   }
 
   override getOutput(): HighDensityIntraNodeRoute[] {
@@ -273,6 +271,7 @@ export class HighDensitySolverA09 extends BaseSolver {
   }
 
   override visualize(): GraphicsObject {
+    const activeSubVisualization = this.activeConnectionSolver?.visualize()
     const rects: NonNullable<GraphicsObject["rects"]> = [
       {
         center: this.nodeWithPortPoints.center,
@@ -290,8 +289,65 @@ export class HighDensitySolverA09 extends BaseSolver {
       }))
     const lines: NonNullable<GraphicsObject["lines"]> = []
     const circles: NonNullable<GraphicsObject["circles"]> = []
+    const texts: NonNullable<GraphicsObject["texts"]> = []
 
-    for (const route of this.outputRoutes) {
+    if (this.activeOrder) {
+      this.appendRoutesToGraphics(
+        this.bestCandidate?.routes ?? [],
+        lines,
+        circles,
+        {
+          alpha: 0.24,
+          strokeDash: "0.08 0.08",
+        },
+      )
+      this.appendRoutesToGraphics(this.activeOrderRoutes, lines, circles, {
+        alpha: 0.8,
+      })
+    } else {
+      this.appendRoutesToGraphics(this.outputRoutes, lines, circles, {
+        alpha: 0.8,
+      })
+    }
+
+    if (activeSubVisualization) {
+      points.push(...(activeSubVisualization.points ?? []))
+      lines.push(...(activeSubVisualization.lines ?? []))
+      circles.push(...(activeSubVisualization.circles ?? []))
+      rects.push(...(activeSubVisualization.rects ?? []).slice(1))
+    }
+
+    texts.push({
+      x: this.boundsMinX,
+      y: this.boundsMaxY,
+      text: this.getVisualizationStatusText(),
+      anchorSide: "bottom_left",
+      fontSize: 0.14,
+      color: "black",
+    })
+
+    return {
+      points,
+      lines,
+      circles,
+      rects,
+      texts,
+      coordinateSystem: "cartesian" as const,
+      title: `HighDensityA09 ${this.getVisualizationStatusText()}`,
+    }
+  }
+
+  override preview(): GraphicsObject {
+    return this.visualize()
+  }
+
+  private appendRoutesToGraphics(
+    routes: HighDensityIntraNodeRoute[],
+    lines: NonNullable<GraphicsObject["lines"]>,
+    circles: NonNullable<GraphicsObject["circles"]>,
+    options: { alpha: number; strokeDash?: string | number[] },
+  ) {
+    for (const route of routes) {
       let segmentStart = 0
       for (let index = 1; index < route.route.length; index += 1) {
         const previous = route.route[index - 1]
@@ -305,10 +361,9 @@ export class HighDensitySolverA09 extends BaseSolver {
               points: route.route
                 .slice(segmentStart, index)
                 .map((point) => ({ x: point.x, y: point.y })),
-              strokeColor:
-                TRACE_COLORS[segmentZ % TRACE_COLORS.length] ??
-                "rgba(0,0,0,0.8)",
+              strokeColor: this.getTraceColor(segmentZ, options.alpha),
               strokeWidth: route.traceThickness,
+              strokeDash: options.strokeDash,
             })
           }
           segmentStart = index
@@ -321,9 +376,9 @@ export class HighDensitySolverA09 extends BaseSolver {
           points: route.route
             .slice(segmentStart)
             .map((point) => ({ x: point.x, y: point.y })),
-          strokeColor:
-            TRACE_COLORS[segmentZ % TRACE_COLORS.length] ?? "rgba(0,0,0,0.8)",
+          strokeColor: this.getTraceColor(segmentZ, options.alpha),
           strokeWidth: route.traceThickness,
+          strokeDash: options.strokeDash,
         })
       }
 
@@ -331,74 +386,181 @@ export class HighDensitySolverA09 extends BaseSolver {
         circles.push({
           center: { x: via.x, y: via.y },
           radius: route.viaDiameter / 2,
-          fill: "rgba(0,0,0,0.3)",
+          fill: `rgba(0,0,0,${Math.min(0.3, options.alpha).toFixed(3)})`,
           stroke: "black",
         })
       }
     }
+  }
 
-    return {
-      points,
-      lines,
-      circles,
-      rects,
-      coordinateSystem: "cartesian" as const,
-      title:
-        this.bestCandidate === null
-          ? "HighDensityA09"
-          : `HighDensityA09 [${this.bestCandidate.routes.length}/${this.connections.length} routed]`,
+  private getTraceColor(z: number, alpha: number) {
+    const color = TRACE_COLORS[z % TRACE_COLORS.length]
+    if (!color) return `rgba(0,0,0,${alpha.toFixed(3)})`
+    return color.replace(/[\d.]+\)$/, `${alpha.toFixed(3)})`)
+  }
+
+  private getVisualizationStatusText() {
+    const orderNumber =
+      this.activeOrder || this.candidateOrderIndex > 0
+        ? Math.max(1, this.candidateOrderIndex)
+        : 0
+    const connectionName =
+      this.activeConnection?.connectionName ??
+      this.activeOrder?.[this.activeOrderConnectionIndex]?.connectionName ??
+      "none"
+    const activeSolvedCount = this.activeOrderRoutes.length
+    const bestSolvedCount = this.bestCandidate?.routes.length ?? 0
+
+    if (this.solved) {
+      return `[solved, best ${bestSolvedCount}/${this.connections.length}]`
+    }
+    if (this.failed) {
+      return `[failed, best ${bestSolvedCount}/${this.connections.length}]`
+    }
+    if (this.activeOrder) {
+      return (
+        `[order ${orderNumber}/${this.candidateOrders.length}, ` +
+        `connection ${this.activeOrderConnectionIndex + 1}/${this.activeOrder.length}: ` +
+        `${connectionName}, active ${activeSolvedCount}/${this.activeOrder.length}, ` +
+        `best ${bestSolvedCount}/${this.connections.length}]`
+      )
+    }
+    return `[orders tried ${this.candidateOrdersTried}/${this.candidateOrders.length}, best ${bestSolvedCount}/${this.connections.length}]`
+  }
+
+  private startNextCandidateOrder() {
+    const order = this.candidateOrders[this.candidateOrderIndex]
+    if (!order) {
+      this.finishSearch()
+      return
+    }
+
+    this.candidateOrderIndex += 1
+    this.activeOrder = order
+    this.activeOrderRoutes = []
+    this.activeOrderConnectionIndex = 0
+  }
+
+  private startNextActiveOrderConnection() {
+    const connection = this.activeOrder?.[this.activeOrderConnectionIndex]
+    if (!connection) {
+      return
+    }
+
+    const solver = this.createConnectionSolver(connection)
+    solver.setup()
+    this.applyExactRouteObstacles(solver, this.activeOrderRoutes)
+    this.activeConnection = connection
+    this.activeConnectionSolver = solver
+    this.activeSubSolver = solver
+  }
+
+  private stepActiveConnectionSolver() {
+    if (!this.activeConnectionSolver) return
+
+    this.activeConnectionSolver.step()
+
+    if (this.activeConnectionSolver.solved) {
+      this.finishSolvedActiveConnection()
+      return
+    }
+
+    if (this.activeConnectionSolver.failed) {
+      this.activeOrderConnectionIndex = this.activeOrder?.length ?? 0
+      this.activeConnection = null
+      this.activeConnectionSolver = null
+      this.activeSubSolver = null
     }
   }
 
-  override preview(): GraphicsObject {
-    return this.visualize()
-  }
+  private finishSolvedActiveConnection() {
+    const connection = this.activeConnection
+    const solver = this.activeConnectionSolver
+    if (!connection || !solver) return
 
-  private searchCandidateOrders() {
-    let bestCandidate: CandidateSolution | null = null
-
-    for (const order of this.candidateOrders) {
-      const candidate = this.solveCandidateOrder(order)
-      if (this.isBetterCandidate(candidate, bestCandidate)) {
-        bestCandidate = candidate
-      }
-
-      if (
-        candidate.complete &&
-        candidate.intersections === 0 &&
-        candidate.violations === 0
-      ) {
-        return candidate
-      }
+    const [route] = solver.getOutput()
+    if (!route) {
+      this.activeOrderConnectionIndex = this.activeOrder?.length ?? 0
+    } else {
+      this.activeOrderRoutes.push({
+        ...route,
+        rootConnectionName: connection.rootConnectionName,
+      })
+      this.activeOrderConnectionIndex += 1
     }
 
-    return bestCandidate
+    this.activeConnection = null
+    this.activeConnectionSolver = null
+    this.activeSubSolver = null
   }
 
-  private solveCandidateOrder(order: ConnectionInfo[]): CandidateSolution {
-    const routes: HighDensityIntraNodeRoute[] = []
+  private finishActiveCandidateOrder() {
+    if (!this.activeOrder) return
 
-    for (const connection of order) {
-      const nextRoute = this.solveConnection(connection, routes)
-      if (!nextRoute) {
-        break
-      }
-      routes.push(nextRoute)
-    }
-
-    return {
-      order: order.map((connection) => connection.connectionName),
+    const routes = this.activeOrderRoutes
+    const candidate: CandidateSolution = {
+      order: this.activeOrder.map((connection) => connection.connectionName),
       routes,
-      complete: routes.length === order.length,
+      complete: routes.length === this.activeOrder.length,
       intersections: findSameLayerIntersections(routes).length,
       violations: findRouteGeometryViolations(routes).length,
     }
+
+    if (this.isBetterCandidate(candidate, this.bestCandidate)) {
+      this.bestCandidate = candidate
+      this.outputRoutes = candidate.routes
+    }
+
+    this.candidateOrdersTried += 1
+    this.activeOrder = null
+    this.activeOrderRoutes = []
+    this.activeOrderConnectionIndex = 0
+    this.refreshStats()
+
+    if (this.isValidCandidate(candidate)) {
+      this.searchComplete = true
+      this.solved = true
+    }
   }
 
-  private solveConnection(
-    connection: ConnectionInfo,
-    occupiedRoutes: HighDensityIntraNodeRoute[],
-  ) {
+  private finishSearch() {
+    this.searchComplete = true
+    this.refreshStats()
+
+    if (!this.bestCandidate) {
+      this.error = "A09 could not route any sample order"
+      this.failed = true
+      return
+    }
+
+    const status = this.bestCandidate.complete ? "complete" : "partial"
+    this.error =
+      `A09 best ${status} candidate still invalid: ` +
+      `${this.bestCandidate.routes.length} routed, ` +
+      `${this.bestCandidate.intersections} intersections, ` +
+      `${this.bestCandidate.violations} geometry violations`
+    this.failed = true
+  }
+
+  private refreshStats() {
+    this.stats = {
+      candidateOrdersTried: this.candidateOrdersTried,
+      bestOrder: this.bestCandidate?.order ?? [],
+      bestRouteCount: this.bestCandidate?.routes.length ?? 0,
+      bestViolations: this.bestCandidate?.violations ?? 0,
+      bestIntersections: this.bestCandidate?.intersections ?? 0,
+    }
+  }
+
+  private isValidCandidate(candidate: CandidateSolution) {
+    return (
+      candidate.complete &&
+      candidate.intersections === 0 &&
+      candidate.violations === 0
+    )
+  }
+
+  private createConnectionSolver(connection: ConnectionInfo) {
     const solver = new HighDensitySolverA03({
       nodeWithPortPoints: this.makeSubproblem(connection),
       highResolutionCellSize: this.highResolutionCellSize,
@@ -417,20 +579,7 @@ export class HighDensitySolverA09 extends BaseSolver {
     })
     solver.MAX_RIPS = 0
     solver.MAX_ITERATIONS = Math.max(1, this.MAX_ITERATIONS)
-    solver.setup()
-    this.applyExactRouteObstacles(solver, occupiedRoutes)
-    solver.solve()
-
-    if (!solver.solved || solver.failed) {
-      return null
-    }
-
-    const [route] = solver.getOutput()
-    if (!route) return null
-    return {
-      ...route,
-      rootConnectionName: connection.rootConnectionName,
-    }
+    return solver
   }
 
   private applyExactRouteObstacles(

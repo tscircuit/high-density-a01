@@ -106,3 +106,23 @@ test("sample009 A09 solve", async () => {
     }
   }
 })
+
+test("sample009 A09 visualize shows active iteration state", () => {
+  const solver = new HighDensitySolverA09({
+    ...defaultA09Params,
+    nodeWithPortPoints: sample009.nodeWithPortPoints,
+  })
+  solver.MAX_ITERATIONS = 100_000_000
+  solver.setup()
+  solver.step()
+  solver.step()
+  solver.step()
+
+  const graphics = solver.visualize()
+  expect(graphics.title).toContain("order 1/")
+  expect(graphics.title).toContain("connection 1/")
+  expect(graphics.texts?.[0]?.text).toContain("active 0/")
+  expect(graphics.points?.length ?? 0).toBeGreaterThan(
+    sample009.nodeWithPortPoints.portPoints.length,
+  )
+})
