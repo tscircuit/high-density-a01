@@ -4,6 +4,7 @@ import {
   type AffineTransform,
   applyAffineTransformToPoint,
 } from "../gridToAffineTransform"
+import { getNodePortPointPairs } from "../nodeWithPortPointPairs"
 import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
 
 type ConnId = number
@@ -1436,58 +1437,38 @@ export class HighDensitySolverA02 extends BaseSolver {
   }
 
   private buildConnectionSegs(): ConnectionSeg[] {
-    const byName = new Map<
-      string,
-      {
-        points: Array<{ x: number; y: number; z: number }>
-        rootConnectionName?: string
-      }
-    >()
-    for (const pp of this.nodeWithPortPoints.portPoints) {
-      const name = pp.connectionName
-      if (!byName.has(name)) {
-        byName.set(name, {
-          points: [],
-          rootConnectionName: pp.rootConnectionName,
-        })
-      }
-      byName.get(name)!.points.push(pp)
-    }
-
     const segs: ConnectionSeg[] = []
     const seenSegmentKeys = new Set<string>()
 
-    for (const [name, conn] of byName) {
-      const pts = conn.points
-      if (pts.length < 2) continue
+    for (const pair of getNodePortPointPairs(this.nodeWithPortPoints)) {
+      const connId = this.internConn(
+        pair.connectionName,
+        pair.rootConnectionName,
+      )
+      const s = this.pointToCell(pair.start)
+      const e = this.pointToCell(pair.end)
 
-      const connId = this.internConn(name, conn.rootConnectionName)
-      for (let i = 0; i < pts.length - 1; i++) {
-        const s = this.pointToCell(pts[i]!)
-        const e = this.pointToCell(pts[i + 1]!)
-
-        const endpointA = `${s.z}:${s.cellId}`
-        const endpointB = `${e.z}:${e.cellId}`
-        const orderedEndpoints =
-          endpointA < endpointB
-            ? `${endpointA}|${endpointB}`
-            : `${endpointB}|${endpointA}`
-        const netName = conn.rootConnectionName ?? name
-        const segKey = `${netName}|${orderedEndpoints}`
-        if (seenSegmentKeys.has(segKey)) {
-          this.overlapFriendlyRootNets.add(netName)
-          continue
-        }
-        seenSegmentKeys.add(segKey)
-
-        segs.push({
-          connId,
-          startZ: s.z,
-          startCellId: s.cellId,
-          endZ: e.z,
-          endCellId: e.cellId,
-        })
+      const endpointA = `${s.z}:${s.cellId}`
+      const endpointB = `${e.z}:${e.cellId}`
+      const orderedEndpoints =
+        endpointA < endpointB
+          ? `${endpointA}|${endpointB}`
+          : `${endpointB}|${endpointA}`
+      const netName = pair.rootConnectionName ?? pair.connectionName
+      const segKey = `${netName}|${orderedEndpoints}`
+      if (seenSegmentKeys.has(segKey)) {
+        this.overlapFriendlyRootNets.add(netName)
+        continue
       }
+      seenSegmentKeys.add(segKey)
+
+      segs.push({
+        connId,
+        startZ: s.z,
+        startCellId: s.cellId,
+        endZ: e.z,
+        endCellId: e.cellId,
+      })
     }
 
     return segs

@@ -8,6 +8,7 @@ import {
   findRouteGeometryViolations,
   findSameLayerIntersections,
 } from "../routeGeometryValidation"
+import { getPortPointPairIdsForSubset } from "../nodeWithPortPointPairs"
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
@@ -751,6 +752,10 @@ export class HighDensitySolverA09 extends BaseSolver {
       width: this.nodeWithPortPoints.width,
       height: this.nodeWithPortPoints.height,
       availableZ: this.nodeWithPortPoints.availableZ,
+      portPointPairIds: getPortPointPairIdsForSubset(
+        this.nodeWithPortPoints,
+        connection.portPoints,
+      ),
       portPoints: connection.portPoints.map((portPoint) => ({ ...portPoint })),
     }
   }
