@@ -27,7 +27,6 @@
     "format:check": "biome format ."
   },
   "files": [
-    "dist",
     "lib"
   ],
   "devDependencies": {
