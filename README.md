@@ -17,7 +17,7 @@ properties:
 
 ## Usage
 
-Install from GitHub with a pinned commit:
+Install from GitHub:
 
 ```sh
 bun add git+https://github.com/tscircuit/high-density-a01.git
