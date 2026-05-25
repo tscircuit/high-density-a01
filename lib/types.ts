@@ -7,13 +7,21 @@ export type PortPoint = {
   z: number
 }
 
+export type PortPointInPair = PortPoint[]
+
 export type NodeWithPortPoints = {
   capacityMeshNodeId: string
   center: { x: number; y: number }
   width: number
   height: number
-  portPoints: PortPoint[]
   availableZ?: number[]
+  portPointsInPairs: PortPointInPair[]
+}
+
+export function getPortPointsFromNode(
+  nodeWithPortPoints: NodeWithPortPoints,
+): PortPoint[] {
+  return nodeWithPortPoints.portPointsInPairs.flat()
 }
 
 export type HighDensityRoutePoint = {

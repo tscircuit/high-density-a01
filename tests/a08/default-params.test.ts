@@ -15,7 +15,7 @@ const nodeWithPortPoints: NodeWithPortPoints = {
   width: 10,
   height: 10,
   availableZ: [0, 1],
-  portPoints: [],
+  portPointsInPairs: [],
 }
 
 test("A08 normalizes omitted parameters from defaultA08Params", () => {

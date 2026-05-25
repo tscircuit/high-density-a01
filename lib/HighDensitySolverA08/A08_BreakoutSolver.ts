@@ -1,6 +1,11 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
 import type { GraphicsObject } from "graphics-debug"
-import type { NodeWithPortPoints } from "../types"
+import {
+  getPortPointsFromNode,
+  type HighDensityRoutePoint,
+  type NodeWithPortPoints,
+  type PortPointInPair,
+} from "../types"
 import {
   type A08BreakoutRoute,
   type A08BreakoutSolverOutput,
@@ -1348,24 +1353,37 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       width: this.innerRect.width,
       height: this.innerRect.height,
       availableZ: this.nodeWithPortPoints.availableZ,
-      portPoints: this.nodeWithPortPoints.portPoints.map((portPoint) => {
-        const assigned = assignedByAnchorKey.get(getAnchorKey(portPoint))
-        if (!assigned) return portPoint
-        return {
-          ...portPoint,
-          x: assigned.x,
-          y: assigned.y,
-        }
-      }),
+      portPointsInPairs: this.nodeWithPortPoints.portPointsInPairs.map(
+        (pair): PortPointInPair => {
+          const startPoint = pair[0]!
+          const endPoint = pair[1]!
+          return [
+            this.movePortPointToAssignedAnchor(startPoint, assignedByAnchorKey),
+            this.movePortPointToAssignedAnchor(endPoint, assignedByAnchorKey),
+          ]
+        },
+      ),
+    }
+  }
+
+  private movePortPointToAssignedAnchor(
+    portPoint: NodeWithPortPoints["portPointsInPairs"][number][number],
+    assignedByAnchorKey: Map<string, HighDensityRoutePoint>,
+  ) {
+    const assigned = assignedByAnchorKey.get(getAnchorKey(portPoint))
+    if (!assigned) return portPoint
+    return {
+      ...portPoint,
+      x: assigned.x,
+      y: assigned.y,
     }
   }
 
   private getInnerLayerCount() {
     return (
       this.nodeWithPortPoints.availableZ?.length ??
-      new Set(
-        this.nodeWithPortPoints.portPoints.map((portPoint) => portPoint.z),
-      ).size
+      new Set(getPortPointsFromNode(this.nodeWithPortPoints).map((pp) => pp.z))
+        .size
     )
   }
 
@@ -1513,13 +1531,14 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       })
     }
 
-    const points: NonNullable<GraphicsObject["points"]> =
-      this.nodeWithPortPoints.portPoints.map((portPoint) => ({
-        x: portPoint.x,
-        y: portPoint.y,
-        color: "black",
-        label: portPoint.connectionName,
-      }))
+    const points: NonNullable<GraphicsObject["points"]> = getPortPointsFromNode(
+      this.nodeWithPortPoints,
+    ).map((portPoint) => ({
+      x: portPoint.x,
+      y: portPoint.y,
+      color: "black",
+      label: portPoint.connectionName,
+    }))
     for (const route of this.breakoutRoutes) {
       const z = route.route[0]?.z ?? route.assigned.z ?? 0
       points.push({

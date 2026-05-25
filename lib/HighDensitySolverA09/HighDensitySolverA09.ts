@@ -12,14 +12,16 @@ import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
   PortPoint,
+  PortPointInPair,
 } from "../types"
+import { getPortPointsFromNode } from "../types"
 
 type Side = "left" | "right" | "top" | "bottom"
 
 type ConnectionInfo = {
   connectionName: string
   rootConnectionName?: string
-  portPoints: PortPoint[]
+  portPointsInPairs: PortPointInPair[]
   sides: Set<Side>
 }
 
@@ -104,8 +106,9 @@ function scoreConnection(
   centerY: number,
   rootSiblingCount: number,
 ) {
-  const xs = connection.portPoints.map((portPoint) => portPoint.x)
-  const ys = connection.portPoints.map((portPoint) => portPoint.y)
+  const portPoints = getConnectionPortPoints(connection)
+  const xs = portPoints.map((portPoint) => portPoint.x)
+  const ys = portPoints.map((portPoint) => portPoint.y)
   const widthSpan = Math.max(...xs) - Math.min(...xs)
   const heightSpan = Math.max(...ys) - Math.min(...ys)
   const minY = Math.min(...ys)
@@ -117,6 +120,9 @@ function scoreConnection(
   score += Math.max(0, rootSiblingCount - 1) * 0.25
   return score
 }
+
+const getConnectionPortPoints = (connection: ConnectionInfo): PortPoint[] =>
+  connection.portPointsInPairs.flat()
 
 export class HighDensitySolverA09 extends BaseSolver {
   nodeWithPortPoints: NodeWithPortPoints
@@ -216,7 +222,8 @@ export class HighDensitySolverA09 extends BaseSolver {
   }
 
   override _setup(): void {
-    const { center, width, height, portPoints } = this.nodeWithPortPoints
+    const { center, width, height } = this.nodeWithPortPoints
+    const portPoints = getPortPointsFromNode(this.nodeWithPortPoints)
     this.boundsMinX = center.x - width / 2
     this.boundsMaxX = center.x + width / 2
     this.boundsMinY = center.y - height / 2
@@ -280,13 +287,14 @@ export class HighDensitySolverA09 extends BaseSolver {
         stroke: "gray",
       },
     ]
-    const points: NonNullable<GraphicsObject["points"]> =
-      this.nodeWithPortPoints.portPoints.map((portPoint) => ({
-        x: portPoint.x,
-        y: portPoint.y,
-        color: PORT_COLORS[portPoint.z] ?? "black",
-        label: portPoint.connectionName,
-      }))
+    const points: NonNullable<GraphicsObject["points"]> = getPortPointsFromNode(
+      this.nodeWithPortPoints,
+    ).map((portPoint) => ({
+      x: portPoint.x,
+      y: portPoint.y,
+      color: PORT_COLORS[portPoint.z] ?? "black",
+      label: portPoint.connectionName,
+    }))
     const lines: NonNullable<GraphicsObject["lines"]> = []
     const circles: NonNullable<GraphicsObject["circles"]> = []
     const texts: NonNullable<GraphicsObject["texts"]> = []
@@ -723,24 +731,28 @@ export class HighDensitySolverA09 extends BaseSolver {
   private getConnections() {
     const byConnection = new Map<string, ConnectionInfo>()
 
-    for (const portPoint of this.nodeWithPortPoints.portPoints) {
-      const existing = byConnection.get(portPoint.connectionName)
+    for (const portPointsInPair of this.nodeWithPortPoints.portPointsInPairs) {
+      const startPoint = portPointsInPair[0]!
+      const endPoint = portPointsInPair[1]!
+      const existing = byConnection.get(startPoint.connectionName)
       if (existing) {
-        existing.portPoints.push(portPoint)
-        existing.sides.add(this.getSide(portPoint))
+        existing.portPointsInPairs.push(portPointsInPair)
+        existing.sides.add(this.getSide(startPoint))
+        existing.sides.add(this.getSide(endPoint))
         continue
       }
 
-      byConnection.set(portPoint.connectionName, {
-        connectionName: portPoint.connectionName,
-        rootConnectionName: portPoint.rootConnectionName,
-        portPoints: [portPoint],
-        sides: new Set([this.getSide(portPoint)]),
+      byConnection.set(startPoint.connectionName, {
+        connectionName: startPoint.connectionName,
+        rootConnectionName:
+          startPoint.rootConnectionName ?? endPoint.rootConnectionName,
+        portPointsInPairs: [portPointsInPair],
+        sides: new Set([this.getSide(startPoint), this.getSide(endPoint)]),
       })
     }
 
     return Array.from(byConnection.values()).filter(
-      (connection) => connection.portPoints.length >= 2,
+      (connection) => connection.portPointsInPairs.length > 0,
     )
   }
 
@@ -751,7 +763,10 @@ export class HighDensitySolverA09 extends BaseSolver {
       width: this.nodeWithPortPoints.width,
       height: this.nodeWithPortPoints.height,
       availableZ: this.nodeWithPortPoints.availableZ,
-      portPoints: connection.portPoints.map((portPoint) => ({ ...portPoint })),
+      portPointsInPairs: connection.portPointsInPairs.map((pair) => [
+        { ...pair[0]! },
+        { ...pair[1]! },
+      ]),
     }
   }
 

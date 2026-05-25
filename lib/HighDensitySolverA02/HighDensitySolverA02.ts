@@ -4,7 +4,11 @@ import {
   type AffineTransform,
   applyAffineTransformToPoint,
 } from "../gridToAffineTransform"
-import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
+import type {
+  HighDensityIntraNodeRoute,
+  NodeWithPortPoints,
+  PortPoint,
+} from "../types"
 
 type ConnId = number
 
@@ -599,12 +603,11 @@ export class HighDensitySolverA02 extends BaseSolver {
     const setupStart = this.enableProfiling ? performance.now() : 0
     const { nodeWithPortPoints } = this
     const { width, height, center } = nodeWithPortPoints
+    const portPoints = this.getPortPoints()
 
     this.availableZ =
       nodeWithPortPoints.availableZ ??
-      [...new Set(nodeWithPortPoints.portPoints.map((pp) => pp.z))].sort(
-        (a, b) => a - b,
-      )
+      [...new Set(portPoints.map((pp) => pp.z))].sort((a, b) => a - b)
 
     this.layers = this.availableZ.length
     this.zToLayer = new Map()
@@ -698,7 +701,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     this.unsolvedSegs = this.buildConnectionSegs()
 
     const rootByPortFlat = new Map<number, string>()
-    for (const pp of this.nodeWithPortPoints.portPoints) {
+    for (const pp of this.getPortPoints()) {
       const connId = this.connNameToId.get(pp.connectionName)
       if (connId === undefined) continue
       const cell = this.pointToCell(pp)
@@ -1435,59 +1438,45 @@ export class HighDensitySolverA02 extends BaseSolver {
     return id
   }
 
-  private buildConnectionSegs(): ConnectionSeg[] {
-    const byName = new Map<
-      string,
-      {
-        points: Array<{ x: number; y: number; z: number }>
-        rootConnectionName?: string
-      }
-    >()
-    for (const pp of this.nodeWithPortPoints.portPoints) {
-      const name = pp.connectionName
-      if (!byName.has(name)) {
-        byName.set(name, {
-          points: [],
-          rootConnectionName: pp.rootConnectionName,
-        })
-      }
-      byName.get(name)!.points.push(pp)
-    }
+  private getPortPoints(): PortPoint[] {
+    return this.nodeWithPortPoints.portPointsInPairs.flat()
+  }
 
+  private buildConnectionSegs(): ConnectionSeg[] {
     const segs: ConnectionSeg[] = []
     const seenSegmentKeys = new Set<string>()
 
-    for (const [name, conn] of byName) {
-      const pts = conn.points
-      if (pts.length < 2) continue
+    for (const pair of this.nodeWithPortPoints.portPointsInPairs) {
+      const startPoint = pair[0]!
+      const endPoint = pair[1]!
+      const name = startPoint.connectionName
+      const rootConnectionName =
+        startPoint.rootConnectionName ?? endPoint.rootConnectionName
+      const connId = this.internConn(name, rootConnectionName)
+      const s = this.pointToCell(startPoint)
+      const e = this.pointToCell(endPoint)
 
-      const connId = this.internConn(name, conn.rootConnectionName)
-      for (let i = 0; i < pts.length - 1; i++) {
-        const s = this.pointToCell(pts[i]!)
-        const e = this.pointToCell(pts[i + 1]!)
-
-        const endpointA = `${s.z}:${s.cellId}`
-        const endpointB = `${e.z}:${e.cellId}`
-        const orderedEndpoints =
-          endpointA < endpointB
-            ? `${endpointA}|${endpointB}`
-            : `${endpointB}|${endpointA}`
-        const netName = conn.rootConnectionName ?? name
-        const segKey = `${netName}|${orderedEndpoints}`
-        if (seenSegmentKeys.has(segKey)) {
-          this.overlapFriendlyRootNets.add(netName)
-          continue
-        }
-        seenSegmentKeys.add(segKey)
-
-        segs.push({
-          connId,
-          startZ: s.z,
-          startCellId: s.cellId,
-          endZ: e.z,
-          endCellId: e.cellId,
-        })
+      const endpointA = `${s.z}:${s.cellId}`
+      const endpointB = `${e.z}:${e.cellId}`
+      const orderedEndpoints =
+        endpointA < endpointB
+          ? `${endpointA}|${endpointB}`
+          : `${endpointB}|${endpointA}`
+      const netName = rootConnectionName ?? name
+      const segKey = `${netName}|${orderedEndpoints}`
+      if (seenSegmentKeys.has(segKey)) {
+        this.overlapFriendlyRootNets.add(netName)
+        continue
       }
+      seenSegmentKeys.add(segKey)
+
+      segs.push({
+        connId,
+        startZ: s.z,
+        startCellId: s.cellId,
+        endZ: e.z,
+        endCellId: e.cellId,
+      })
     }
 
     return segs
@@ -2140,7 +2129,7 @@ export class HighDensitySolverA02 extends BaseSolver {
       }
     }
 
-    for (const pp of this.nodeWithPortPoints.portPoints) {
+    for (const pp of this.getPortPoints()) {
       points.push({
         x: pp.x,
         y: pp.y,

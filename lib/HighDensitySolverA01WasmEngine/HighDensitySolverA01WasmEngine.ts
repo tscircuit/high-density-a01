@@ -10,7 +10,11 @@ import {
   applyAffineTransformToPoint,
   computeGridToAffineTransform,
 } from "../gridToAffineTransform"
-import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
+import {
+  getPortPointsFromNode,
+  type HighDensityIntraNodeRoute,
+  type NodeWithPortPoints,
+} from "../types"
 
 type HyperParameters = {
   shuffleSeed: number
@@ -228,7 +232,7 @@ export class HighDensitySolverA01WasmEngine extends BaseSolver {
     })
 
     // Port points colored by layer
-    for (const pp of this.props.nodeWithPortPoints.portPoints) {
+    for (const pp of getPortPointsFromNode(this.props.nodeWithPortPoints)) {
       points!.push({
         x: pp.x,
         y: pp.y,

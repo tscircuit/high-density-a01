@@ -1,10 +1,11 @@
 import { useState } from "react"
+import { getPortPointsFromNode } from "../../lib/types"
 import { SolverDebugger } from "../components/SolverDebugger"
 import { datasetFails03Entries } from "./dataset-fails03"
 
 const getRootNetCount = (entry: (typeof datasetFails03Entries)[number]) =>
   new Set(
-    entry.nodeWithPortPoints.portPoints.map(
+    getPortPointsFromNode(entry.nodeWithPortPoints).map(
       (portPoint) => portPoint.rootConnectionName ?? portPoint.connectionName,
     ),
   ).size
@@ -24,7 +25,7 @@ export default function DatasetFails03SelectorFixture() {
     return <div>Dataset fails03 is empty.</div>
   }
 
-  const portCount = sample.nodeWithPortPoints.portPoints.length
+  const portCount = getPortPointsFromNode(sample.nodeWithPortPoints).length
   const rootNetCount = getRootNetCount(sample)
 
   return (

@@ -1,8 +1,9 @@
-import type {
-  HighDensityIntraNodeRoute,
-  HighDensityRoutePoint,
-  NodeWithPortPoints,
-  PortPoint,
+import {
+  getPortPointsFromNode,
+  type HighDensityIntraNodeRoute,
+  type HighDensityRoutePoint,
+  type NodeWithPortPoints,
+  type PortPoint,
 } from "../types"
 
 export type Side = "left" | "right" | "top" | "bottom"
@@ -156,7 +157,7 @@ export function getPopulatedSides(nodeWithPortPoints: NodeWithPortPoints) {
   const outerBounds = getNodeBounds(nodeWithPortPoints)
   const populatedSides = new Set<Side>()
 
-  for (const portPoint of nodeWithPortPoints.portPoints) {
+  for (const portPoint of getPortPointsFromNode(nodeWithPortPoints)) {
     if (Math.abs(portPoint.x - outerBounds.minX) <= POINT_EPSILON) {
       populatedSides.add("left")
     }
@@ -189,7 +190,7 @@ export function pickExactSideInsetRect(
 
   if (candidate.width <= EPSILON || candidate.height <= EPSILON) return null
 
-  for (const portPoint of nodeWithPortPoints.portPoints) {
+  for (const portPoint of getPortPointsFromNode(nodeWithPortPoints)) {
     if (pointToRectDistance(portPoint, candidate) + POINT_EPSILON < marginMm) {
       return null
     }
@@ -202,7 +203,7 @@ export function buildSpreadAnchors(nodeWithPortPoints: NodeWithPortPoints) {
   const outerBounds = getNodeBounds(nodeWithPortPoints)
   const anchorsByKey = new Map<string, SpreadAnchor>()
 
-  for (const portPoint of nodeWithPortPoints.portPoints) {
+  for (const portPoint of getPortPointsFromNode(nodeWithPortPoints)) {
     const key = getAnchorKey(portPoint)
     if (!anchorsByKey.has(key)) {
       anchorsByKey.set(key, {

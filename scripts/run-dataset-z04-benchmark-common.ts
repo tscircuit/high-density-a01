@@ -1,5 +1,5 @@
 // @ts-ignore
-import { hgProblems } from "../node_modules/high-density-dataset-z04/hg-problem/index.ts"
+import { hgProblems } from "high-density-dataset-z04"
 
 export const datasetZ04ProblemCount = hgProblems.length
 

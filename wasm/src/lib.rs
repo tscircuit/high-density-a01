@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use indexmap::IndexMap;
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -53,7 +52,7 @@ pub struct NodeWithPortPoints {
     pub width: f64,
     pub height: f64,
     pub center: Point2,
-    pub port_points: Vec<PortPoint>,
+    pub port_points_in_pairs: Vec<[PortPoint; 2]>,
     #[serde(default)]
     pub available_z: Option<Vec<f64>>,
 }
@@ -421,7 +420,13 @@ impl Solver {
         self.available_z = if let Some(zs) = &self.node.available_z {
             zs.clone()
         } else {
-            let mut zs: Vec<f64> = self.node.port_points.iter().map(|pp| pp.z).collect();
+            let mut zs: Vec<f64> = self
+                .node
+                .port_points_in_pairs
+                .iter()
+                .flat_map(|pair| pair.iter())
+                .map(|pp| pp.z)
+                .collect();
             zs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
             zs.dedup();
             zs
@@ -1030,41 +1035,33 @@ impl Solver {
     }
 
     fn build_connections_from_port_points(&mut self) -> Vec<ConnectionSeg> {
-        // Preserve TS Map insertion semantics
-        let mut by_name: IndexMap<String, Vec<PortPoint>> = IndexMap::new();
-        for pp in self.node.port_points.iter() {
-            by_name
-                .entry(pp.connection_name.clone())
-                .or_default()
-                .push(pp.clone());
-        }
-
         // Build name->id
         self.conn_names.clear();
         self.conn_name_to_id.clear();
-        for name in by_name.keys() {
-            let id = self.conn_names.len() as u32;
-            self.conn_names.push(name.clone());
-            self.conn_name_to_id.insert(name.clone(), id);
+        for [start, _end] in self.node.port_points_in_pairs.iter() {
+            if !self.conn_name_to_id.contains_key(&start.connection_name) {
+                let id = self.conn_names.len() as u32;
+                self.conn_names.push(start.connection_name.clone());
+                self.conn_name_to_id
+                    .insert(start.connection_name.clone(), id);
+            }
         }
 
         let mut conns = Vec::new();
-        for (name, pts) in by_name.iter() {
-            if pts.len() < 2 {
-                continue;
-            }
-            let conn_id = *self.conn_name_to_id.get(name).unwrap();
-            for i in 0..(pts.len() - 1) {
-                let start = self.point_to_cell(&pts[i]);
-                let end = self.point_to_cell(&pts[i + 1]);
-                conns.push(ConnectionSeg {
-                    conn: conn_id,
-                    start,
-                    end,
-                    start_idx: self.cell_index(start.z, start.row, start.col),
-                    end_idx: self.cell_index(end.z, end.row, end.col),
-                });
-            }
+        for [start_point, end_point] in self.node.port_points_in_pairs.iter() {
+            let conn_id = *self
+                .conn_name_to_id
+                .get(&start_point.connection_name)
+                .unwrap();
+            let start = self.point_to_cell(start_point);
+            let end = self.point_to_cell(end_point);
+            conns.push(ConnectionSeg {
+                conn: conn_id,
+                start,
+                end,
+                start_idx: self.cell_index(start.z, start.row, start.col),
+                end_idx: self.cell_index(end.z, end.row, end.col),
+            });
         }
 
         conns

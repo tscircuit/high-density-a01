@@ -1,6 +1,7 @@
 import { datasetFails03Entries } from "../fixtures/dataset-fails03/dataset-fails03"
 import { defaultA05Params } from "../lib/default-params"
 import { HighDensitySolverA05 } from "../lib/HighDensitySolverA05/HighDensitySolverA05"
+import { getPortPointsFromNode } from "../lib/types"
 import { findRouteGeometryViolations } from "../tests/fixtures/validateNoIntersections"
 
 type SolverMode = "default" | "repro"
@@ -109,9 +110,10 @@ const runSingleSample = (
   const routes = solver.getOutput()
   const violationCount = findRouteGeometryViolations(routes).length
   const valid = solver.solved && violationCount === 0
-  const portCount = entry.nodeWithPortPoints.portPoints.length
+  const portPoints = getPortPointsFromNode(entry.nodeWithPortPoints)
+  const portCount = portPoints.length
   const rootNetCount = new Set(
-    entry.nodeWithPortPoints.portPoints.map(
+    portPoints.map(
       (portPoint) => portPoint.rootConnectionName ?? portPoint.connectionName,
     ),
   ).size

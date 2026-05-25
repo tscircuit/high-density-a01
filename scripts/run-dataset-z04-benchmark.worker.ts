@@ -11,7 +11,7 @@ import {
   defaultParams,
 } from "../lib/default-params"
 // @ts-ignore
-import { hgProblems } from "../node_modules/high-density-dataset-z04/hg-problem/index.ts"
+import { hgProblems } from "high-density-dataset-z04"
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
@@ -51,6 +51,8 @@ type HgProblemEntry = {
   data: NodeWithPortPoints
 }
 
+// TODO: datasetZ04 needs to get updated later
+// @ts-ignore
 const datasetZ04 = hgProblems as readonly HgProblemEntry[]
 
 export const datasetZ04ProblemCount = datasetZ04.length

@@ -2,6 +2,7 @@ import { expect, setDefaultTimeout, test } from "bun:test"
 import dataset02Json from "@tscircuit/hypergraph/datasets/jumper-graph-solver/dataset02.json"
 import { HighDensitySolverA01 } from "../lib/HighDensitySolverA01/HighDensitySolverA01"
 import { HighDensitySolverA08 } from "../lib/HighDensitySolverA08/HighDensitySolverA08"
+import { getPortPointsFromNode } from "../lib/types"
 import {
   convertDataset02SampleToNodeWithPortPoints,
   type Dataset02Sample,
@@ -23,7 +24,8 @@ test("fails during setup when required cells exceed maxCellCount", () => {
   const cellSizeMm = 0.5
   const rows = Math.floor(sample001.height / cellSizeMm)
   const cols = Math.floor(sample001.width / cellSizeMm)
-  const layers = new Set(sample001.portPoints.map((pp) => pp.z)).size
+  const layers = new Set(getPortPointsFromNode(sample001).map((pp) => pp.z))
+    .size
   const totalCells = rows * cols * layers
 
   const solver = new HighDensitySolverA01({
