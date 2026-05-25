@@ -49,13 +49,15 @@ test("A03 getOutput applies grid-to-bounds transform to solved routes", () => {
   expect(endCellId).toBeGreaterThanOrEqual(0)
 
   internal.solvedRoutes = [
-    {
-      connId: 0,
-      states: Int32Array.from([startCellId, endCellId]),
-      viaCellIds: Int32Array.from([startCellId, endCellId]),
-      startPoint: { x: internal.boundsMinX, y: internal.boundsMinY, z: 0 },
-      endPoint: { x: internal.boundsMaxX, y: internal.boundsMaxY, z: 0 },
-    },
+    [
+      {
+        connId: 0,
+        states: Int32Array.from([startCellId, endCellId]),
+        viaCellIds: Int32Array.from([startCellId, endCellId]),
+        startPoint: { x: internal.boundsMinX, y: internal.boundsMinY, z: 0 },
+        endPoint: { x: internal.boundsMaxX, y: internal.boundsMaxY, z: 0 },
+      },
+    ],
   ]
 
   const [route] = solver.getOutput()
@@ -85,17 +87,19 @@ test("A03 getOutput preserves exact user-provided route endpoints", () => {
   const endPoint = { x: 0.243, y: 0.217, z: 1 }
 
   internal.solvedRoutes = [
-    {
-      connId: 0,
-      states: Int32Array.from([
-        startCellId,
-        Math.floor(internal.planeSize / 2),
-        internal.planeSize + endCellId,
-      ]),
-      viaCellIds: Int32Array.from([endCellId]),
-      startPoint,
-      endPoint,
-    },
+    [
+      {
+        connId: 0,
+        states: Int32Array.from([
+          startCellId,
+          Math.floor(internal.planeSize / 2),
+          internal.planeSize + endCellId,
+        ]),
+        viaCellIds: Int32Array.from([endCellId]),
+        startPoint,
+        endPoint,
+      },
+    ],
   ]
 
   const [route] = solver.getOutput()
