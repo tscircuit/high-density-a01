@@ -1348,6 +1348,10 @@ export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
       width: this.innerRect.width,
       height: this.innerRect.height,
       availableZ: this.nodeWithPortPoints.availableZ,
+      portPointPairIds: this.nodeWithPortPoints.portPointPairIds?.map(
+        ([startPortPointId, endPortPointId]) =>
+          [startPortPointId, endPortPointId] as [string, string],
+      ),
       portPoints: this.nodeWithPortPoints.portPoints.map((portPoint) => {
         const assigned = assignedByAnchorKey.get(getAnchorKey(portPoint))
         if (!assigned) return portPoint

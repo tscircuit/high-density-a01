@@ -1,6 +1,10 @@
 export type PortPoint = {
   connectionName: string
   rootConnectionName?: string
+  /**
+   * Stable identifier for this endpoint.
+   * Pair-aware solvers use this to resolve `portPointPairIds`.
+   */
   portPointId?: string
   x: number
   y: number
@@ -13,6 +17,15 @@ export type NodeWithPortPoints = {
   width: number
   height: number
   portPoints: PortPoint[]
+  /**
+   * Explicit ordered endpoint pairs for logical route segments.
+   *
+   * Each tuple is `[startPortPointId, endPortPointId]` and references
+   * `portPoints[*].portPointId`. Solvers should prefer this over inferring
+   * segment order from the `portPoints` array and only fall back to positional
+   * pairing for backwards compatibility when ids are unavailable.
+   */
+  portPointPairIds?: [string, string][]
   availableZ?: number[]
 }
 
