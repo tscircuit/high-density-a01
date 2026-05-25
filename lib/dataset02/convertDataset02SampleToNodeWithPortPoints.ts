@@ -1,4 +1,4 @@
-import type { NodeWithPortPoints } from "../types"
+import type { NodeWithPortPoints, PortPointInPair } from "../types"
 
 export type Dataset02Connection = {
   connectionId: string
@@ -79,31 +79,33 @@ export const convertDataset02SampleToNodeWithPortPoints = (
     y: (minY + maxY) / 2,
   }
 
-  const portPoints = sample.connections.flatMap((connection) => {
-    const startRegion = regionById.get(connection.startRegionId)
-    const endRegion = regionById.get(connection.endRegionId)
+  const portPointsInPairs: PortPointInPair[] = sample.connections.map(
+    (connection) => {
+      const startRegion = regionById.get(connection.startRegionId)
+      const endRegion = regionById.get(connection.endRegionId)
 
-    if (!startRegion || !endRegion) {
-      throw new Error(
-        `Missing region for connection ${connection.connectionId}: ${connection.startRegionId} -> ${connection.endRegionId}`,
-      )
-    }
+      if (!startRegion || !endRegion) {
+        throw new Error(
+          `Missing region for connection ${connection.connectionId}: ${connection.startRegionId} -> ${connection.endRegionId}`,
+        )
+      }
 
-    return [
-      {
-        connectionName: connection.connectionId,
-        x: startRegion.d.center.x,
-        y: startRegion.d.center.y,
-        z: availableZ[0] ?? 0,
-      },
-      {
-        connectionName: connection.connectionId,
-        x: endRegion.d.center.x,
-        y: endRegion.d.center.y,
-        z: availableZ[0] ?? 0,
-      },
-    ]
-  })
+      return [
+        {
+          connectionName: connection.connectionId,
+          x: startRegion.d.center.x,
+          y: startRegion.d.center.y,
+          z: availableZ[0] ?? 0,
+        },
+        {
+          connectionName: connection.connectionId,
+          x: endRegion.d.center.x,
+          y: endRegion.d.center.y,
+          z: availableZ[0] ?? 0,
+        },
+      ]
+    },
+  )
 
   return {
     capacityMeshNodeId:
@@ -112,7 +114,7 @@ export const convertDataset02SampleToNodeWithPortPoints = (
     center,
     width,
     height,
-    portPoints,
+    portPointsInPairs,
     availableZ,
   }
 }

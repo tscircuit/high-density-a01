@@ -10,35 +10,39 @@ test("A08 breakout spaces inner-rect ports independently per layer", () => {
     width: 10,
     height: 10,
     availableZ: [0, 1],
-    portPoints: [
-      {
-        connectionName: "right-z0-a",
-        portPointId: "right-z0-a",
-        x: 5,
-        y: -4,
-        z: 0,
-      },
-      {
-        connectionName: "right-z0-b",
-        portPointId: "right-z0-b",
-        x: 5,
-        y: 4,
-        z: 0,
-      },
-      {
-        connectionName: "right-z1-a",
-        portPointId: "right-z1-a",
-        x: 5,
-        y: -4,
-        z: 1,
-      },
-      {
-        connectionName: "right-z1-b",
-        portPointId: "right-z1-b",
-        x: 5,
-        y: 4,
-        z: 1,
-      },
+    portPointsInPairs: [
+      [
+        {
+          connectionName: "right-z0-a",
+          portPointId: "right-z0-a",
+          x: 5,
+          y: -4,
+          z: 0,
+        },
+        {
+          connectionName: "right-z0-b",
+          portPointId: "right-z0-b",
+          x: 5,
+          y: 4,
+          z: 0,
+        },
+      ],
+      [
+        {
+          connectionName: "right-z1-a",
+          portPointId: "right-z1-a",
+          x: 5,
+          y: -4,
+          z: 1,
+        },
+        {
+          connectionName: "right-z1-b",
+          portPointId: "right-z1-b",
+          x: 5,
+          y: 4,
+          z: 1,
+        },
+      ],
     ],
   }
 

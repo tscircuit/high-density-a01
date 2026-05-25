@@ -9,6 +9,7 @@ import { datasetFails03Entries } from "../fixtures/dataset-fails03/dataset-fails
 import { defaultA05Params } from "../lib/default-params"
 import { applyAffineTransformToPoint } from "../lib/gridToAffineTransform"
 import { HighDensitySolverA05 } from "../lib/HighDensitySolverA05/HighDensitySolverA05"
+import { getPortPointsFromNode } from "../lib/types"
 
 type CheckpointReport = {
   label: string
@@ -323,9 +324,9 @@ const report = {
     scenarioName: sample.scenarioName,
     capacityMeshNodeId: sample.capacityMeshNodeId,
     extractedError: sample.error,
-    portCount: sample.nodeWithPortPoints.portPoints.length,
+    portCount: getPortPointsFromNode(sample.nodeWithPortPoints).length,
     rootNetCount: new Set(
-      sample.nodeWithPortPoints.portPoints.map(
+      getPortPointsFromNode(sample.nodeWithPortPoints).map(
         (portPoint) => portPoint.rootConnectionName ?? portPoint.connectionName,
       ),
     ).size,

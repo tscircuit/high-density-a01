@@ -6,6 +6,7 @@ import {
 } from "../../lib/dataset02/convertDataset02SampleToNodeWithPortPoints"
 import { defaultParams } from "../../lib/default-params"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
+import { getPortPointsFromNode } from "../../lib/types"
 
 const dataset02 = dataset02Json as Dataset02Sample[]
 
@@ -23,7 +24,7 @@ test("dataset02 sample001 converts and runs", () => {
     },
   )
 
-  expect(nodeWithPortPoints.portPoints.length).toBe(
+  expect(getPortPointsFromNode(nodeWithPortPoints).length).toBe(
     sample.connections.length * 2,
   )
 

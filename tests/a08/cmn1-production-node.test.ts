@@ -2,13 +2,34 @@ import { expect, setDefaultTimeout, test } from "bun:test"
 import { defaultA08Params, defaultParams } from "../../lib/default-params"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import { HighDensitySolverA08 } from "../../lib/HighDensitySolverA08/HighDensitySolverA08"
-import type { NodeWithPortPoints } from "../../lib/types"
+import type {
+  NodeWithPortPoints,
+  PortPoint,
+  PortPointInPair,
+} from "../../lib/types"
 import {
   findRouteGeometryViolations,
   findSameLayerIntersections,
 } from "../fixtures/validateNoIntersections"
 
 setDefaultTimeout(120_000)
+
+const portPointsToPairs = (portPoints: PortPoint[]): PortPointInPair[] => {
+  const byConnection = new Map<string, PortPoint[]>()
+  for (const portPoint of portPoints) {
+    const list = byConnection.get(portPoint.connectionName) ?? []
+    list.push(portPoint)
+    byConnection.set(portPoint.connectionName, list)
+  }
+
+  const pairs: PortPointInPair[] = []
+  for (const points of byConnection.values()) {
+    for (let index = 0; index < points.length - 1; index++) {
+      pairs.push([points[index]!, points[index + 1]!])
+    }
+  }
+  return pairs
+}
 
 // Derived from the production repro in
 // /Users/seve/Downloads/cmn_1-nodeWithPortPoints (7).json
@@ -20,7 +41,7 @@ const productionCmn1NodeWithPortPoints = {
   },
   width: 4.810175999999999,
   height: 9.940000000000001,
-  portPoints: [
+  portPointsInPairs: portPointsToPairs([
     {
       portPointId: "ce27_pp0_z0::0",
       x: -2.405088,
@@ -165,7 +186,7 @@ const productionCmn1NodeWithPortPoints = {
       connectionName: "source_net_0_mst1",
       rootConnectionName: "source_net_0",
     },
-  ],
+  ]),
   availableZ: [0, 1],
 } satisfies NodeWithPortPoints
 

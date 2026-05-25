@@ -8,7 +8,11 @@ import {
   HighDensitySolverA01,
   type HighDensitySolverA01Props,
 } from "../HighDensitySolverA01/HighDensitySolverA01"
-import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
+import {
+  getPortPointsFromNode,
+  type HighDensityIntraNodeRoute,
+  type NodeWithPortPoints,
+} from "../types"
 import {
   A08_BreakoutSolver,
   HighDensitySolverA08BreakoutSolver,
@@ -263,7 +267,7 @@ export class HighDensitySolverA08 extends BasePipelineSolver<HighDensitySolverA0
     const LAYER_COLORS = ["red", "blue", "orange", "green"]
 
     return {
-      points: this.inputProblem.nodeWithPortPoints.portPoints.map(
+      points: getPortPointsFromNode(this.inputProblem.nodeWithPortPoints).map(
         (portPoint) => ({
           x: portPoint.x,
           y: portPoint.y,
@@ -379,14 +383,14 @@ export class HighDensitySolverA08 extends BasePipelineSolver<HighDensitySolverA0
       }
     }
 
-    const points = this.inputProblem.nodeWithPortPoints.portPoints.map(
-      (portPoint) => ({
-        x: portPoint.x,
-        y: portPoint.y,
-        color: "black",
-        label: portPoint.connectionName,
-      }),
-    )
+    const points = getPortPointsFromNode(
+      this.inputProblem.nodeWithPortPoints,
+    ).map((portPoint) => ({
+      x: portPoint.x,
+      y: portPoint.y,
+      color: "black",
+      label: portPoint.connectionName,
+    }))
 
     return {
       points,

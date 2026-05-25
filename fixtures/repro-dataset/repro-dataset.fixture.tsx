@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { getPortPointsFromNode } from "../../lib/types"
 import { SolverDebugger } from "../components/SolverDebugger"
 import { reproDatasetEntries } from "./repro-dataset"
 
@@ -6,7 +7,7 @@ const A_SERIES_SOLVER_KEYS = ["a01", "a03", "a05"] as const
 
 const getRootNetCount = (entry: (typeof reproDatasetEntries)[number]) =>
   new Set(
-    entry.nodeWithPortPoints.portPoints.map(
+    getPortPointsFromNode(entry.nodeWithPortPoints).map(
       (portPoint) => portPoint.rootConnectionName ?? portPoint.connectionName,
     ),
   ).size
@@ -26,7 +27,7 @@ export default function ReproDatasetFixture() {
     return <div>Repro dataset is empty.</div>
   }
 
-  const portCount = sample.nodeWithPortPoints.portPoints.length
+  const portCount = getPortPointsFromNode(sample.nodeWithPortPoints).length
   const rootNetCount = getRootNetCount(sample)
 
   return (

@@ -4,6 +4,7 @@ setDefaultTimeout(120_000)
 import "graphics-debug/matcher"
 import { defaultA09Params } from "../../../lib/default-params"
 import { HighDensitySolverA09 } from "../../../lib/HighDensitySolverA09/HighDensitySolverA09"
+import { getPortPointsFromNode } from "../../../lib/types"
 import {
   findRouteGeometryViolations,
   findSameLayerIntersections,
@@ -123,6 +124,6 @@ test("sample009 A09 visualize shows active iteration state", () => {
   expect(graphics.title).toContain("connection 1/")
   expect(graphics.texts?.[0]?.text).toContain("active 0/")
   expect(graphics.points?.length ?? 0).toBeGreaterThan(
-    sample009.nodeWithPortPoints.portPoints.length,
+    getPortPointsFromNode(sample009.nodeWithPortPoints).length,
   )
 })

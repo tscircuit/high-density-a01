@@ -1,4 +1,8 @@
-import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "./types"
+import {
+  getPortPointsFromNode,
+  type HighDensityIntraNodeRoute,
+  type NodeWithPortPoints,
+} from "./types"
 
 type RoutePoint = HighDensityIntraNodeRoute["route"][number]
 type ViaPoint = HighDensityIntraNodeRoute["vias"][number]
@@ -945,8 +949,9 @@ const getViaAttractionTarget = (
 ): ViaAttraction => {
   const centerX = (bounds.minX + bounds.maxX) * 0.5
   const centerY = (bounds.minY + bounds.maxY) * 0.5
+  const portPoints = getPortPointsFromNode(sample)
 
-  if (sample.portPoints.length === 0) {
+  if (portPoints.length === 0) {
     return {
       target: {
         x: centerX,
@@ -956,14 +961,14 @@ const getViaAttractionTarget = (
     }
   }
 
-  const portCentroid = sample.portPoints.reduce(
+  const portCentroid = portPoints.reduce(
     (accumulator, portPoint) => ({
       x: accumulator.x + portPoint.x,
       y: accumulator.y + portPoint.y,
     }),
     { x: 0, y: 0 },
   )
-  const inversePortCount = 1 / sample.portPoints.length
+  const inversePortCount = 1 / portPoints.length
   const portCenterX = portCentroid.x * inversePortCount
   const portCenterY = portCentroid.y * inversePortCount
   const halfWidth = Math.max(

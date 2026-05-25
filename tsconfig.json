@@ -25,5 +25,9 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "exclude": [
+    "vendor/high-density-dataset-z04/fixture",
+    "vendor/high-density-dataset-z04/script"
+  ]
 }

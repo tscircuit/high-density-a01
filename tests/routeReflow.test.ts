@@ -44,35 +44,39 @@ test("runForceDirectedRouteReflow keeps routes inside node bounds", () => {
     width: 8,
     height: 8,
     availableZ: [0, 1],
-    portPoints: [
-      {
-        connectionName: "conn00",
-        rootConnectionName: "root00",
-        x: -4,
-        y: -1,
-        z: 0,
-      },
-      {
-        connectionName: "conn00",
-        rootConnectionName: "root00",
-        x: 4,
-        y: 1,
-        z: 0,
-      },
-      {
-        connectionName: "conn01",
-        rootConnectionName: "root01",
-        x: -4,
-        y: 1,
-        z: 1,
-      },
-      {
-        connectionName: "conn01",
-        rootConnectionName: "root01",
-        x: 4,
-        y: -1,
-        z: 1,
-      },
+    portPointsInPairs: [
+      [
+        {
+          connectionName: "conn00",
+          rootConnectionName: "root00",
+          x: -4,
+          y: -1,
+          z: 0,
+        },
+        {
+          connectionName: "conn00",
+          rootConnectionName: "root00",
+          x: 4,
+          y: 1,
+          z: 0,
+        },
+      ],
+      [
+        {
+          connectionName: "conn01",
+          rootConnectionName: "root01",
+          x: -4,
+          y: 1,
+          z: 1,
+        },
+        {
+          connectionName: "conn01",
+          rootConnectionName: "root01",
+          x: 4,
+          y: -1,
+          z: 1,
+        },
+      ],
     ],
   }
 
@@ -134,21 +138,23 @@ test("runForceDirectedRouteReflow pulls vias inward from boundary-heavy routes",
     width: 8,
     height: 8,
     availableZ: [0, 1],
-    portPoints: [
-      {
-        connectionName: "conn00",
-        rootConnectionName: "root00",
-        x: 4,
-        y: 3,
-        z: 0,
-      },
-      {
-        connectionName: "conn00",
-        rootConnectionName: "root00",
-        x: 4,
-        y: -3,
-        z: 1,
-      },
+    portPointsInPairs: [
+      [
+        {
+          connectionName: "conn00",
+          rootConnectionName: "root00",
+          x: 4,
+          y: 3,
+          z: 0,
+        },
+        {
+          connectionName: "conn00",
+          rootConnectionName: "root00",
+          x: 4,
+          y: -3,
+          z: 1,
+        },
+      ],
     ],
   }
 
@@ -187,21 +193,23 @@ test("runForceDirectedRouteReflow relaxes endpoint orthogonal locking near corne
     width: 8,
     height: 8,
     availableZ: [0],
-    portPoints: [
-      {
-        connectionName: "conn00",
-        rootConnectionName: "root00",
-        x: -4,
-        y: endpointY,
-        z: 0,
-      },
-      {
-        connectionName: "conn00",
-        rootConnectionName: "root00",
-        x: 4,
-        y: 0,
-        z: 0,
-      },
+    portPointsInPairs: [
+      [
+        {
+          connectionName: "conn00",
+          rootConnectionName: "root00",
+          x: -4,
+          y: endpointY,
+          z: 0,
+        },
+        {
+          connectionName: "conn00",
+          rootConnectionName: "root00",
+          x: 4,
+          y: 0,
+          z: 0,
+        },
+      ],
     ],
   })
 
@@ -248,35 +256,39 @@ test("runForceDirectedRouteReflow steers vias away from bottom-heavy port distri
     width: 8,
     height: 8,
     availableZ: [0, 1],
-    portPoints: [
-      {
-        connectionName: "conn00",
-        rootConnectionName: "root00",
-        x: -2.5,
-        y: -4,
-        z: 0,
-      },
-      {
-        connectionName: "conn00",
-        rootConnectionName: "root00",
-        x: 2.5,
-        y: -4,
-        z: 1,
-      },
-      {
-        connectionName: "dummy-left",
-        rootConnectionName: "dummy-left",
-        x: -3.5,
-        y: -4,
-        z: 0,
-      },
-      {
-        connectionName: "dummy-right",
-        rootConnectionName: "dummy-right",
-        x: 3.5,
-        y: -4,
-        z: 1,
-      },
+    portPointsInPairs: [
+      [
+        {
+          connectionName: "conn00",
+          rootConnectionName: "root00",
+          x: -2.5,
+          y: -4,
+          z: 0,
+        },
+        {
+          connectionName: "conn00",
+          rootConnectionName: "root00",
+          x: 2.5,
+          y: -4,
+          z: 1,
+        },
+      ],
+      [
+        {
+          connectionName: "dummy-left",
+          rootConnectionName: "dummy-left",
+          x: -3.5,
+          y: -4,
+          z: 0,
+        },
+        {
+          connectionName: "dummy-right",
+          rootConnectionName: "dummy-right",
+          x: 3.5,
+          y: -4,
+          z: 1,
+        },
+      ],
     ],
   }
 
