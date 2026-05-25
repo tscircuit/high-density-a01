@@ -12,6 +12,14 @@ type IndexedPortPoint = {
   portPoint: PortPoint
 }
 
+/**
+ * Creates a defensive copy of explicit port-point pair ids.
+ *
+ * @param portPointPairIds Ordered `[startPortPointId, endPortPointId]` tuples
+ *   to copy.
+ * @returns A new array with cloned tuple entries so callers can mutate the
+ *   result without affecting the source node definition.
+ */
 function clonePortPointPairIds(
   portPointPairIds: [string, string][],
 ): [string, string][] {
@@ -21,6 +29,19 @@ function clonePortPointPairIds(
   )
 }
 
+/**
+ * Filters a node's explicit pair definitions down to the pairs fully contained
+ * in a port-point subset.
+ *
+ * @param nodeWithPortPoints Source of explicit `portPointPairIds`.
+ * @param portPoints Candidate subset whose `portPointId` values should be kept.
+ * @returns The matching pair ids as cloned tuples, or `undefined` when the node
+ *   has no explicit pairs, the subset has no usable ids, or no complete pair is
+ *   fully represented in the subset.
+ *
+ * @note Pair ids are only returned when both endpoints are present in
+ *   `portPoints`.
+ */
 export function getPortPointPairIdsForSubset(
   nodeWithPortPoints: Pick<NodeWithPortPoints, "portPointPairIds">,
   portPoints: Array<Pick<PortPoint, "portPointId">>,
@@ -45,6 +66,24 @@ export function getPortPointPairIdsForSubset(
     : undefined
 }
 
+/**
+ * Resolves logical route segments for a node from explicit pair ids when
+ * available, then falls back to positional pairing for any remaining endpoints.
+ *
+ * @param nodeWithPortPoints Node definition containing port points and
+ *   optional explicit `portPointPairIds`.
+ * @returns Ordered start/end pairs ready for segment construction.
+ *   Explicitly declared pairs are returned first. Any unconsumed points are
+ *   then paired sequentially by `connectionName` in original array order.
+ *
+ * @note Fallback pairing preserves backwards compatibility for nodes that do
+ *   not provide `portPointPairIds`.
+ * @caution Invalid explicit pairs are skipped silently. This includes missing
+ *   ids, duplicate `portPointId` values that make an endpoint ambiguous,
+ *   self-pairs, and pairs that cross different `connectionName` values.
+ * @caution If fallback pairing leaves an odd number of unpaired points for a
+ *   connection, the final point is ignored because it cannot form a segment.
+ */
 export function getNodePortPointPairs(
   nodeWithPortPoints: NodeWithPortPoints,
 ): NodePortPointPair[] {
