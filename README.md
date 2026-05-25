@@ -17,6 +17,12 @@ properties:
 
 ## Usage
 
+Install from GitHub:
+
+```sh
+bun add git+https://github.com/tscircuit/high-density-a01.git
+```
+
 The package exports the solver classes directly:
 
 ```ts
