@@ -32,7 +32,6 @@ function createA01Solver() {
     ...defaultParams,
     nodeWithPortPoints: reproParallelSameConnectionSolvingNodeWithPortPoints,
   })
-  solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
   return solver
 }
@@ -42,7 +41,6 @@ function createA02Solver() {
     ...defaultA02Params,
     nodeWithPortPoints: reproParallelSameConnectionSolvingNodeWithPortPoints,
   })
-  solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
   return solver
 }
@@ -52,7 +50,6 @@ function createA03Solver() {
     ...defaultA03Params,
     nodeWithPortPoints: reproParallelSameConnectionSolvingNodeWithPortPoints,
   })
-  solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
   return solver
 }
@@ -62,7 +59,6 @@ function createA05Solver() {
     ...defaultA05Params,
     nodeWithPortPoints: reproParallelSameConnectionSolvingNodeWithPortPoints,
   })
-  solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
   return solver
 }
@@ -72,7 +68,6 @@ function createA08Solver() {
     ...defaultA08Params,
     nodeWithPortPoints: reproParallelSameConnectionSolvingNodeWithPortPoints,
   })
-  solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
   return solver
 }
@@ -82,7 +77,6 @@ function createA09Solver() {
     ...defaultA09Params,
     nodeWithPortPoints: reproParallelSameConnectionSolvingNodeWithPortPoints,
   })
-  solver.MAX_ITERATIONS = 1_000_000
   solver.solve()
   return solver
 }
