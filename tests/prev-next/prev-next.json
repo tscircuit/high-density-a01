@@ -1,0 +1,44 @@
+{
+  "capacityMeshNodeId": "prev-next-linked-chains",
+  "center": {
+    "x": 0,
+    "y": 0
+  },
+  "width": 10,
+  "height": 10,
+  "availableZ": [0],
+  "portPoints": [
+    {
+      "portPointId": "left-start",
+      "connectionName": "shared-connection",
+      "x": -5,
+      "y": -0.5,
+      "z": 0,
+      "nextPortPointId": "top-left-end"
+    },
+    {
+      "portPointId": "bottom-start",
+      "connectionName": "shared-connection",
+      "x": 0.6,
+      "y": -5,
+      "z": 0,
+      "nextPortPointId": "top-right-end"
+    },
+    {
+      "portPointId": "top-left-end",
+      "connectionName": "shared-connection",
+      "x": -0.5,
+      "y": 5,
+      "z": 0,
+      "prevPortPointId": "left-start"
+    },
+    {
+      "portPointId": "top-right-end",
+      "connectionName": "shared-connection",
+      "x": 1.2,
+      "y": 5,
+      "z": 0,
+      "prevPortPointId": "bottom-start"
+    }
+  ]
+}

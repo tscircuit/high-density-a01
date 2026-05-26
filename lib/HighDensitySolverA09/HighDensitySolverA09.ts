@@ -156,6 +156,7 @@ export class HighDensitySolverA09 extends BaseSolver {
   private activeOrder: ConnectionInfo[] | null = null
   private activeOrderRoutes: HighDensityIntraNodeRoute[] = []
   private activeOrderConnectionIndex = 0
+  private activeOrderFailed = false
   private activeConnection: ConnectionInfo | null = null
   private activeConnectionSolver: HighDensitySolverA03 | null = null
 
@@ -236,6 +237,7 @@ export class HighDensitySolverA09 extends BaseSolver {
     this.activeOrder = null
     this.activeOrderRoutes = []
     this.activeOrderConnectionIndex = 0
+    this.activeOrderFailed = false
     this.activeConnection = null
     this.activeConnectionSolver = null
     this.activeSubSolver = null
@@ -439,6 +441,7 @@ export class HighDensitySolverA09 extends BaseSolver {
     this.activeOrder = order
     this.activeOrderRoutes = []
     this.activeOrderConnectionIndex = 0
+    this.activeOrderFailed = false
   }
 
   private startNextActiveOrderConnection() {
@@ -466,6 +469,7 @@ export class HighDensitySolverA09 extends BaseSolver {
     }
 
     if (this.activeConnectionSolver.failed) {
+      this.activeOrderFailed = true
       this.activeOrderConnectionIndex = this.activeOrder?.length ?? 0
       this.activeConnection = null
       this.activeConnectionSolver = null
@@ -478,14 +482,17 @@ export class HighDensitySolverA09 extends BaseSolver {
     const solver = this.activeConnectionSolver
     if (!connection || !solver) return
 
-    const [route] = solver.getOutput()
-    if (!route) {
+    const routes = solver.getOutput()
+    if (routes.length === 0) {
+      this.activeOrderFailed = true
       this.activeOrderConnectionIndex = this.activeOrder?.length ?? 0
     } else {
-      this.activeOrderRoutes.push({
-        ...route,
-        rootConnectionName: connection.rootConnectionName,
-      })
+      this.activeOrderRoutes.push(
+        ...routes.map((route) => ({
+          ...route,
+          rootConnectionName: connection.rootConnectionName,
+        })),
+      )
       this.activeOrderConnectionIndex += 1
     }
 
@@ -501,7 +508,7 @@ export class HighDensitySolverA09 extends BaseSolver {
     const candidate: CandidateSolution = {
       order: this.activeOrder.map((connection) => connection.connectionName),
       routes,
-      complete: routes.length === this.activeOrder.length,
+      complete: !this.activeOrderFailed,
       intersections: findSameLayerIntersections(routes).length,
       violations: findRouteGeometryViolations(routes).length,
     }
@@ -515,6 +522,7 @@ export class HighDensitySolverA09 extends BaseSolver {
     this.activeOrder = null
     this.activeOrderRoutes = []
     this.activeOrderConnectionIndex = 0
+    this.activeOrderFailed = false
     this.refreshStats()
 
     if (this.isValidCandidate(candidate)) {

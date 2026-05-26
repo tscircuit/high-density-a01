@@ -3,8 +3,13 @@ import {
   type AffineTransform,
   applyAffineTransformToPoint,
 } from "../gridToAffineTransform"
+import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
-import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
+import type {
+  HighDensityIntraNodeRoute,
+  NodeWithPortPoints,
+  PortPoint,
+} from "../types"
 
 type ConnId = number
 
@@ -407,7 +412,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private usedIndicesByConn!: Array<number[] | undefined>
   private unsolvedSegs!: ConnectionSeg[]
-  private solvedRoutes!: Array<SolvedRouteInternal | undefined>
+  private solvedRoutes!: Array<SolvedRouteInternal[] | undefined>
 
   private activeConnSeg: ConnectionSeg | null = null
   private activeConnId: ConnId = -1
@@ -438,10 +443,10 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   get solvedConnectionsMap() {
-    const map = new Map<ConnId, SolvedRouteInternal>()
+    const map = new Map<ConnId, SolvedRouteInternal[]>()
     for (let connId = 0; connId < this.solvedRoutes.length; connId++) {
-      const route = this.solvedRoutes[connId]
-      if (route) map.set(connId, route)
+      const routes = this.getSolvedRoutesForConn(connId)
+      if (routes.length > 0) map.set(connId, routes)
     }
     return map
   }
@@ -1471,7 +1476,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     const byName = new Map<
       string,
       {
-        points: Array<{ x: number; y: number; z: number }>
+        points: PortPoint[]
         rootConnectionName?: string
       }
     >()
@@ -1491,12 +1496,13 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     for (const [name, conn] of byName) {
       const pts = conn.points
-      if (pts.length < 2) continue
+      const pointPairs = getConnectionPortPointPairs(pts)
+      if (pointPairs.length === 0) continue
 
       const connId = this.internConn(name, conn.rootConnectionName)
-      for (let i = 0; i < pts.length - 1; i++) {
-        const s = this.pointToCell(pts[i]!)
-        const e = this.pointToCell(pts[i + 1]!)
+      for (const [startPoint, endPoint] of pointPairs) {
+        const s = this.pointToCell(startPoint)
+        const e = this.pointToCell(endPoint)
 
         const endpointA = `${s.z}:${s.cellId}`
         const endpointB = `${e.z}:${e.cellId}`
@@ -1516,10 +1522,10 @@ export class HighDensitySolverA03 extends BaseSolver {
           connId,
           startZ: s.z,
           startCellId: s.cellId,
-          startPoint: pts[i]!,
+          startPoint,
           endZ: e.z,
           endCellId: e.cellId,
-          endPoint: pts[i + 1]!,
+          endPoint,
         })
       }
     }
@@ -1632,17 +1638,21 @@ export class HighDensitySolverA03 extends BaseSolver {
     while (this.usedIndicesByConn.length <= connId) {
       this.usedIndicesByConn.push(undefined)
     }
-    this.usedIndicesByConn[connId] = indices
+    const usedIndices = this.usedIndicesByConn[connId] ?? []
+    usedIndices.push(...indices)
+    this.usedIndicesByConn[connId] = usedIndices
     while (this.solvedRoutes.length <= connId) {
       this.solvedRoutes.push(undefined)
     }
-    this.solvedRoutes[connId] = {
+    const solvedRoutes = this.solvedRoutes[connId] ?? []
+    solvedRoutes.push({
       connId,
       states: Int32Array.from(states),
       viaCellIds: Int32Array.from(viaCellIds),
       startPoint: this.activeConnSeg!.startPoint,
       endPoint: this.activeConnSeg!.endPoint,
-    }
+    })
+    this.solvedRoutes[connId] = solvedRoutes
 
     for (let i = 0; i < displacedByVias.length; i++) {
       this.ripTrace(displacedByVias[i]!)
@@ -1848,18 +1858,20 @@ export class HighDensitySolverA03 extends BaseSolver {
       return
     }
 
-    const route = this.solvedRoutes[connId]
-    if (route) {
-      for (let i = 0; i < route.states.length; i++) {
-        const state = route.states[i]!
-        const cellId = state % this.planeSize
-        this.penalty2d[cellId] =
-          this.penalty2d[cellId]! + this.hyperParameters.ripTracePenalty
-      }
-      for (let i = 0; i < route.viaCellIds.length; i++) {
-        const cellId = route.viaCellIds[i]!
-        this.penalty2d[cellId] =
-          this.penalty2d[cellId]! + this.hyperParameters.ripViaPenalty
+    const routes = this.getSolvedRoutesForConn(connId)
+    if (routes.length > 0) {
+      for (const route of routes) {
+        for (let i = 0; i < route.states.length; i++) {
+          const state = route.states[i]!
+          const cellId = state % this.planeSize
+          this.penalty2d[cellId] =
+            this.penalty2d[cellId]! + this.hyperParameters.ripTracePenalty
+        }
+        for (let i = 0; i < route.viaCellIds.length; i++) {
+          const cellId = route.viaCellIds[i]!
+          this.penalty2d[cellId] =
+            this.penalty2d[cellId]! + this.hyperParameters.ripViaPenalty
+        }
       }
     }
 
@@ -1871,21 +1883,23 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.usedIndicesByConn[connId] = undefined
     }
 
-    if (route) {
+    if (routes.length > 0) {
       this.solvedRoutes[connId] = undefined
-      const first = route.states[0]!
-      const last = route.states[route.states.length - 1]!
-      const startZ = Math.floor(first / this.planeSize)
-      const endZ = Math.floor(last / this.planeSize)
-      this.unsolvedSegs.push({
-        connId,
-        startZ,
-        startCellId: first - startZ * this.planeSize,
-        startPoint: route.startPoint,
-        endZ,
-        endCellId: last - endZ * this.planeSize,
-        endPoint: route.endPoint,
-      })
+      for (const route of routes) {
+        const first = route.states[0]!
+        const last = route.states[route.states.length - 1]!
+        const startZ = Math.floor(first / this.planeSize)
+        const endZ = Math.floor(last / this.planeSize)
+        this.unsolvedSegs.push({
+          connId,
+          startZ,
+          startCellId: first - startZ * this.planeSize,
+          startPoint: route.startPoint,
+          endZ,
+          endCellId: last - endZ * this.planeSize,
+          endPoint: route.endPoint,
+        })
+      }
     }
   }
 
@@ -2088,49 +2102,60 @@ export class HighDensitySolverA03 extends BaseSolver {
     const result: HighDensityIntraNodeRoute[] = []
 
     for (let connId = 0; connId < this.solvedRoutes.length; connId++) {
-      const route = this.solvedRoutes[connId]
-      if (!route) continue
+      const routes = this.getSolvedRoutesForConn(connId)
+      if (routes.length === 0) continue
       const connName = this.connIdToName[connId]!
-      const points = Array.from(route.states, (state) => {
-        const z = Math.floor(state / this.planeSize)
-        const cellId = state - z * this.planeSize
-        const tp = applyAffineTransformToPoint(t, {
-          x: this.cellCenterX[cellId]!,
-          y: this.cellCenterY[cellId]!,
-        })
-        return {
-          x: tp.x,
-          y: tp.y,
-          z: this.layerToZ.get(z) ?? z,
-        }
-      })
-      if (points.length > 0) {
-        points[0] = { ...route.startPoint }
-        if (points.length > 1) {
-          points[points.length - 1] = { ...route.endPoint }
-        }
-      }
-      result.push({
-        connectionName: connName,
-        traceThickness: this.traceThickness,
-        viaDiameter: this.viaDiameter,
-        route: points,
-        vias: Array.from(route.viaCellIds, (cellId) =>
-          applyAffineTransformToPoint(t, {
+      for (const route of routes) {
+        const points = Array.from(route.states, (state) => {
+          const z = Math.floor(state / this.planeSize)
+          const cellId = state - z * this.planeSize
+          const tp = applyAffineTransformToPoint(t, {
             x: this.cellCenterX[cellId]!,
             y: this.cellCenterY[cellId]!,
-          }),
-        ),
-      })
+          })
+          return {
+            x: tp.x,
+            y: tp.y,
+            z: this.layerToZ.get(z) ?? z,
+          }
+        })
+        if (points.length > 0) {
+          points[0] = { ...route.startPoint }
+          if (points.length > 1) {
+            points[points.length - 1] = { ...route.endPoint }
+          }
+        }
+        result.push({
+          connectionName: connName,
+          traceThickness: this.traceThickness,
+          viaDiameter: this.viaDiameter,
+          route: points,
+          vias: Array.from(route.viaCellIds, (cellId) =>
+            applyAffineTransformToPoint(t, {
+              x: this.cellCenterX[cellId]!,
+              y: this.cellCenterY[cellId]!,
+            }),
+          ),
+        })
+      }
     }
 
     return result
   }
 
+  private getSolvedRoutesForConn(connId: ConnId): SolvedRouteInternal[] {
+    const routes = this.solvedRoutes[connId] as
+      | SolvedRouteInternal[]
+      | SolvedRouteInternal
+      | undefined
+    if (!routes) return []
+    return Array.isArray(routes) ? routes : [routes]
+  }
+
   private getSolvedRouteCount() {
     let count = 0
     for (let i = 0; i < this.solvedRoutes.length; i++) {
-      if (this.solvedRoutes[i]) count++
+      count += this.getSolvedRoutesForConn(i).length
     }
     return count
   }

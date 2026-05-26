@@ -1,0 +1,68 @@
+{
+  "capacityMeshNodeId": "floating-portpoints",
+  "center": {
+    "x": 0,
+    "y": 0
+  },
+  "width": 10,
+  "height": 10,
+  "availableZ": [0],
+  "portPoints": [
+    {
+      "portPointId": "left-start",
+      "x": -5,
+      "y": -0.4,
+      "z": 0,
+      "connectionName": "cosmic-left-chain",
+      "rootConnectionName": "cosmic-left-chain",
+      "nextPortPointId": "left-mid"
+    },
+    {
+      "portPointId": "left-mid",
+      "x": -2.35,
+      "y": 1.2,
+      "z": 0,
+      "connectionName": "cosmic-left-chain",
+      "rootConnectionName": "cosmic-left-chain",
+      "prevPortPointId": "left-start",
+      "nextPortPointId": "top-left"
+    },
+    {
+      "portPointId": "top-left",
+      "x": -1.25,
+      "y": 4.9,
+      "z": 0,
+      "connectionName": "cosmic-left-chain",
+      "rootConnectionName": "cosmic-left-chain",
+      "prevPortPointId": "left-mid"
+    },
+    {
+      "portPointId": "top-right",
+      "x": 1.7,
+      "y": 4.95,
+      "z": 0,
+      "connectionName": "cosmic-right-chain",
+      "rootConnectionName": "cosmic-right-chain",
+      "nextPortPointId": "right-mid"
+    },
+    {
+      "portPointId": "right-mid",
+      "x": 1.2,
+      "y": 0.3,
+      "z": 0,
+      "connectionName": "cosmic-right-chain",
+      "rootConnectionName": "cosmic-right-chain",
+      "prevPortPointId": "top-right",
+      "nextPortPointId": "bottom-end"
+    },
+    {
+      "portPointId": "bottom-end",
+      "x": 0.7,
+      "y": -5,
+      "z": 0,
+      "connectionName": "cosmic-right-chain",
+      "rootConnectionName": "cosmic-right-chain",
+      "prevPortPointId": "right-mid"
+    }
+  ]
+}
