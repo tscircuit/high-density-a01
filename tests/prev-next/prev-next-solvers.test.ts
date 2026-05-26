@@ -99,8 +99,11 @@ for (const [solverName, createSolver] of [
   ["A09", createA09Solver],
 ] as const) {
   test(`${solverName} SVG snapshot`, async () => {
-    await expect(createSolver().visualize()).toMatchGraphicsSvg(import.meta.path, {
-      svgName: solverName,
-    })
+    await expect(createSolver().visualize()).toMatchGraphicsSvg(
+      import.meta.path,
+      {
+        svgName: solverName,
+      },
+    )
   })
 }
