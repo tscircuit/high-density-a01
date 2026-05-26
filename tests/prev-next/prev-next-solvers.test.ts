@@ -19,76 +19,82 @@ import type { NodeWithPortPoints } from "../../lib/types"
 import prevNextLinkedChains from "./prev-next.json"
 
 const nodeWithPortPoints = prevNextLinkedChains as NodeWithPortPoints
+const maxIterations = 1_000_000
 
-const createA01Solver = () => {
-  const solver = new HighDensitySolverA01({
-    ...defaultParams,
-    cellSizeMm: 0.25,
-    nodeWithPortPoints,
-  })
-  solver.MAX_ITERATIONS = 1_000_000
+/**
+ * Runs a solver to completion with a shared high iteration cap for snapshot tests.
+ *
+ * @param solver - Solver instance configured for the current fixture.
+ * @returns The same solver instance after `solve()` finishes.
+ *
+ * @remarks
+ * The shared helper keeps each snapshot case focused on solver-specific parameters.
+ */
+const solveSolver = <TSolver extends { MAX_ITERATIONS: number; solve(): void }>(
+  solver: TSolver,
+) => {
+  solver.MAX_ITERATIONS = maxIterations
   solver.solve()
   return solver
 }
 
-const createA02Solver = () => {
-  const solver = new HighDensitySolverA02({
-    ...defaultA02Params,
-    outerGridCellSize: 0.25,
-    innerGridCellSize: 0.5,
-    nodeWithPortPoints,
-  })
-  solver.MAX_ITERATIONS = 1_000_000
-  solver.solve()
-  return solver
-}
+const createA01Solver = () =>
+  solveSolver(
+    new HighDensitySolverA01({
+      ...defaultParams,
+      cellSizeMm: 0.25,
+      nodeWithPortPoints,
+    }),
+  )
 
-const createA03Solver = () => {
-  const solver = new HighDensitySolverA03({
-    ...defaultA03Params,
-    highResolutionCellSize: 0.25,
-    lowResolutionCellSize: 0.5,
-    nodeWithPortPoints,
-  })
-  solver.MAX_ITERATIONS = 1_000_000
-  solver.solve()
-  return solver
-}
+const createA02Solver = () =>
+  solveSolver(
+    new HighDensitySolverA02({
+      ...defaultA02Params,
+      outerGridCellSize: 0.25,
+      innerGridCellSize: 0.5,
+      nodeWithPortPoints,
+    }),
+  )
 
-const createA05Solver = () => {
-  const solver = new HighDensitySolverA05({
-    ...defaultA05Params,
-    highResolutionCellSize: 0.25,
-    lowResolutionCellSize: 0.5,
-    nodeWithPortPoints,
-  })
-  solver.MAX_ITERATIONS = 1_000_000
-  solver.solve()
-  return solver
-}
+const createA03Solver = () =>
+  solveSolver(
+    new HighDensitySolverA03({
+      ...defaultA03Params,
+      highResolutionCellSize: 0.25,
+      lowResolutionCellSize: 0.5,
+      nodeWithPortPoints,
+    }),
+  )
 
-const createA08Solver = () => {
-  const solver = new HighDensitySolverA08({
-    ...defaultA08Params,
-    cellSizeMm: 0.25,
-    nodeWithPortPoints,
-  })
-  solver.MAX_ITERATIONS = 1_000_000
-  solver.solve()
-  return solver
-}
+const createA05Solver = () =>
+  solveSolver(
+    new HighDensitySolverA05({
+      ...defaultA05Params,
+      highResolutionCellSize: 0.25,
+      lowResolutionCellSize: 0.5,
+      nodeWithPortPoints,
+    }),
+  )
 
-const createA09Solver = () => {
-  const solver = new HighDensitySolverA09({
-    ...defaultA09Params,
-    highResolutionCellSize: 0.25,
-    lowResolutionCellSize: 0.5,
-    nodeWithPortPoints,
-  })
-  solver.MAX_ITERATIONS = 1_000_000
-  solver.solve()
-  return solver
-}
+const createA08Solver = () =>
+  solveSolver(
+    new HighDensitySolverA08({
+      ...defaultA08Params,
+      cellSizeMm: 0.25,
+      nodeWithPortPoints,
+    }),
+  )
+
+const createA09Solver = () =>
+  solveSolver(
+    new HighDensitySolverA09({
+      ...defaultA09Params,
+      highResolutionCellSize: 0.25,
+      lowResolutionCellSize: 0.5,
+      nodeWithPortPoints,
+    }),
+  )
 
 for (const [solverName, createSolver] of [
   ["A01", createA01Solver],
