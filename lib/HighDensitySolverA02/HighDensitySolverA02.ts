@@ -4,7 +4,12 @@ import {
   type AffineTransform,
   applyAffineTransformToPoint,
 } from "../gridToAffineTransform"
-import type { HighDensityIntraNodeRoute, NodeWithPortPoints } from "../types"
+import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
+import type {
+  HighDensityIntraNodeRoute,
+  NodeWithPortPoints,
+  PortPoint,
+} from "../types"
 
 type ConnId = number
 
@@ -1439,7 +1444,7 @@ export class HighDensitySolverA02 extends BaseSolver {
     const byName = new Map<
       string,
       {
-        points: Array<{ x: number; y: number; z: number }>
+        points: PortPoint[]
         rootConnectionName?: string
       }
     >()
@@ -1459,12 +1464,13 @@ export class HighDensitySolverA02 extends BaseSolver {
 
     for (const [name, conn] of byName) {
       const pts = conn.points
-      if (pts.length < 2) continue
+      const pointPairs = getConnectionPortPointPairs(pts)
+      if (pointPairs.length === 0) continue
 
       const connId = this.internConn(name, conn.rootConnectionName)
-      for (let i = 0; i < pts.length - 1; i++) {
-        const s = this.pointToCell(pts[i]!)
-        const e = this.pointToCell(pts[i + 1]!)
+      for (const [startPoint, endPoint] of pointPairs) {
+        const s = this.pointToCell(startPoint)
+        const e = this.pointToCell(endPoint)
 
         const endpointA = `${s.z}:${s.cellId}`
         const endpointB = `${e.z}:${e.cellId}`
