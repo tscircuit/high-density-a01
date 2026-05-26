@@ -445,8 +445,8 @@ export class HighDensitySolverA03 extends BaseSolver {
   get solvedConnectionsMap() {
     const map = new Map<ConnId, SolvedRouteInternal[]>()
     for (let connId = 0; connId < this.solvedRoutes.length; connId++) {
-      const routes = this.solvedRoutes[connId]
-      if (routes) map.set(connId, routes)
+      const routes = this.getSolvedRoutesForConn(connId)
+      if (routes.length > 0) map.set(connId, routes)
     }
     return map
   }
@@ -1858,8 +1858,8 @@ export class HighDensitySolverA03 extends BaseSolver {
       return
     }
 
-    const routes = this.solvedRoutes[connId]
-    if (routes) {
+    const routes = this.getSolvedRoutesForConn(connId)
+    if (routes.length > 0) {
       for (const route of routes) {
         for (let i = 0; i < route.states.length; i++) {
           const state = route.states[i]!
@@ -1883,7 +1883,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.usedIndicesByConn[connId] = undefined
     }
 
-    if (routes) {
+    if (routes.length > 0) {
       this.solvedRoutes[connId] = undefined
       for (const route of routes) {
         const first = route.states[0]!
@@ -2102,8 +2102,8 @@ export class HighDensitySolverA03 extends BaseSolver {
     const result: HighDensityIntraNodeRoute[] = []
 
     for (let connId = 0; connId < this.solvedRoutes.length; connId++) {
-      const routes = this.solvedRoutes[connId]
-      if (!routes) continue
+      const routes = this.getSolvedRoutesForConn(connId)
+      if (routes.length === 0) continue
       const connName = this.connIdToName[connId]!
       for (const route of routes) {
         const points = Array.from(route.states, (state) => {
@@ -2143,10 +2143,19 @@ export class HighDensitySolverA03 extends BaseSolver {
     return result
   }
 
+  private getSolvedRoutesForConn(connId: ConnId): SolvedRouteInternal[] {
+    const routes = this.solvedRoutes[connId] as
+      | SolvedRouteInternal[]
+      | SolvedRouteInternal
+      | undefined
+    if (!routes) return []
+    return Array.isArray(routes) ? routes : [routes]
+  }
+
   private getSolvedRouteCount() {
     let count = 0
     for (let i = 0; i < this.solvedRoutes.length; i++) {
-      count += this.solvedRoutes[i]?.length ?? 0
+      count += this.getSolvedRoutesForConn(i).length
     }
     return count
   }
