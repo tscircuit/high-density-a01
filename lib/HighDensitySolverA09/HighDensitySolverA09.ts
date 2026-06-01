@@ -491,6 +491,8 @@ export class HighDensitySolverA09 extends BaseSolver {
         ...routes.map((route) => ({
           ...route,
           rootConnectionName: connection.rootConnectionName,
+          regionId:
+            route.regionId ?? this.nodeWithPortPoints.capacityMeshNodeId,
         })),
       )
       this.activeOrderConnectionIndex += 1

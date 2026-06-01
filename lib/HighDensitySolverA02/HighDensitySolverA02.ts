@@ -1,10 +1,10 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
 import Flatbush from "flatbush"
+import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
   applyAffineTransformToPoint,
 } from "../gridToAffineTransform"
-import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
@@ -2254,6 +2254,7 @@ export class HighDensitySolverA02 extends BaseSolver {
       for (const route of routes) {
         result.push({
           connectionName: connName,
+          regionId: this.nodeWithPortPoints.capacityMeshNodeId,
           traceThickness: this.traceThickness,
           viaDiameter: this.viaDiameter,
           route: Array.from(route.states, (state) => {
