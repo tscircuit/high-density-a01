@@ -1,9 +1,9 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
   applyAffineTransformToPoint,
 } from "../gridToAffineTransform"
-import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
 import type {
   HighDensityIntraNodeRoute,
@@ -2127,6 +2127,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         }
         result.push({
           connectionName: connName,
+          regionId: this.nodeWithPortPoints.capacityMeshNodeId,
           traceThickness: this.traceThickness,
           viaDiameter: this.viaDiameter,
           route: points,
