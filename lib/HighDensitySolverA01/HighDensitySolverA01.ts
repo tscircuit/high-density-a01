@@ -183,6 +183,10 @@ const DIRS_DR = [-1, -1, -1, 0, 0, 1, 1, 1] as const
 const DIRS_DC = [-1, 0, 1, -1, 1, -1, 0, 1] as const
 
 export class HighDensitySolverA01 extends BaseSolver {
+  override getSolverName(): string {
+    return "HighDensitySolverA01"
+  }
+
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   viaDiameter: number
