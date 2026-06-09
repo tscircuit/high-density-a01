@@ -377,6 +377,10 @@ export interface HighDensitySolverA05Props {
 }
 
 export class HighDensitySolverA05 extends BaseSolver {
+  override getSolverName(): string {
+    return "HighDensitySolverA05"
+  }
+
   nodeWithPortPoints: NodeWithPortPoints
   highResolutionCellSize: number
   highResolutionCellThickness: number
