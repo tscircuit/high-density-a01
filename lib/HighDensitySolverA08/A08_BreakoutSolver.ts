@@ -356,6 +356,10 @@ function groupPathIndexesByLayer(sideState: SideState) {
 }
 
 export class HighDensitySolverA08BreakoutSolver extends BaseSolver {
+  override getSolverName(): string {
+    return "HighDensitySolverA08BreakoutSolver"
+  }
+
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   maxCellCount?: number

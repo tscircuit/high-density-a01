@@ -341,6 +341,10 @@ export interface HighDensitySolverA03Props {
 }
 
 export class HighDensitySolverA03 extends BaseSolver {
+  override getSolverName(): string {
+    return "HighDensitySolverA03"
+  }
+
   nodeWithPortPoints: NodeWithPortPoints
   highResolutionCellSize: number
   highResolutionCellThickness: number

@@ -123,6 +123,10 @@ function computePenaltyMap(
 }
 
 export class HighDensitySolverA01WasmEngine extends BaseSolver {
+  override getSolverName(): string {
+    return "HighDensitySolverA01WasmEngine"
+  }
+
   private props: HighDensitySolverA01WasmEngineProps
   private wasm!: HighDensitySolverA01Wasm
   private gridToBoundsTransform!: AffineTransform

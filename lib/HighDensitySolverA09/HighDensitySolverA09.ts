@@ -119,6 +119,10 @@ function scoreConnection(
 }
 
 export class HighDensitySolverA09 extends BaseSolver {
+  override getSolverName(): string {
+    return "HighDensitySolverA09"
+  }
+
   nodeWithPortPoints: NodeWithPortPoints
   highResolutionCellSize: number
   highResolutionCellThickness: number

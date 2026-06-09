@@ -394,6 +394,10 @@ export interface HighDensitySolverA02Props {
 }
 
 export class HighDensitySolverA02 extends BaseSolver {
+  override getSolverName(): string {
+    return "HighDensitySolverA02"
+  }
+
   nodeWithPortPoints: NodeWithPortPoints
   outerGridCellSize: number
   outerGridCellThickness: number
