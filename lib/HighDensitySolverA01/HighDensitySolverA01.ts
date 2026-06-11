@@ -516,6 +516,34 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
+  release(): void {
+    this.usedCellsFlat = new Int32Array(0)
+    this.portOwnerFlat = new Int32Array(0)
+    this.usedDiagFlat = new Int32Array(0)
+    this.penalty2d = new Float64Array(0)
+    this.visitedStamp = new Uint32Array(0)
+    this.sharedCrossRootPortCells = new Set()
+    this.viaOffsetsDr = new Int32Array(0)
+    this.viaOffsetsDc = new Int32Array(0)
+    this.viaOffsetsLen = 0
+    this.usedIndicesByConn = []
+    this.usedDiagIndicesByConn = []
+    this.unsolvedSegs = []
+    this.activeConnSeg = null
+    this.activeConnId = -1
+    this.crossLayerSearch = false
+    this.nodePool = []
+    this.heap = new MinHeap()
+    this._viaOccs = []
+    this.ripCount = []
+    this.totalRipEvents = 0
+    this.searchIterations = 0
+    this.consecutiveSkips = 0
+    this.penaltyCap = 0
+    this.baseSearchBudgetIters = 0
+    this._moveRipped = null
+  }
+
   private stepOnce(): void {
     // 1. If no active connection, dequeue next
     if (!this.activeConnSeg) {

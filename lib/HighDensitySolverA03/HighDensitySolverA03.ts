@@ -701,6 +701,49 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
   }
 
+  release(): void {
+    this.cellCenterX = new Float64Array(0)
+    this.cellCenterY = new Float64Array(0)
+    this.cellMinX = new Float64Array(0)
+    this.cellMinY = new Float64Array(0)
+    this.cellMaxX = new Float64Array(0)
+    this.cellMaxY = new Float64Array(0)
+    this.cellWidth = new Float64Array(0)
+    this.cellHeight = new Float64Array(0)
+    this.cellRegion = new Uint8Array(0)
+    this.cellRow = new Int32Array(0)
+    this.cellCol = new Int32Array(0)
+    this.viaAllowed = new Uint8Array(0)
+    this.neighborOffset = new Int32Array(0)
+    this.neighborIds = new Int32Array(0)
+    this.neighborCosts = new Float32Array(0)
+    this.usedCellsFlat = new Int32Array(0)
+    this.sharedCellsFlat = []
+    this.portOwnerFlat = new Int32Array(0)
+    this.penalty2d = new Float64Array(0)
+    this.visitedStamp = new Uint32Array(0)
+    this.bestGStamp = new Uint32Array(0)
+    this.bestGValue = new Float64Array(0)
+    this.visitedFlatStamp = new Uint32Array(0)
+    this.sharedCrossRootPortFlat = new Uint8Array(0)
+    this.usedIndicesByConn = []
+    this.unsolvedSegs = []
+    this.activeConnSeg = null
+    this.activeConnId = -1
+    this.nodePool = new TypedNodePool()
+    this.heap = new TypedMinHeap()
+    this.ripChain = new TypedRipChain()
+    this._viaOccs = []
+    this._cellOccs = []
+    this._rippedIds = []
+    this.ripCount = []
+    this.totalRipEvents = 0
+    this.searchIterations = 0
+    this.consecutiveSkips = 0
+    this.penaltyCap = 0
+    this.baseSearchBudgetIters = 0
+  }
+
   private buildFiveRegionGrid(width: number, height: number) {
     this.fineCols = Math.max(1, Math.ceil(width / this.highResolutionCellSize))
     this.fineRows = Math.max(1, Math.ceil(height / this.highResolutionCellSize))
