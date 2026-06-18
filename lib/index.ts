@@ -16,5 +16,10 @@ export {
   HighDensitySolverA08BreakoutSolver,
 } from "./HighDensitySolverA08/HighDensitySolverA08"
 export { HighDensitySolverA09 } from "./HighDensitySolverA09/HighDensitySolverA09"
+export {
+  HighDensitySolverA10,
+  type HighDensitySolverA10Props,
+  type SimpleRouteJsonRectObstacle,
+} from "./HighDensitySolverA10/HighDensitySolverA10"
 export * from "./routeGeometryValidation"
 export * from "./types"
