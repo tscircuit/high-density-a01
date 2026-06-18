@@ -2,7 +2,7 @@
   "name": "@tscircuit/high-density-a01",
   "module": "lib/index.ts",
   "type": "module",
-  "version": "0.0.36",
+  "version": "0.0.37",
   "exports": {
     ".": {
       "import": "./lib/index.ts",
