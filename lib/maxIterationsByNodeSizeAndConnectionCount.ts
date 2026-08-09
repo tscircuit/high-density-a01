@@ -8,8 +8,11 @@ export interface MaxIterationsByNodeSizeAndConnectionCountInput {
 
 export interface MaxIterationsByNodeSizeAndConnectionCountResult {
   maxIterationsIters: number
+  maxProgressExtendedIterationsIters: number
   baseSearchBudgetIters: number
 }
+
+const MAX_COMPUTED_ITERATIONS = 12_000_000
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
@@ -26,12 +29,12 @@ export function computeMaxIterationsByNodeSizeAndConnectionCount(
   const baseComputedMaxIterations = clamp(
     Math.round(states * (8 + 1.2 * connectionFactor)),
     150_000,
-    12_000_000,
+    MAX_COMPUTED_ITERATIONS,
   )
   const computedMaxIters = clamp(
     Math.round(baseComputedMaxIterations * input.effort),
     150_000,
-    12_000_000,
+    MAX_COMPUTED_ITERATIONS,
   )
   const minIterationBudgetIters = clamp(
     Math.round(requestedMaxIterations * 0.2),
@@ -53,6 +56,10 @@ export function computeMaxIterationsByNodeSizeAndConnectionCount(
 
   return {
     maxIterationsIters,
+    maxProgressExtendedIterationsIters: Math.min(
+      requestedMaxIterations,
+      MAX_COMPUTED_ITERATIONS,
+    ),
     baseSearchBudgetIters,
   }
 }

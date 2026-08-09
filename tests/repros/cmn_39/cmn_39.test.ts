@@ -169,16 +169,17 @@ test("cmn_39 A08 starts with the breakout pipeline stage", () => {
   expect(solver.innerSolver).toBeNull()
 })
 
-test("cmn_39 comparison logs A01 failing vs A08 solving", () => {
+test("cmn_39 comparison logs valid A01 and A08 solutions", () => {
   const a01Solver = getA01Solver()
   const a08Solver = getA08Solver()
+  const a01Routes = a01Solver.getOutput()
 
   console.log("A01", {
     solved: a01Solver.solved,
     failed: a01Solver.failed,
     error: a01Solver.error,
     iterations: a01Solver.iterations,
-    routes: a01Solver.getOutput().length,
+    routes: a01Routes.length,
     gridStats: a01Solver.gridStats,
   })
 
@@ -193,8 +194,10 @@ test("cmn_39 comparison logs A01 failing vs A08 solving", () => {
     breakoutStats: a08Solver.breakoutSolver?.stats,
   })
 
-  expect(a01Solver.solved).toBeFalse()
-  expect(a01Solver.failed).toBeTrue()
+  expect(a01Solver.solved).toBeTrue()
+  expect(a01Solver.failed).toBeFalse()
+  validateNoIntersections(a01Routes)
+  validateRouteGeometry(a01Routes)
   expect(a08Solver.solved).toBeTrue()
   expect(a08Solver.failed).toBeFalse()
   expect(a08Solver.iterations).toBeGreaterThan(0)

@@ -14,6 +14,8 @@ import type {
 
 // --- Interned connection ID ---
 type ConnId = number
+type RootNetName = string
+type EndpointKey = string
 
 // --- Persistent ripped-trace linked list ---
 interface RippedNode {
@@ -181,6 +183,7 @@ export interface HighDensitySolverA01Props {
 // Static direction offsets for 8-connected neighbor expansion
 const DIRS_DR = [-1, -1, -1, 0, 0, 1, 1, 1] as const
 const DIRS_DC = [-1, 0, 1, -1, 1, -1, 0, 1] as const
+const PROGRESS_STALL_SEARCH_BUDGETS = 2
 
 export class HighDensitySolverA01 extends BaseSolver {
   override getSolverName(): string {
@@ -226,6 +229,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private portOwnerFlat!: Int32Array // layers * planeSize; -1 = none, -2 = shared
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
+  private tracePenalty3d!: Float64Array // layers * planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
@@ -267,6 +271,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   private consecutiveSkips = 0
   private penaltyCap!: number
   private baseSearchBudgetIters!: number
+  private maxProgressExtendedIterationsIters!: number
+  private bestSolvedSegmentCount = 0
 
   // --- Reusable scratch for computeMoveCostAndRips ---
   private _moveCost = 0
@@ -400,6 +406,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Flat penalty map (Float64Array is zero-initialized)
     this.penalty2d = new Float64Array(this.planeSize)
+    this.tracePenalty3d = new Float64Array(totalCells)
     if (this.initialPenaltyFn) {
       for (let row = 0; row < this.rows; row++) {
         const rowBase = row * this.cols
@@ -499,6 +506,9 @@ export class HighDensitySolverA01 extends BaseSolver {
       maxIterations: this.MAX_ITERATIONS,
     })
     this.baseSearchBudgetIters = budget.baseSearchBudgetIters
+    this.maxProgressExtendedIterationsIters =
+      budget.maxProgressExtendedIterationsIters
+    this.bestSolvedSegmentCount = 0
     this.MAX_ITERATIONS = budget.maxIterationsIters
 
     // A* state
@@ -570,6 +580,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       const pen = this.penalty2d
       for (let i = 0; i < pen.length; i++) {
         pen[i] = pen[i]! * 0.9
+      }
+      const tracePen = this.tracePenalty3d
+      for (let i = 0; i < tracePen.length; i++) {
+        tracePen[i] = tracePen[i]! * 0.9
       }
       this.unsolvedSegs.push(this.activeConnSeg!)
       this.activeConnSeg = null
@@ -715,9 +729,11 @@ export class HighDensitySolverA01 extends BaseSolver {
     if (fromZ !== toZ) {
       // Via transition
       cost += this.hyperParameters.viaBaseCost
-      cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
-
       const toFlatIdx = (toZ * this.rows + toRow) * cols + toCol
+      cost += Math.min(
+        this.penalty2d[toRow * cols + toCol]! + this.tracePenalty3d[toFlatIdx]!,
+        this.penaltyCap,
+      )
       const fixedOwner = this.portOwnerFlat[toFlatIdx]!
       const fixedSameRoot =
         this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
@@ -757,9 +773,11 @@ export class HighDensitySolverA01 extends BaseSolver {
       const dr = fromRow > toRow ? fromRow - toRow : toRow - fromRow
       const dc = fromCol > toCol ? fromCol - toCol : toCol - fromCol
       cost += (dr + dc > 1 ? Math.SQRT2 : 1) * this.cellSizeMm
-      cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
-
       const flatIdx = (toZ * this.rows + toRow) * cols + toCol
+      cost += Math.min(
+        this.penalty2d[toRow * cols + toCol]! + this.tracePenalty3d[flatIdx]!,
+        this.penaltyCap,
+      )
       const fixedOwner = this.portOwnerFlat[flatIdx]!
       const fixedSameRoot =
         this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
@@ -971,6 +989,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     const segs: ConnectionSeg[] = []
     const seenSegmentKeys = new Set<string>()
+    const seenEndpointKeysByNet = new Map<RootNetName, Set<EndpointKey>>()
 
     for (const [name, conn] of byName) {
       const pts = conn.points
@@ -996,6 +1015,17 @@ export class HighDensitySolverA01 extends BaseSolver {
         }
         seenSegmentKeys.add(segKey)
 
+        const seenEndpointKeys = seenEndpointKeysByNet.get(netName) ?? new Set()
+        if (
+          seenEndpointKeys.has(endpointA) ||
+          seenEndpointKeys.has(endpointB)
+        ) {
+          this.overlapFriendlyRootNets.add(netName)
+        }
+        seenEndpointKeys.add(endpointA)
+        seenEndpointKeys.add(endpointB)
+        seenEndpointKeysByNet.set(netName, seenEndpointKeys)
+
         segs.push({
           connId,
           startZ: s.z,
@@ -1017,18 +1047,23 @@ export class HighDensitySolverA01 extends BaseSolver {
     row: number
     col: number
   } {
+    const { width, height } = this.nodeWithPortPoints
     const col = Math.max(
       0,
       Math.min(
         this.cols - 1,
-        Math.round((pt.x - this.gridOrigin.x) / this.cellSizeMm - 0.5),
+        this.cols > 1
+          ? Math.round(((pt.x - this.gridOrigin.x) / width) * (this.cols - 1))
+          : 0,
       ),
     )
     const row = Math.max(
       0,
       Math.min(
         this.rows - 1,
-        Math.round((pt.y - this.gridOrigin.y) / this.cellSizeMm - 0.5),
+        this.rows > 1
+          ? Math.round(((pt.y - this.gridOrigin.y) / height) * (this.rows - 1))
+          : 0,
       ),
     )
     const z = this.zToLayer.get(pt.z) ?? 0
@@ -1263,11 +1298,15 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Penalty decay to prevent death spiral
     if (rippedIds.length > 0 || displacedByVias.length > 0) {
       const pen = this.penalty2d
+      const tracePen = this.tracePenalty3d
       const cap = this.penaltyCap
       if (this.totalRipEvents > 50) {
         // High-contention mode: global decay to help stuck connections converge
         for (let i = 0; i < pen.length; i++) {
           pen[i] = pen[i]! * 0.99
+        }
+        for (let i = 0; i < tracePen.length; i++) {
+          tracePen[i] = tracePen[i]! * 0.99
         }
       } else {
         // Normal mode: targeted decay only for above-cap cells
@@ -1276,7 +1315,27 @@ export class HighDensitySolverA01 extends BaseSolver {
             pen[i] = pen[i]! * 0.5
           }
         }
+        for (let i = 0; i < tracePen.length; i++) {
+          if (tracePen[i]! > cap) {
+            tracePen[i] = tracePen[i]! * 0.5
+          }
+        }
       }
+    }
+
+    let solvedSegmentCount = 0
+    for (const routes of this.solvedRoutes.values()) {
+      solvedSegmentCount += routes.length
+    }
+    if (solvedSegmentCount > this.bestSolvedSegmentCount) {
+      this.bestSolvedSegmentCount = solvedSegmentCount
+      const progressDeadline =
+        this.iterations +
+        this.baseSearchBudgetIters * PROGRESS_STALL_SEARCH_BUDGETS
+      this.MAX_ITERATIONS = Math.max(
+        this.MAX_ITERATIONS,
+        Math.min(progressDeadline, this.maxProgressExtendedIterationsIters),
+      )
     }
   }
 
@@ -1299,9 +1358,9 @@ export class HighDensitySolverA01 extends BaseSolver {
       for (const route of routes) {
         for (let i = 0; i < route.cells.length; i++) {
           const cell = route.cells[i]!
-          const cellIdx = cell.row * cols + cell.col
-          this.penalty2d[cellIdx] =
-            this.penalty2d[cellIdx]! + this.hyperParameters.ripTracePenalty
+          const cellIdx = (cell.z * this.rows + cell.row) * cols + cell.col
+          this.tracePenalty3d[cellIdx] =
+            this.tracePenalty3d[cellIdx]! + this.hyperParameters.ripTracePenalty
         }
         for (let i = 0; i < route.viaCells.length; i++) {
           const via = route.viaCells[i]!
