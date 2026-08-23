@@ -1608,12 +1608,20 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
     states.reverse()
 
+    // Preserve terminal layer transitions so endpoint snapping cannot turn them
+    // into a lateral layer change without a via.
     while (states.length > 1) {
       if (!this.sharedCrossRootPortFlat[states[0]!]!) break
+      const startZ = Math.floor(states[0]! / this.planeSize)
+      const nextZ = Math.floor(states[1]! / this.planeSize)
+      if (startZ !== nextZ) break
       states.shift()
     }
     while (states.length > 1) {
       if (!this.sharedCrossRootPortFlat[states[states.length - 1]!]!) break
+      const previousZ = Math.floor(states[states.length - 2]! / this.planeSize)
+      const endZ = Math.floor(states[states.length - 1]! / this.planeSize)
+      if (previousZ !== endZ) break
       states.pop()
     }
 
