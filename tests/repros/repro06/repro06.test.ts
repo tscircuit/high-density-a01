@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test"
+import "bun-match-svg"
+import { getSvgFromGraphicsObject } from "graphics-debug"
 import { defaultA03Params } from "../../../lib/default-params"
 import { HighDensitySolverA03 } from "../../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import nodeWithPortPoints from "./repro06.json"
 
 const POSITION_EPSILON = 1e-6
 
-test("A03 preserves terminal layers when trimming shared port cells", () => {
+test("A03 preserves terminal layers when trimming shared port cells", async () => {
   const solver = new HighDensitySolverA03({
     ...defaultA03Params,
     traceMargin: 0.1,
@@ -43,4 +45,7 @@ test("A03 preserves terminal layers when trimming shared port cells", () => {
       ),
     ).toBeTrue()
   }
+
+  const svg = getSvgFromGraphicsObject(solver.visualize())
+  await expect(svg).toMatchSvgSnapshot(import.meta.path)
 })
