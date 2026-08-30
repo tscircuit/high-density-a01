@@ -27,21 +27,26 @@ The package exports the solver classes directly:
 
 ```ts
 import {
-  HighDensitySolverA01FineGrid,
   HighDensitySolverA03,
   HighDensitySolverA05,
+  HighDensitySolverA11,
 } from "@tscircuit/high-density-a01"
 ```
 
-### A01 fine grid
+### A11
 
-Use `HighDensitySolverA01FineGrid` to retry dense nodes at their original
-bounds instead of enlarging the node. It derives one deterministic grid size
-from the configured trace and via dimensions; it does not grow or shrink the
-input node.
+Use `HighDensitySolverA11` for an A01-derived fine-grid solver that retries
+dense nodes at their original bounds instead of enlarging the node. It derives
+one deterministic grid size from the configured trace and via dimensions; it
+does not grow or shrink the input node.
+
+The grid pitch is
+`min(0.05, traceThickness / 2, traceMargin / 2, viaDiameter / 6)`. This exposes
+narrow routing corridors and via locations that A01's coarser 0.1 mm grid can
+alias away, at the cost of more grid cells and A* search work.
 
 ```ts
-const solver = new HighDensitySolverA01FineGrid({
+const solver = new HighDensitySolverA11({
   nodeWithPortPoints,
   traceThickness: 0.1,
   traceMargin: 0.15,
@@ -73,7 +78,7 @@ six of the 27 native-bound problems in
 
 All six outputs pass exact route-geometry validation without growing the input
 node. They are covered by native-bounds regressions under
-`tests/repros/dataset-hd30-a01-fine-grid/`.
+`tests/repros/dataset-hd30-a11/`.
 
 ### A03
 
@@ -184,7 +189,7 @@ work.
 Useful benchmark commands:
 
 ```sh
-./benchmark.sh --solver A01,A01_FINE --concurrency=4
+./benchmark.sh --solver A01,A11 --concurrency=4
 bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
 bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4
 ```

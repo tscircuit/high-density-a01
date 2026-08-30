@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { HighDensitySolverA01FineGrid } from "../../../lib/HighDensitySolverA01FineGrid/HighDensitySolverA01FineGrid"
+import { HighDensitySolverA11 } from "../../../lib/HighDensitySolverA11/HighDensitySolverA11"
 import type { NodeWithPortPoints } from "../../../lib/types"
 import { findRouteGeometryViolations } from "../../fixtures/validateNoIntersections"
 import cmn279 from "./sample002-cmn_279.json"
@@ -54,9 +54,9 @@ function isSamePoint(
 }
 
 for (const testCase of cases) {
-  test(`A01 fine grid solves ${testCase.id} at native bounds`, () => {
+  test(`A11 solves ${testCase.id} at native bounds`, () => {
     const originalNode = structuredClone(testCase.nodeWithPortPoints)
-    const solver = new HighDensitySolverA01FineGrid({
+    const solver = new HighDensitySolverA11({
       nodeWithPortPoints: testCase.nodeWithPortPoints,
       viaDiameter: 0.3,
       viaMinDistFromBorder: 0.15,

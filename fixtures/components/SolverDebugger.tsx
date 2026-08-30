@@ -5,9 +5,9 @@ import {
   type HighDensitySolverA01Props,
 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import {
-  HighDensitySolverA01FineGrid,
-  type HighDensitySolverA01FineGridProps,
-} from "../../lib/HighDensitySolverA01FineGrid/HighDensitySolverA01FineGrid"
+  HighDensitySolverA11,
+  type HighDensitySolverA11Props,
+} from "../../lib/HighDensitySolverA11/HighDensitySolverA11"
 import {
   HighDensitySolverA02,
   type HighDensitySolverA02Props,
@@ -38,40 +38,38 @@ import {
 } from "../../lib/default-params"
 import type { NodeWithPortPoints } from "../../lib/types"
 
-type SolverKey = "a01" | "a01fine" | "a02" | "a03" | "a05" | "a08" | "a09"
+type SolverKey = "a01" | "a02" | "a03" | "a05" | "a08" | "a09" | "a11"
 type SolverPropsByKey = {
   a01: Partial<Omit<HighDensitySolverA01Props, "nodeWithPortPoints">>
-  a01fine: Partial<
-    Omit<HighDensitySolverA01FineGridProps, "nodeWithPortPoints">
-  >
   a02: Partial<Omit<HighDensitySolverA02Props, "nodeWithPortPoints">>
   a03: Partial<Omit<HighDensitySolverA03Props, "nodeWithPortPoints">>
   a05: Partial<Omit<HighDensitySolverA05Props, "nodeWithPortPoints">>
   a08: Partial<Omit<HighDensitySolverA08Props, "nodeWithPortPoints">>
   a09: Partial<Omit<HighDensitySolverA09Props, "nodeWithPortPoints">>
+  a11: Partial<Omit<HighDensitySolverA11Props, "nodeWithPortPoints">>
 }
 
 const STORAGE_KEY = "high-density:selected-solver"
 
 const SOLVER_OPTIONS: Array<{ label: string; value: SolverKey }> = [
   { label: "A01", value: "a01" },
-  { label: "A01 Fine", value: "a01fine" },
   { label: "A02", value: "a02" },
   { label: "A03", value: "a03" },
   { label: "A05", value: "a05" },
   { label: "A08", value: "a08" },
   { label: "A09", value: "a09" },
+  { label: "A11", value: "a11" },
 ]
 const ALL_SOLVER_KEYS = SOLVER_OPTIONS.map((option) => option.value)
 
 const isSolverKey = (value: string | null): value is SolverKey =>
   value === "a01" ||
-  value === "a01fine" ||
   value === "a02" ||
   value === "a03" ||
   value === "a05" ||
   value === "a08" ||
-  value === "a09"
+  value === "a09" ||
+  value === "a11"
 
 const getInitialSolverKey = (fallback: SolverKey) => {
   if (typeof window === "undefined") return fallback
@@ -163,17 +161,6 @@ export function SolverDebugger({
                   ...solverPropOverrides?.a01,
                 }),
               )
-            case "a01fine":
-              return prepareSolver(
-                new HighDensitySolverA01FineGrid({
-                  nodeWithPortPoints,
-                  viaDiameter: defaultParams.viaDiameter,
-                  viaMinDistFromBorder: defaultParams.viaMinDistFromBorder,
-                  traceMargin: defaultParams.traceMargin,
-                  traceThickness: defaultParams.traceThickness,
-                  ...solverPropOverrides?.a01fine,
-                }),
-              )
             case "a02":
               return prepareSolver(
                 new HighDensitySolverA02({
@@ -212,6 +199,17 @@ export function SolverDebugger({
                   ...defaultA09Params,
                   nodeWithPortPoints,
                   ...solverPropOverrides?.a09,
+                }),
+              )
+            case "a11":
+              return prepareSolver(
+                new HighDensitySolverA11({
+                  nodeWithPortPoints,
+                  viaDiameter: defaultParams.viaDiameter,
+                  viaMinDistFromBorder: defaultParams.viaMinDistFromBorder,
+                  traceMargin: defaultParams.traceMargin,
+                  traceThickness: defaultParams.traceThickness,
+                  ...solverPropOverrides?.a11,
                 }),
               )
           }

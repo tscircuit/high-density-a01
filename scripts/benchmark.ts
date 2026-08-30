@@ -50,7 +50,7 @@ Typical flow:
   ./benchmark.sh --solver A01,A03 --limit=100
 
 Options:
-  --solver LIST         Required. Comma-separated solver list: A01,A01_FINE,A02,A03,A05,A08
+  --solver LIST         Required. Comma-separated solver list: A01,A02,A03,A05,A08,A11
   --concurrency N       Number of worker loops per solver run (default: 4)
   --limit N             Only run first N problems
   --mode MODE           Optional shared mode: default|repro|fast|strict
@@ -61,29 +61,29 @@ Options:
 
 const SOLVER_LABELS: Record<Z04SolverKey, string> = {
   a01: "HighDensitySolverA01",
-  a01fine: "HighDensitySolverA01FineGrid",
   a02: "HighDensitySolverA02",
   a03: "HighDensitySolverA03",
   a05: "HighDensitySolverA05",
   a08: "HighDensitySolverA08",
+  a11: "HighDensitySolverA11",
 }
 
 const CLI_TO_SOLVER_KEY: Record<string, Z04SolverKey> = {
   A01: "a01",
-  A01_FINE: "a01fine",
   A02: "a02",
   A03: "a03",
   A05: "a05",
   A08: "a08",
+  A11: "a11",
 }
 
 const MODE_COMPATIBILITY: Record<Z04SolverKey, readonly Z04SolverMode[]> = {
   a01: [],
-  a01fine: [],
   a02: ["fast", "strict"],
   a03: ["default", "repro"],
   a05: ["default", "repro"],
   a08: [],
+  a11: [],
 }
 
 function parsePositiveInteger(rawValue: string, optionName: string): number {
