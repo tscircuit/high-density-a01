@@ -58,6 +58,23 @@ if (solver.solved) {
 The fine-grid solver checks segment-to-via clearance in output coordinates and
 rejects solved outputs that fail exact geometry validation.
 
+At Pipeline 9 copper dimensions, seed 0, and a 100,000-iteration cap, it solves
+six of the 27 native-bound problems in
+[`tscircuit/dataset-hd30`](https://github.com/tscircuit/dataset-hd30):
+
+| Node | Iterations |
+| --- | ---: |
+| `sample002-cmn_279` | 303 |
+| `sample004-cmn_117` | 2,794 |
+| `sample007-cmn_345__sub_0_2` | 245 |
+| `sample007-cmn_345__sub_0_0` | 79 |
+| `sample008-cmn_447` | 4,884 |
+| `sample008-cmn_438` | 1,828 |
+
+All six outputs pass exact route-geometry validation without growing the input
+node. They are covered by native-bounds regressions under
+`tests/repros/dataset-hd30-a01-fine-grid/`.
+
 ### A03
 
 Use `HighDensitySolverA03` for the baseline high-density solver:
