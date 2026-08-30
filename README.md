@@ -30,6 +30,7 @@ import {
   HighDensitySolverA03,
   HighDensitySolverA05,
   HighDensitySolverA11,
+  HighDensitySolverA12,
 } from "@tscircuit/high-density-a01"
 ```
 
@@ -79,6 +80,56 @@ six of the 27 native-bound problems in
 All six outputs pass exact route-geometry validation without growing the input
 node. They are covered by native-bounds regressions under
 `tests/repros/dataset-hd30-a11/`.
+
+### A12
+
+Use `HighDensitySolverA12` when A11's uniform fine grid creates too many search
+states. A12 applies the same feature-derived fine pitch to a 16-cell perimeter
+band, uses cells four times larger in the middle, and enables diagonal moves on
+A03's five-region graph. Set `fineGridCellThickness` to tune the fine perimeter
+width for a particular portfolio.
+
+```ts
+const solver = new HighDensitySolverA12({
+  nodeWithPortPoints,
+  traceThickness: 0.1,
+  traceMargin: 0.15,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+  fineGridCellThickness: 16,
+})
+
+solver.solve()
+if (solver.solved) {
+  const routes = solver.getOutput()
+}
+```
+
+A12 preserves the exact supplied endpoints and rejects completed routes that
+fail exact geometry validation. At Pipeline 9 dimensions, seed 0, and a
+100,000-iteration cap, it solves eight native-bound dataset-hd30 problems:
+
+| Node | Iterations |
+| --- | ---: |
+| `sample003-cmn_70` | 265 |
+| `sample004-topology_merge_639` | 14,478 |
+| `sample005-cmn_45` | 373 |
+| `sample007-cmn_345__sub_0_0` | 49 |
+| `sample007-cmn_345__sub_0_2` | 149 |
+| `sample008-cmn_251` | 1,067 |
+| `sample008-cmn_438` | 38,206 |
+| `sample016-cmn_31` | 306 |
+
+Five of these are new beyond A11, giving the two-solver portfolio 11
+native-bounds solves.
+
+Together, the A12 graphs allocate 44.1% as many search states as A11 across all
+27 dataset-hd30 nodes. On the largest grid, A12 uses 27.5% as many states. The
+reduction is concentrated in the larger nodes; narrow nodes whose perimeter
+bands meet in the middle remain fully fine-grid.
+Because diagonal-edge conflicts are checked by the final geometry gate rather
+than repaired during search, A12 is currently best used as a complementary
+portfolio stage alongside A11.
 
 ### A03
 
@@ -189,7 +240,7 @@ work.
 Useful benchmark commands:
 
 ```sh
-./benchmark.sh --solver A01,A11 --concurrency=4
+./benchmark.sh --solver A01,A11,A12 --concurrency=4
 bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
 bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4
 ```

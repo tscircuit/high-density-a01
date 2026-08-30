@@ -4,6 +4,7 @@ import { HighDensitySolverA03 } from "../lib/HighDensitySolverA03/HighDensitySol
 import { HighDensitySolverA05 } from "../lib/HighDensitySolverA05/HighDensitySolverA05"
 import { HighDensitySolverA08 } from "../lib/HighDensitySolverA08/HighDensitySolverA08"
 import { HighDensitySolverA11 } from "../lib/HighDensitySolverA11/HighDensitySolverA11"
+import { HighDensitySolverA12 } from "../lib/HighDensitySolverA12/HighDensitySolverA12"
 import {
   defaultA02Params,
   defaultA03Params,
@@ -68,6 +69,14 @@ const createSolver = (
       })
     case "a11":
       return new HighDensitySolverA11({
+        viaDiameter: defaultParams.viaDiameter,
+        viaMinDistFromBorder: defaultParams.viaMinDistFromBorder,
+        traceMargin: defaultParams.traceMargin,
+        traceThickness: defaultParams.traceThickness,
+        nodeWithPortPoints,
+      })
+    case "a12":
+      return new HighDensitySolverA12({
         viaDiameter: defaultParams.viaDiameter,
         viaMinDistFromBorder: defaultParams.viaMinDistFromBorder,
         traceMargin: defaultParams.traceMargin,
