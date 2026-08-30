@@ -29,8 +29,56 @@ The package exports the solver classes directly:
 import {
   HighDensitySolverA03,
   HighDensitySolverA05,
+  HighDensitySolverA11,
 } from "@tscircuit/high-density-a01"
 ```
+
+### A11
+
+Use `HighDensitySolverA11` for an A01-derived fine-grid solver that retries
+dense nodes at their original bounds instead of enlarging the node. It derives
+one deterministic grid size from the configured trace and via dimensions; it
+does not grow or shrink the input node.
+
+The grid pitch is
+`min(0.05, traceThickness / 2, traceMargin / 2, viaDiameter / 6)`. This exposes
+narrow routing corridors and via locations that A01's coarser 0.1 mm grid can
+alias away, at the cost of more grid cells and A* search work.
+
+```ts
+const solver = new HighDensitySolverA11({
+  nodeWithPortPoints,
+  traceThickness: 0.1,
+  traceMargin: 0.15,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+})
+
+solver.solve()
+if (solver.solved) {
+  const routes = solver.getOutput()
+}
+```
+
+The fine-grid solver checks segment-to-via clearance in output coordinates and
+rejects solved outputs that fail exact geometry validation.
+
+At Pipeline 9 copper dimensions, seed 0, and a 100,000-iteration cap, it solves
+six of the 27 native-bound problems in
+[`tscircuit/dataset-hd30`](https://github.com/tscircuit/dataset-hd30):
+
+| Node | Iterations |
+| --- | ---: |
+| `sample002-cmn_279` | 303 |
+| `sample004-cmn_117` | 2,794 |
+| `sample007-cmn_345__sub_0_2` | 245 |
+| `sample007-cmn_345__sub_0_0` | 79 |
+| `sample008-cmn_447` | 4,884 |
+| `sample008-cmn_438` | 1,828 |
+
+All six outputs pass exact route-geometry validation without growing the input
+node. They are covered by native-bounds regressions under
+`tests/repros/dataset-hd30-a11/`.
 
 ### A03
 
@@ -141,6 +189,7 @@ work.
 Useful benchmark commands:
 
 ```sh
+./benchmark.sh --solver A01,A11 --concurrency=4
 bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
 bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4
 ```

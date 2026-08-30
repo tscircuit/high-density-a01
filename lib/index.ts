@@ -16,5 +16,10 @@ export {
   HighDensitySolverA08BreakoutSolver,
 } from "./HighDensitySolverA08/HighDensitySolverA08"
 export { HighDensitySolverA09 } from "./HighDensitySolverA09/HighDensitySolverA09"
+export {
+  getA11CellSizeMm,
+  HighDensitySolverA11,
+  type HighDensitySolverA11Props,
+} from "./HighDensitySolverA11/HighDensitySolverA11"
 export * from "./routeGeometryValidation"
 export * from "./types"
