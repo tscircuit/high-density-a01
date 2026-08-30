@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test"
+import "bun-match-svg"
+import "graphics-debug/matcher"
 import { defaultParams } from "../../../lib/default-params"
 import { HighDensitySolverA01 } from "../../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import type { NodeWithPortPoints } from "../../../lib/types"
@@ -49,7 +51,7 @@ function createBoundaryToleranceSolver(): HighDensitySolverA01 {
   return solver
 }
 
-test("A01 deterministically routes noisy boundary coordinates without moving endpoints", () => {
+test("A01 deterministically routes noisy boundary coordinates without moving endpoints", async () => {
   const firstSolver = createBoundaryToleranceSolver()
   const repeatedSolver = createBoundaryToleranceSolver()
   const firstOutput = firstSolver.getOutput()
@@ -82,4 +84,5 @@ test("A01 deterministically routes noisy boundary coordinates without moving end
     z: 1,
   })
   validateNoIntersections(firstOutput)
+  await expect(firstSolver.visualize()).toMatchGraphicsSvg(import.meta.path)
 })
