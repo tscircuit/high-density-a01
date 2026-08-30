@@ -27,10 +27,36 @@ The package exports the solver classes directly:
 
 ```ts
 import {
+  HighDensitySolverA01FineGrid,
   HighDensitySolverA03,
   HighDensitySolverA05,
 } from "@tscircuit/high-density-a01"
 ```
+
+### A01 fine grid
+
+Use `HighDensitySolverA01FineGrid` to retry dense nodes at their original
+bounds instead of enlarging the node. It derives one deterministic grid size
+from the configured trace and via dimensions; it does not grow or shrink the
+input node.
+
+```ts
+const solver = new HighDensitySolverA01FineGrid({
+  nodeWithPortPoints,
+  traceThickness: 0.1,
+  traceMargin: 0.15,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+})
+
+solver.solve()
+if (solver.solved) {
+  const routes = solver.getOutput()
+}
+```
+
+The fine-grid solver checks segment-to-via clearance in output coordinates and
+rejects solved outputs that fail exact geometry validation.
 
 ### A03
 
@@ -141,6 +167,7 @@ work.
 Useful benchmark commands:
 
 ```sh
+./benchmark.sh --solver A01,A01_FINE --concurrency=4
 bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
 bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4
 ```

@@ -8,6 +8,11 @@ export {
   computeGridToAffineTransform,
 } from "./gridToAffineTransform"
 export { HighDensitySolverA01 } from "./HighDensitySolverA01/HighDensitySolverA01"
+export {
+  getA01FineGridCellSizeMm,
+  HighDensitySolverA01FineGrid,
+  type HighDensitySolverA01FineGridProps,
+} from "./HighDensitySolverA01FineGrid/HighDensitySolverA01FineGrid"
 export { HighDensitySolverA02 } from "./HighDensitySolverA02/HighDensitySolverA02"
 export { HighDensitySolverA03 } from "./HighDensitySolverA03/HighDensitySolverA03"
 export { HighDensitySolverA05 } from "./HighDensitySolverA05/HighDensitySolverA05"
