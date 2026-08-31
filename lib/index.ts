@@ -25,9 +25,5 @@ export {
   HighDensitySolverA12,
   type HighDensitySolverA12Props,
 } from "./HighDensitySolverA12/HighDensitySolverA12"
-export {
-  HighDensitySolverA13,
-  type HighDensitySolverA13Props,
-} from "./HighDensitySolverA13/HighDensitySolverA13"
 export * from "./routeGeometryValidation"
 export * from "./types"

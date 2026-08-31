@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test"
-import { HighDensitySolverA13 } from "../../../lib/HighDensitySolverA13/HighDensitySolverA13"
+import { HighDensitySolverA11 } from "../../../lib/HighDensitySolverA11/HighDensitySolverA11"
 import type { NodeWithPortPoints } from "../../../lib/types"
 import { findRouteGeometryViolations } from "../../fixtures/validateNoIntersections"
 import node from "./sample004-topology_merge_298.json"
 
 function createSolver() {
-  const solver = new HighDensitySolverA13({
+  const solver = new HighDensitySolverA11({
     nodeWithPortPoints: structuredClone(node) as NodeWithPortPoints,
     viaDiameter: 0.3,
     viaMinDistFromBorder: 0.15,
@@ -19,7 +19,7 @@ function createSolver() {
   return solver
 }
 
-test("A13 breaks the topology_merge_298 rip cycle at native bounds", () => {
+test("A11 history-aware rip costs break the topology_merge_298 cycle", () => {
   const first = createSolver()
   const second = createSolver()
   const routes = first.getOutput()
@@ -45,7 +45,7 @@ test("A13 breaks the topology_merge_298 rip cycle at native bounds", () => {
     }),
   )
 
-  expect(first.getSolverName()).toBe("HighDensitySolverA13")
+  expect(first.getSolverName()).toBe("HighDensitySolverA11")
   expect(first.solved).toBeTrue()
   expect(first.failed).toBeFalse()
   expect(first.iterations).toBeLessThan(10_000)

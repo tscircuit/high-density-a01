@@ -29,6 +29,7 @@ export function getA11CellSizeMm(props: HighDensitySolverA11Props): number {
 
 export class HighDensitySolverA11 extends HighDensitySolverA01 {
   protected override useExactViaTraceClearance = true
+  protected override ripHistoryCostMultiplier = 1
 
   override getSolverName(): string {
     return "HighDensitySolverA11"
@@ -49,8 +50,7 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
     if (geometryError) {
       this.solved = false
       this.failed = true
-      const solverName = this.getSolverName().replace("HighDensitySolver", "")
-      this.error = `${solverName} solution failed geometry validation: ${geometryError}`
+      this.error = `A11 solution failed geometry validation: ${geometryError}`
     }
   }
 }
