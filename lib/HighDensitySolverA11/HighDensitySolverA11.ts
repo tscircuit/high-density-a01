@@ -29,6 +29,7 @@ export function getA11CellSizeMm(props: HighDensitySolverA11Props): number {
 
 export class HighDensitySolverA11 extends HighDensitySolverA01 {
   protected override useExactViaTraceClearance = true
+  protected override ripHistoryCostMultiplier = 1
 
   override getSolverName(): string {
     return "HighDensitySolverA11"
