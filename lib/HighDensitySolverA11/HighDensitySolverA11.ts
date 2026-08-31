@@ -49,7 +49,8 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
     if (geometryError) {
       this.solved = false
       this.failed = true
-      this.error = `A11 solution failed geometry validation: ${geometryError}`
+      const solverName = this.getSolverName().replace("HighDensitySolver", "")
+      this.error = `${solverName} solution failed geometry validation: ${geometryError}`
     }
   }
 }

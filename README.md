@@ -31,6 +31,7 @@ import {
   HighDensitySolverA05,
   HighDensitySolverA11,
   HighDensitySolverA12,
+  HighDensitySolverA13,
 } from "@tscircuit/high-density-a01"
 ```
 
@@ -131,6 +132,37 @@ Because diagonal-edge conflicts are checked by the final geometry gate rather
 than repaired during search, A12 is currently best used as a complementary
 portfolio stage alongside A11.
 
+### A13
+
+Use `HighDensitySolverA13` for fine-grid nodes that get caught repeatedly
+displacing the same routes. A01 and A11 normally charge one fixed `ripCost`
+whenever a search path crosses an existing route. That fixed price does not
+distinguish a useful first displacement from a route that has already been
+ripped many times, so a small dense node can settle into a repeatable cycle.
+
+A13 keeps A11's grid and exact geometry gate, but multiplies the displacement
+cost by `1 + priorRipCount` for the route being crossed. Existing A01, A11, and
+A12 behavior is unchanged.
+
+```ts
+const solver = new HighDensitySolverA13({
+  nodeWithPortPoints,
+  traceThickness: 0.1,
+  traceMargin: 0.15,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+})
+
+solver.solve()
+```
+
+At Pipeline 9 dimensions, seed 0, and a 100,000-iteration cap, A13 solves the
+same six native-bound HD30 nodes as A11 plus
+`sample004-topology_merge_298` in 3,309 iterations. The new output passes exact
+route-geometry validation without changing the node bounds. Adding A13 to the
+A11/A12 portfolio increases native-bound coverage from 11 to 12 of the 27
+dataset-hd30 nodes.
+
 ### A03
 
 Use `HighDensitySolverA03` for the baseline high-density solver:
@@ -220,6 +252,8 @@ exploration, we consider both used and unused cells. Used cells incur rip costs
 and trace/via penalties, while vias allow moving between any available layers.
 A path that rips the same trace only pays `ripCost` once, so the search tracks
 which traces have already been ripped along that candidate path.
+For A13, that one-time candidate-path cost is additionally scaled by how many
+earlier committed routes have already displaced the trace.
 
 When we reach the `end` of a path, we mark that route as solved and apply its
 occupied cells to the congestion structure. Vias occupy more cells based on
@@ -240,7 +274,7 @@ work.
 Useful benchmark commands:
 
 ```sh
-./benchmark.sh --solver A01,A11,A12 --concurrency=4
+./benchmark.sh --solver A01,A11,A12,A13 --concurrency=4
 bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
 bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4
 ```
