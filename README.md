@@ -30,6 +30,7 @@ import {
   HighDensitySolverA03,
   HighDensitySolverA05,
   HighDensitySolverA11,
+  HighDensitySolverA12,
 } from "@tscircuit/high-density-a01"
 ```
 
@@ -79,6 +80,70 @@ six of the 27 native-bound problems in
 All six outputs pass exact route-geometry validation without growing the input
 node. They are covered by native-bounds regressions under
 `tests/repros/dataset-hd30-a11/`.
+
+### A12
+
+Use `HighDensitySolverA12` when A11's uniform fine grid creates too many search
+states. A12 applies the same feature-derived fine pitch to a 16-cell perimeter
+band, uses cells four times larger in the middle, and enables diagonal moves on
+A03's five-region graph. Set `fineGridCellThickness` to tune the fine perimeter
+width for a particular portfolio.
+
+```ts
+const solver = new HighDensitySolverA12({
+  nodeWithPortPoints,
+  traceThickness: 0.1,
+  traceMargin: 0.15,
+  viaDiameter: 0.3,
+  viaMinDistFromBorder: 0.15,
+  fineGridCellThickness: 16,
+})
+
+solver.solve()
+if (solver.solved) {
+  const routes = solver.getOutput()
+}
+```
+
+A12 preserves the exact supplied endpoints and rejects completed routes that
+fail exact geometry validation. At Pipeline 9 dimensions, seed 0, and a
+100,000-iteration cap, it solves eight native-bound dataset-hd30 problems:
+
+| Node | Iterations |
+| --- | ---: |
+| `sample003-cmn_70` | 265 |
+| `sample004-topology_merge_639` | 14,478 |
+| `sample005-cmn_45` | 373 |
+| `sample007-cmn_345__sub_0_0` | 49 |
+| `sample007-cmn_345__sub_0_2` | 149 |
+| `sample008-cmn_251` | 1,067 |
+| `sample008-cmn_438` | 38,206 |
+| `sample016-cmn_31` | 306 |
+
+Five of these are new beyond A11, giving the two-solver portfolio 11
+native-bounds solves.
+
+Together, the A12 graphs allocate 44.1% as many search states as A11 across all
+27 dataset-hd30 nodes. On the largest grid, A12 uses 27.5% as many states. The
+reduction is concentrated in the larger nodes; narrow nodes whose perimeter
+bands meet in the middle remain fully fine-grid.
+Because diagonal-edge conflicts are checked by the final geometry gate rather
+than repaired during search, A12 is currently best used as a complementary
+portfolio stage alongside A11.
+
+### History-aware displacement in A11
+
+A11 increases the cost of displacing a route each time that route has already
+been ripped. A fixed `ripCost` does not distinguish a useful first
+displacement from repeatedly undoing the same decision, so small dense nodes
+can settle into stable rip cycles. The effective A11 cost is
+`ripCost * (1 + priorRipCount)`; A01 keeps its original fixed cost.
+
+At Pipeline 9 dimensions, seed 0, and a 100,000-iteration cap, this lets A11
+solve `sample004-topology_merge_298` in 3,309 iterations at the original node
+bounds. The output passes exact route-geometry validation, the other six A11
+HD30 solves are preserved, and the A11/A12 native-bound portfolio increases
+from 11 to 12 of the 27 dataset-hd30 nodes.
 
 ### A03
 
@@ -169,6 +234,8 @@ exploration, we consider both used and unused cells. Used cells incur rip costs
 and trace/via penalties, while vias allow moving between any available layers.
 A path that rips the same trace only pays `ripCost` once, so the search tracks
 which traces have already been ripped along that candidate path.
+For A11, that one-time candidate-path cost is additionally scaled by how many
+earlier committed routes have already displaced the trace.
 
 When we reach the `end` of a path, we mark that route as solved and apply its
 occupied cells to the congestion structure. Vias occupy more cells based on
@@ -189,7 +256,7 @@ work.
 Useful benchmark commands:
 
 ```sh
-./benchmark.sh --solver A01,A11 --concurrency=4
+./benchmark.sh --solver A01,A11,A12 --concurrency=4
 bun run scripts/run-dataset02-benchmark-a03.ts --concurrency=4
 bun run scripts/run-dataset02-benchmark-a05.ts --concurrency=4
 ```

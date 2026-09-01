@@ -245,6 +245,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
+  protected ripHistoryCostMultiplier = 0
 
   // Grid dimensions
   rows!: number
@@ -745,6 +746,13 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // --- Merged cost + rip computation (writes to _moveCost/_moveRipped) ---
+  protected getRipCost(connId: ConnId): number {
+    return (
+      this.hyperParameters.ripCost *
+      (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0))
+    )
+  }
+
   private computeMoveCostAndRips(
     activeConn: ConnId,
     fromZ: number,
@@ -794,7 +802,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!rippedContains(r, occ)) {
-          cost += this.hyperParameters.ripCost
+          cost += this.getRipCost(occ)
           r = { id: occ, prev: r }
         }
         cost += this.hyperParameters.ripViaPenalty
@@ -838,7 +846,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
       if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
         if (!rippedContains(r, occ)) {
-          cost += this.hyperParameters.ripCost
+          cost += this.getRipCost(occ)
           r = { id: occ, prev: r }
         }
         cost += this.hyperParameters.ripTracePenalty
@@ -859,7 +867,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         for (let i = 0; i < viaOccs.length; i++) {
           const viaOwner = viaOccs[i]!
           if (!rippedContains(r, viaOwner)) {
-            cost += this.hyperParameters.ripCost
+            cost += this.getRipCost(viaOwner)
             r = { id: viaOwner, prev: r }
           }
           cost += this.hyperParameters.ripViaPenalty
