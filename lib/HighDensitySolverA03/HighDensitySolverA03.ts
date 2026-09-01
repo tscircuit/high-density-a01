@@ -364,6 +364,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
+  protected preserveExactSameCellEndpoints = false
 
   boundsMinX!: number
   boundsMaxX!: number
@@ -2144,7 +2145,14 @@ export class HighDensitySolverA03 extends BaseSolver {
         })
         if (points.length === 1) {
           points[0] = { ...route.startPoint }
-          points.push({ ...route.endPoint })
+          if (
+            this.preserveExactSameCellEndpoints &&
+            (route.startPoint.x !== route.endPoint.x ||
+              route.startPoint.y !== route.endPoint.y ||
+              route.startPoint.z !== route.endPoint.z)
+          ) {
+            points.push({ ...route.endPoint })
+          }
         } else if (points.length > 1) {
           points[0] = { ...route.startPoint }
           points[points.length - 1] = { ...route.endPoint }

@@ -25,6 +25,7 @@ const A12_COARSE_CELL_SCALE = 4
  */
 export class HighDensitySolverA12 extends HighDensitySolverA03 {
   fineGridCellThickness: number
+  protected override preserveExactSameCellEndpoints = true
 
   override getSolverName(): string {
     return "HighDensitySolverA12"
