@@ -74,10 +74,12 @@ interface CircularGridOffsets {
 function createCircularGridOffsets(params: {
   radiusMm: number
   cellSizeMm: number
+  stabilizeNearInteger?: boolean
 }): CircularGridOffsets {
   const radiusCellRatio = params.radiusMm / params.cellSizeMm
   const nearestRadiusCellCount = Math.round(radiusCellRatio)
   const radiusCells =
+    params.stabilizeNearInteger &&
     Math.abs(radiusCellRatio - nearestRadiusCellCount) <= 1e-9
       ? nearestRadiusCellCount
       : Math.ceil(radiusCellRatio)
@@ -486,6 +488,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     const viaOccupantScanOffsets = createCircularGridOffsets({
       radiusMm: this.viaDiameter / 2,
       cellSizeMm,
+      stabilizeNearInteger: this.useExactViaTraceClearance,
     })
     this.viaOccupantScanOffsetsLen = viaOccupantScanOffsets.length
     this.viaOccupantScanOffsetsDr = viaOccupantScanOffsets.rowOffsets

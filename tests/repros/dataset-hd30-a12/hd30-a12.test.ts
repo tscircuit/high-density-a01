@@ -222,6 +222,52 @@ test("A12 preserves both exact endpoints when they share one grid cell", () => {
   ])
 })
 
+test("A03 keeps identical endpoints as one point", () => {
+  const endpoint = {
+    x: -0.19,
+    y: -0.19,
+    z: 0,
+  }
+  const nodeWithPortPoints: NodeWithPortPoints = {
+    capacityMeshNodeId: "identical-endpoints",
+    center: { x: 0, y: 0 },
+    width: 0.4,
+    height: 0.4,
+    availableZ: [0, 1],
+    portPoints: [
+      {
+        ...endpoint,
+        portPointId: "start",
+        connectionName: "identical-endpoint-connection",
+        rootConnectionName: "identical-endpoint-root",
+      },
+      {
+        ...endpoint,
+        portPointId: "end",
+        connectionName: "identical-endpoint-connection",
+        rootConnectionName: "identical-endpoint-root",
+      },
+    ],
+  }
+  const solver = new HighDensitySolverA03({
+    ...solverProps,
+    nodeWithPortPoints,
+    highResolutionCellSize: 0.05,
+    highResolutionCellThickness: 8,
+    lowResolutionCellSize: 0.2,
+  })
+
+  solver.solve()
+
+  expect(solver.solved).toBeTrue()
+  expect(solver.getOutput()).toEqual([
+    expect.objectContaining({
+      rootConnectionName: "identical-endpoint-root",
+      route: [expect.objectContaining(endpoint)],
+    }),
+  ])
+})
+
 test("A12 preserves root-net metadata for overlapping MST branches", () => {
   const nodeWithPortPoints: NodeWithPortPoints = {
     capacityMeshNodeId: "same-root-crossing",
