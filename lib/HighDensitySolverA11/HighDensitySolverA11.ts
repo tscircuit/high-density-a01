@@ -31,6 +31,10 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
   protected override useExactViaTraceClearance = true
   protected override ripHistoryCostMultiplier = 1
 
+  protected override getInitialConnectionOrdering(): "shortest-first" {
+    return "shortest-first"
+  }
+
   override getSolverName(): string {
     return "HighDensitySolverA11"
   }

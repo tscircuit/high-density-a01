@@ -3,6 +3,7 @@ import { HighDensitySolverA11 } from "../../../lib/HighDensitySolverA11/HighDens
 import type { NodeWithPortPoints } from "../../../lib/types"
 import { findRouteGeometryViolations } from "../../fixtures/validateNoIntersections"
 import cmn279 from "./sample002-cmn_279.json"
+import cmn36 from "./sample002-cmn_36.json"
 import cmn117 from "./sample004-cmn_117.json"
 import cmn345Sub02 from "./sample007-cmn_345__sub_0_2.json"
 import cmn345Sub00 from "./sample007-cmn_345__sub_0_0.json"
@@ -97,3 +98,27 @@ for (const testCase of cases) {
     }
   })
 }
+
+test("A11 routes the shortest connections first to avoid blocking cmn_36", () => {
+  const originalNode = structuredClone(cmn36) as NodeWithPortPoints
+  const solver = new HighDensitySolverA11({
+    nodeWithPortPoints: structuredClone(originalNode),
+    viaDiameter: 0.3,
+    viaMinDistFromBorder: 0.15,
+    traceMargin: 0.1,
+    traceThickness: 0.1,
+    effort: 1,
+    hyperParameters: { shuffleSeed: 0 },
+  })
+  solver.MAX_ITERATIONS = 100_000
+
+  solver.solve()
+
+  expect(solver.solved).toBeTrue()
+  expect(solver.failed).toBeFalse()
+  expect(solver.iterations).toBeLessThan(100_000)
+  expect(solver.getOutput()).toHaveLength(14)
+  expect(findRouteGeometryViolations(solver.getOutput())).toEqual([])
+  expect(solver.nodeWithPortPoints.width).toBe(originalNode.width)
+  expect(solver.nodeWithPortPoints.height).toBe(originalNode.height)
+})

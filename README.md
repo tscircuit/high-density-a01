@@ -145,6 +145,17 @@ bounds. The output passes exact route-geometry validation, the other six A11
 HD30 solves are preserved, and the A11/A12 native-bound portfolio increases
 from 11 to 12 of the 27 dataset-hd30 nodes.
 
+### Shortest-first initial routing in A11
+
+A11 routes shorter connections before longer ones. On its uniform fine grid,
+this keeps local connections from being blocked by longer routes that have
+more ways around the node. A01 retains its seeded shuffled order.
+
+At Pipeline 9 dimensions and a 100,000-iteration cap, this lets A11 solve
+`sample002-cmn_36` in 95,308 iterations at the original node bounds. The
+previous seven A11 HD30 solves are preserved, and the A11/A12 native-bound
+portfolio increases from 12 to 13 of the 27 dataset-hd30 nodes.
+
 ### A03
 
 Use `HighDensitySolverA03` for the baseline high-density solver:

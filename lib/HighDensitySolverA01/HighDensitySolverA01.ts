@@ -538,7 +538,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.ripCount = []
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
-    this.shuffleConnections()
+    this.orderInitialConnections()
     const budget = computeMaxIterationsByNodeSizeAndConnectionCount({
       planeSize: this.planeSize,
       layers: this.layers,
@@ -1180,19 +1180,38 @@ export class HighDensitySolverA01 extends BaseSolver {
     return { z, row, col }
   }
 
-  private shuffleConnections(): void {
-    const arr = this.unsolvedSegs
+  private orderInitialConnections(): void {
+    const unsolvedSegs = this.unsolvedSegs
+    if (this.getInitialConnectionOrdering() === "shortest-first") {
+      unsolvedSegs.sort((left, right) => {
+        const leftDeltaX = left.endPoint.x - left.startPoint.x
+        const leftDeltaY = left.endPoint.y - left.startPoint.y
+        const rightDeltaX = right.endPoint.x - right.startPoint.x
+        const rightDeltaY = right.endPoint.y - right.startPoint.y
+        const lengthDifference =
+          leftDeltaX * leftDeltaX +
+          leftDeltaY * leftDeltaY -
+          (rightDeltaX * rightDeltaX + rightDeltaY * rightDeltaY)
+        if (lengthDifference !== 0) return lengthDifference
+        return left.connId - right.connId
+      })
+      return
+    }
     let s = this.hyperParameters.shuffleSeed
     const rng = () => {
       s = (s * 1664525 + 1013904223) & 0xffffffff
       return (s >>> 0) / 0xffffffff
     }
-    for (let i = arr.length - 1; i > 0; i--) {
+    for (let i = unsolvedSegs.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1))
-      const tmp = arr[i]!
-      arr[i] = arr[j]!
-      arr[j] = tmp
+      const tmp = unsolvedSegs[i]!
+      unsolvedSegs[i] = unsolvedSegs[j]!
+      unsolvedSegs[j] = tmp
     }
+  }
+
+  protected getInitialConnectionOrdering(): "shuffled" | "shortest-first" {
+    return "shuffled"
   }
 
   // --- Finalize a found route ---
