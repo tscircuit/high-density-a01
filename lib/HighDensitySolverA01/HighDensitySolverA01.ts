@@ -43,11 +43,11 @@ interface ConnectionSeg {
   startZ: number
   startRow: number
   startCol: number
-  startPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
   endZ: number
   endRow: number
   endCol: number
-  endPoint: { x: number; y: number; z: number }
+  endPoint: PortPoint
 }
 
 // --- Internal solved route (cell-based) ---
@@ -56,11 +56,11 @@ interface SolvedRouteInternal {
   startZ: number
   startRow: number
   startCol: number
-  startPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
   endZ: number
   endRow: number
   endCol: number
-  endPoint: { x: number; y: number; z: number }
+  endPoint: PortPoint
   cells: Array<{ z: number; row: number; col: number }>
   viaCells: Array<{ row: number; col: number }>
 }
@@ -1182,7 +1182,31 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   private orderInitialConnections(): void {
     const unsolvedSegs = this.unsolvedSegs
-    if (this.getInitialConnectionOrdering() === "shortest-first") {
+    const ordering = this.getInitialConnectionOrdering()
+    if (ordering === "topology-aware") {
+      const rootOrder = new Map<string, number>()
+      for (const segment of unsolvedSegs) {
+        const rootName =
+          segment.startPoint.rootConnectionName ??
+          segment.startPoint.connectionName
+        if (!rootOrder.has(rootName)) rootOrder.set(rootName, rootOrder.size)
+      }
+
+      if (rootOrder.size < unsolvedSegs.length) {
+        // Preserve the seeded order between roots and within each root while
+        // making every multi-terminal root contiguous.
+        unsolvedSegs.sort((left, right) => {
+          const leftRoot =
+            left.startPoint.rootConnectionName ?? left.startPoint.connectionName
+          const rightRoot =
+            right.startPoint.rootConnectionName ??
+            right.startPoint.connectionName
+          return rootOrder.get(leftRoot)! - rootOrder.get(rightRoot)!
+        })
+        return
+      }
+    }
+    if (ordering === "shortest-first" || ordering === "topology-aware") {
       unsolvedSegs.sort((left, right) => {
         const leftDeltaX = left.endPoint.x - left.startPoint.x
         const leftDeltaY = left.endPoint.y - left.startPoint.y
@@ -1210,7 +1234,10 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
-  protected getInitialConnectionOrdering(): "shuffled" | "shortest-first" {
+  protected getInitialConnectionOrdering():
+    | "shuffled"
+    | "shortest-first"
+    | "topology-aware" {
     return "shuffled"
   }
 
