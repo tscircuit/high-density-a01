@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
+import { getConnectionPortPointPairs } from "../../../lib/getConnectionPortPointPairs"
 import { HighDensitySolverA11 } from "../../../lib/HighDensitySolverA11/HighDensitySolverA11"
-import type { NodeWithPortPoints } from "../../../lib/types"
+import type { NodeWithPortPoints, PortPoint } from "../../../lib/types"
 import { findRouteGeometryViolations } from "../../fixtures/validateNoIntersections"
 import cmn36 from "./sample002-cmn_36.json"
 import cmn279 from "./sample002-cmn_279.json"
@@ -107,10 +108,19 @@ for (const testCase of cases) {
     expect(solver.nodeWithPortPoints.width).toBe(originalNode.width)
     expect(solver.nodeWithPortPoints.height).toBe(originalNode.height)
 
+    const portPointsByConnection = new Map<string, PortPoint[]>()
+    for (const portPoint of originalNode.portPoints) {
+      const portPoints =
+        portPointsByConnection.get(portPoint.connectionName) ?? []
+      portPoints.push(portPoint)
+      portPointsByConnection.set(portPoint.connectionName, portPoints)
+    }
     const expectedPhysicalPairs = new Set(
-      originalNode.portPointsInPairs?.map(([start, end]) =>
-        physicalPairKey(start, end),
-      ) ?? [],
+      [...portPointsByConnection.values()].flatMap((portPoints) =>
+        getConnectionPortPointPairs(portPoints).map(([start, end]) =>
+          physicalPairKey(start, end),
+        ),
+      ),
     )
     const actualPhysicalPairCounts = new Map<string, number>()
     for (const route of routes) {
