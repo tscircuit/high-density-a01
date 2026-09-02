@@ -22,7 +22,7 @@ const cases: Array<{
     id: "sample002-cmn_36",
     nodeWithPortPoints: cmn36,
     expectedRouteCount: 14,
-    maxExpectedIterations: 100_000,
+    maxExpectedIterations: 50_000,
   },
   {
     id: "sample002-cmn_279",

@@ -248,6 +248,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
   protected ripHistoryCostMultiplier = 0
+  protected useBestGPruning = false
 
   // Grid dimensions
   rows!: number
@@ -274,6 +275,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
+  private bestGStamp?: Uint32Array
+  private bestGValue?: Float64Array
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -481,6 +484,12 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
+    this.bestGStamp = this.useBestGPruning
+      ? new Uint32Array(totalCells)
+      : undefined
+    this.bestGValue = this.useBestGPruning
+      ? new Float64Array(totalCells)
+      : undefined
     this.stamp = 0
 
     // Existing traces already occupy their traceMargin halo, so a prospective
@@ -604,6 +613,12 @@ export class HighDensitySolverA01 extends BaseSolver {
         parentIdx: -1,
         ripped: null,
       })
+      if (this.useBestGPruning) {
+        const startCellIdx =
+          (next.startZ * this.rows + next.startRow) * this.cols + next.startCol
+        this.bestGStamp![startCellIdx] = this.stamp
+        this.bestGValue![startCellIdx] = 0
+      }
       this.heap.push(f, this.seqCounter++, 0)
       return
     }
@@ -683,6 +698,17 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
+      if (
+        this.useBestGPruning &&
+        this.bestGStamp![nIdx] === stamp &&
+        g2 >= this.bestGValue![nIdx]!
+      ) {
+        continue
+      }
+      if (this.useBestGPruning) {
+        this.bestGStamp![nIdx] = stamp
+        this.bestGValue![nIdx] = g2
+      }
       const f2 =
         g2 +
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
@@ -727,6 +753,17 @@ export class HighDensitySolverA01 extends BaseSolver {
         )
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
+        if (
+          this.useBestGPruning &&
+          this.bestGStamp![nIdx] === stamp &&
+          g2 >= this.bestGValue![nIdx]!
+        ) {
+          continue
+        }
+        if (this.useBestGPruning) {
+          this.bestGStamp![nIdx] = stamp
+          this.bestGValue![nIdx] = g2
+        }
         const f2 =
           g2 +
           this.computeH(nz, row, col, endZ, endRow, endCol) *
@@ -1037,6 +1074,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
+      this.bestGStamp?.fill(0)
       this.stamp = 1
     }
   }

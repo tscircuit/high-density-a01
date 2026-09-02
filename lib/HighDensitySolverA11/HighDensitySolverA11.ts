@@ -30,6 +30,7 @@ export function getA11CellSizeMm(props: HighDensitySolverA11Props): number {
 export class HighDensitySolverA11 extends HighDensitySolverA01 {
   protected override useExactViaTraceClearance = true
   protected override ripHistoryCostMultiplier = 1
+  protected override useBestGPruning = true
 
   protected override getInitialConnectionOrdering(): "topology-aware" {
     return "topology-aware"

@@ -65,29 +65,36 @@ The fine-grid solver checks segment-to-via clearance in output coordinates and
 rejects solved outputs that fail exact geometry validation.
 
 At Pipeline 9 copper dimensions, seed 0, and a 100,000-iteration cap, it solves
-six of the 27 native-bound problems in
+nine of the 27 native-bound problems in
 [`tscircuit/dataset-hd30`](https://github.com/tscircuit/dataset-hd30):
 
 | Node | Iterations |
 | --- | ---: |
-| `sample002-cmn_279` | 303 |
-| `sample004-cmn_117` | 2,794 |
-| `sample007-cmn_345__sub_0_2` | 245 |
-| `sample007-cmn_345__sub_0_0` | 79 |
-| `sample008-cmn_447` | 4,884 |
-| `sample008-cmn_438` | 1,828 |
+| `sample002-cmn_279` | 192 |
+| `sample002-cmn_36` | 48,630 |
+| `sample004-cmn_117` | 1,382 |
+| `sample004-topology_merge_298` | 1,250 |
+| `sample007-cmn_345__sub_0_2` | 134 |
+| `sample007-cmn_345__sub_0_0` | 68 |
+| `sample008-cmn_447` | 2,343 |
+| `sample008-cmn_438` | 858 |
+| `sample011-cmn_108` | 1,354 |
 
-All six outputs pass exact route-geometry validation without growing the input
+All nine outputs pass exact route-geometry validation without growing the input
 node. They are covered by native-bounds regressions under
 `tests/repros/dataset-hd30-a11/`.
 
 ### A12
 
 Use `HighDensitySolverA12` when A11's uniform fine grid creates too many search
-states. A12 applies the same feature-derived fine pitch to a 16-cell perimeter
-band, uses cells four times larger in the middle, and enables diagonal moves on
-A03's five-region graph. Set `fineGridCellThickness` to tune the fine perimeter
-width for a particular portfolio.
+states. A12 adapts A03's five-region graph to the routing demand. Congested
+nodes use a one-trace-width fine perimeter so the coarse middle keeps most of
+the search capacity. Four-layer nodes dominated by same-layer connections use
+half the normal fine pitch to preserve narrow planar channels. Other nodes use
+the original feature-derived pitch and 16-cell perimeter. All variants use
+cells four times larger in the middle and enable diagonal moves. Set
+`fineGridCellThickness` to opt out of the adaptive default and tune the original
+fine perimeter for a particular portfolio.
 
 ```ts
 const solver = new HighDensitySolverA12({
@@ -96,7 +103,6 @@ const solver = new HighDensitySolverA12({
   traceMargin: 0.15,
   viaDiameter: 0.3,
   viaMinDistFromBorder: 0.15,
-  fineGridCellThickness: 16,
 })
 
 solver.solve()
@@ -107,26 +113,28 @@ if (solver.solved) {
 
 A12 preserves the exact supplied endpoints and rejects completed routes that
 fail exact geometry validation. At Pipeline 9 dimensions, seed 0, and a
-100,000-iteration cap, it solves eight native-bound dataset-hd30 problems:
+100,000-iteration cap, it solves ten native-bound dataset-hd30 problems:
 
 | Node | Iterations |
 | --- | ---: |
 | `sample003-cmn_70` | 265 |
-| `sample004-topology_merge_639` | 14,478 |
+| `sample004-topology_merge_639` | 526 |
 | `sample005-cmn_45` | 373 |
 | `sample007-cmn_345__sub_0_0` | 49 |
 | `sample007-cmn_345__sub_0_2` | 149 |
 | `sample008-cmn_251` | 1,067 |
 | `sample008-cmn_438` | 38,206 |
+| `sample011-cmn_56` | 1,256 |
+| `sample016-cmn_119` | 1,394 |
 | `sample016-cmn_31` | 306 |
 
-Five of these are new beyond A11, giving the two-solver portfolio 11
+Seven of these are new beyond A11, giving the two-solver portfolio 16
 native-bounds solves.
 
-Together, the A12 graphs allocate 44.1% as many search states as A11 across all
-27 dataset-hd30 nodes. On the largest grid, A12 uses 27.5% as many states. The
-reduction is concentrated in the larger nodes; narrow nodes whose perimeter
-bands meet in the middle remain fully fine-grid.
+Together, the A12 graphs allocate 18.1% as many search states as A11 across all
+27 dataset-hd30 nodes. On the largest grid, A12 uses 9.2% as many states. The
+reduction is concentrated in congested nodes; low-congestion nodes retain the
+original grid unless their same-layer demand requires finer planar resolution.
 Because diagonal-edge conflicts are checked by the final geometry gate rather
 than repaired during search, A12 is currently best used as a complementary
 portfolio stage alongside A11.
@@ -156,11 +164,20 @@ retain their seeded shuffled order. A01 always retains its seeded shuffled
 order.
 
 At Pipeline 9 dimensions and a 100,000-iteration cap, this lets A11 solve
-`sample002-cmn_36` in 95,308 iterations and `sample011-cmn_108` in fewer than
+`sample002-cmn_36` in 48,630 iterations and `sample011-cmn_108` in fewer than
 10,000 iterations at their original node bounds. Exact geometry and every
 unique physical port pair are validated. The previous seven A11 HD30 solves
 are preserved, A11 increases from 7 to 9 solves, and the A11/A12 native-bound
 portfolio increases from 12 to 14 of the 27 regular Pipeline 9 nodes.
+
+### Dominated-state pruning in A11
+
+A11 records the best queued cost for each grid state and does not enqueue a
+path whose cost is equal or worse. Such a path would reach the same state after
+the cheaper queued path and be discarded by the existing visited-state check,
+so pruning it does not remove a usable search state. A01 keeps its original
+queue behavior. Across A11's eight wins under the Pipeline 9 5,000-iteration
+cap, this reduces aggregate iterations by 50.3% while preserving every output.
 
 ### A03
 

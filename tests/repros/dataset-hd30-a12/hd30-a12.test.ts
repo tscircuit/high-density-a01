@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { getConnectionPortPointPairs } from "../../../lib/getConnectionPortPointPairs"
 import { HighDensitySolverA03 } from "../../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import { HighDensitySolverA11 } from "../../../lib/HighDensitySolverA11/HighDensitySolverA11"
 import { HighDensitySolverA12 } from "../../../lib/HighDensitySolverA12/HighDensitySolverA12"
@@ -6,6 +7,7 @@ import { findRouteGeometryViolations } from "../../../lib/routeGeometryValidatio
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
+  PortPoint,
 } from "../../../lib/types"
 import cmn345Sub00 from "../dataset-hd30-a11/sample007-cmn_345__sub_0_0.json"
 import cmn345Sub02 from "../dataset-hd30-a11/sample007-cmn_345__sub_0_2.json"
@@ -14,6 +16,8 @@ import cmn70 from "./sample003-cmn_70.json"
 import topologyMerge639 from "./sample004-topology_merge_639.json"
 import cmn45 from "./sample005-cmn_45.json"
 import cmn251 from "./sample008-cmn_251.json"
+import cmn56 from "./sample011-cmn_56.json"
+import cmn119 from "./sample016-cmn_119.json"
 import cmn31 from "./sample016-cmn_31.json"
 
 const solverProps = {
@@ -29,12 +33,20 @@ const cases: Array<{
   id: string
   nodeWithPortPoints: NodeWithPortPoints
   expectedRouteCount: number
+  expectedFineCellSize?: number
+  expectedFineGridThickness?: number
+  maxExpectedIterations?: number
 }> = [
-  { id: "sample003-cmn_70", nodeWithPortPoints: cmn70, expectedRouteCount: 5 },
+  {
+    id: "sample003-cmn_70",
+    nodeWithPortPoints: cmn70,
+    expectedRouteCount: 5,
+  },
   {
     id: "sample004-topology_merge_639",
     nodeWithPortPoints: topologyMerge639,
     expectedRouteCount: 5,
+    expectedFineGridThickness: 2,
   },
   { id: "sample005-cmn_45", nodeWithPortPoints: cmn45, expectedRouteCount: 4 },
   {
@@ -57,8 +69,32 @@ const cases: Array<{
     nodeWithPortPoints: cmn438,
     expectedRouteCount: 3,
   },
+  {
+    id: "sample011-cmn_56",
+    nodeWithPortPoints: cmn56,
+    expectedRouteCount: 11,
+    expectedFineGridThickness: 2,
+    maxExpectedIterations: 15_000,
+  },
+  {
+    id: "sample016-cmn_119",
+    nodeWithPortPoints: cmn119,
+    expectedRouteCount: 6,
+    expectedFineCellSize: 0.025,
+    maxExpectedIterations: 15_000,
+  },
   { id: "sample016-cmn_31", nodeWithPortPoints: cmn31, expectedRouteCount: 3 },
 ]
+
+function physicalPairKey(
+  start: { x: number; y: number; z: number },
+  end: { x: number; y: number; z: number },
+) {
+  return [start, end]
+    .map((point) => `${point.x},${point.y},${point.z}`)
+    .sort()
+    .join("|")
+}
 
 function isSamePoint(
   left: { x: number; y: number; z: number },
@@ -338,21 +374,56 @@ for (const testCase of cases) {
       nodeWithPortPoints: testCase.nodeWithPortPoints,
     })
     solver.setup()
-    solver.MAX_ITERATIONS = 100_000
+    solver.MAX_ITERATIONS = testCase.maxExpectedIterations ?? 100_000
     solver.solve()
 
     const routes = solver.getOutput()
     expect(solver.solved).toBeTrue()
     expect(solver.failed).toBeFalse()
-    expect(solver.highResolutionCellSize).toBeCloseTo(0.05, 12)
-    expect(solver.highResolutionCellThickness).toBe(16)
-    expect(solver.lowResolutionCellSize).toBeCloseTo(0.2, 12)
+    const expectedFineCellSize = testCase.expectedFineCellSize ?? 0.05
+    expect(solver.highResolutionCellSize).toBeCloseTo(expectedFineCellSize, 12)
+    expect(solver.highResolutionCellThickness).toBe(
+      testCase.expectedFineGridThickness ?? 16,
+    )
+    expect(solver.lowResolutionCellSize).toBeCloseTo(
+      expectedFineCellSize * 4,
+      12,
+    )
     expect(solver.enableDiagonalMoves).toBeTrue()
     expect(routes).toHaveLength(testCase.expectedRouteCount)
     expect(findRouteGeometryViolations(routes)).toEqual([])
     expect(testCase.nodeWithPortPoints).toEqual(originalNode)
     expect(solver.nodeWithPortPoints.width).toBe(originalNode.width)
     expect(solver.nodeWithPortPoints.height).toBe(originalNode.height)
+
+    const portPointsByConnection = new Map<string, PortPoint[]>()
+    for (const portPoint of originalNode.portPoints) {
+      const portPoints =
+        portPointsByConnection.get(portPoint.connectionName) ?? []
+      portPoints.push(portPoint)
+      portPointsByConnection.set(portPoint.connectionName, portPoints)
+    }
+    const expectedPhysicalPairs = new Set(
+      [...portPointsByConnection.values()].flatMap((portPoints) =>
+        getConnectionPortPointPairs(portPoints).map(([start, end]) =>
+          physicalPairKey(start, end),
+        ),
+      ),
+    )
+    const actualPhysicalPairCounts = new Map<string, number>()
+    for (const route of routes) {
+      const key = physicalPairKey(route.route[0]!, route.route.at(-1)!)
+      actualPhysicalPairCounts.set(
+        key,
+        (actualPhysicalPairCounts.get(key) ?? 0) + 1,
+      )
+    }
+    expect(new Set(actualPhysicalPairCounts.keys())).toEqual(
+      expectedPhysicalPairs,
+    )
+    expect([...actualPhysicalPairCounts.values()]).toEqual(
+      Array.from({ length: expectedPhysicalPairs.size }, () => 1),
+    )
 
     for (const route of routes) {
       const matchingPorts = originalNode.portPoints.filter(
