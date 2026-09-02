@@ -8,4 +8,5 @@ They are the nine regular Pipeline 9 nodes solved by
 `HighDensitySolverA11` with Pipeline 9 copper dimensions, shuffle seed
 0, and no node growth. The `sample002-cmn_36` and `sample011-cmn_108`
 fixtures cover topology-aware connection scheduling for independent pairs and
-multi-segment physical roots, respectively.
+multi-segment physical roots, respectively. `sample008-cmn_447` protects the
+bounded seeded order used for smaller independent problems.

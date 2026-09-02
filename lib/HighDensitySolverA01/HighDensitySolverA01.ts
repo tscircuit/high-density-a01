@@ -15,6 +15,8 @@ import type {
 // --- Interned connection ID ---
 type ConnId = number
 
+const MIN_SHORTEST_FIRST_CONNECTION_COUNT = 8
+
 // --- Persistent ripped-trace linked list ---
 interface RippedNode {
   id: ConnId
@@ -1206,7 +1208,11 @@ export class HighDensitySolverA01 extends BaseSolver {
         return
       }
     }
-    if (ordering === "shortest-first" || ordering === "topology-aware") {
+    const shouldRouteShortestFirst =
+      ordering === "shortest-first" ||
+      (ordering === "topology-aware" &&
+        unsolvedSegs.length >= MIN_SHORTEST_FIRST_CONNECTION_COUNT)
+    if (shouldRouteShortestFirst) {
       unsolvedSegs.sort((left, right) => {
         const leftDeltaX = left.endPoint.x - left.startPoint.x
         const leftDeltaY = left.endPoint.y - left.startPoint.y

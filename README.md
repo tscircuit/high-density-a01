@@ -149,10 +149,11 @@ from 11 to 12 of the 27 dataset-hd30 nodes.
 
 A11 groups related MST segments when several connection names share one
 physical root net. This lets the root establish one corridor before unrelated
-roots fragment it. Nodes made entirely of independent pairs instead route
+roots fragment it. Nodes with at least eight independent pairs instead route
 shorter spans first, keeping compact local routes from being blocked by longer
-connections that have more ways around the node. A01 retains its seeded
-shuffled order.
+connections that have more ways around the node. Smaller independent problems
+retain their seeded shuffled order. A01 always retains its seeded shuffled
+order.
 
 At Pipeline 9 dimensions and a 100,000-iteration cap, this lets A11 solve
 `sample002-cmn_36` in 95,308 iterations and `sample011-cmn_108` in fewer than
