@@ -15,6 +15,8 @@ import type {
 // --- Interned connection ID ---
 type ConnId = number
 
+const MIN_SHORTEST_FIRST_CONNECTION_COUNT = 8
+
 // --- Persistent ripped-trace linked list ---
 interface RippedNode {
   id: ConnId
@@ -43,11 +45,11 @@ interface ConnectionSeg {
   startZ: number
   startRow: number
   startCol: number
-  startPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
   endZ: number
   endRow: number
   endCol: number
-  endPoint: { x: number; y: number; z: number }
+  endPoint: PortPoint
 }
 
 // --- Internal solved route (cell-based) ---
@@ -56,11 +58,11 @@ interface SolvedRouteInternal {
   startZ: number
   startRow: number
   startCol: number
-  startPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
   endZ: number
   endRow: number
   endCol: number
-  endPoint: { x: number; y: number; z: number }
+  endPoint: PortPoint
   cells: Array<{ z: number; row: number; col: number }>
   viaCells: Array<{ row: number; col: number }>
 }
@@ -538,7 +540,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.ripCount = []
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
-    this.shuffleConnections()
+    this.orderInitialConnections()
     const budget = computeMaxIterationsByNodeSizeAndConnectionCount({
       planeSize: this.planeSize,
       layers: this.layers,
@@ -1180,19 +1182,69 @@ export class HighDensitySolverA01 extends BaseSolver {
     return { z, row, col }
   }
 
-  private shuffleConnections(): void {
-    const arr = this.unsolvedSegs
+  private orderInitialConnections(): void {
+    const unsolvedSegs = this.unsolvedSegs
+    const ordering = this.getInitialConnectionOrdering()
+    if (ordering === "topology-aware") {
+      const rootOrder = new Map<string, number>()
+      for (const segment of unsolvedSegs) {
+        const rootName =
+          segment.startPoint.rootConnectionName ??
+          segment.startPoint.connectionName
+        if (!rootOrder.has(rootName)) rootOrder.set(rootName, rootOrder.size)
+      }
+
+      if (rootOrder.size < unsolvedSegs.length) {
+        // Preserve the seeded order between roots and within each root while
+        // making every multi-terminal root contiguous.
+        unsolvedSegs.sort((left, right) => {
+          const leftRoot =
+            left.startPoint.rootConnectionName ?? left.startPoint.connectionName
+          const rightRoot =
+            right.startPoint.rootConnectionName ??
+            right.startPoint.connectionName
+          return rootOrder.get(leftRoot)! - rootOrder.get(rightRoot)!
+        })
+        return
+      }
+    }
+    const shouldRouteShortestFirst =
+      ordering === "shortest-first" ||
+      (ordering === "topology-aware" &&
+        unsolvedSegs.length >= MIN_SHORTEST_FIRST_CONNECTION_COUNT)
+    if (shouldRouteShortestFirst) {
+      unsolvedSegs.sort((left, right) => {
+        const leftDeltaX = left.endPoint.x - left.startPoint.x
+        const leftDeltaY = left.endPoint.y - left.startPoint.y
+        const rightDeltaX = right.endPoint.x - right.startPoint.x
+        const rightDeltaY = right.endPoint.y - right.startPoint.y
+        const lengthDifference =
+          leftDeltaX * leftDeltaX +
+          leftDeltaY * leftDeltaY -
+          (rightDeltaX * rightDeltaX + rightDeltaY * rightDeltaY)
+        if (lengthDifference !== 0) return lengthDifference
+        return left.connId - right.connId
+      })
+      return
+    }
     let s = this.hyperParameters.shuffleSeed
     const rng = () => {
       s = (s * 1664525 + 1013904223) & 0xffffffff
       return (s >>> 0) / 0xffffffff
     }
-    for (let i = arr.length - 1; i > 0; i--) {
+    for (let i = unsolvedSegs.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1))
-      const tmp = arr[i]!
-      arr[i] = arr[j]!
-      arr[j] = tmp
+      const tmp = unsolvedSegs[i]!
+      unsolvedSegs[i] = unsolvedSegs[j]!
+      unsolvedSegs[j] = tmp
     }
+  }
+
+  protected getInitialConnectionOrdering():
+    | "shuffled"
+    | "shortest-first"
+    | "topology-aware" {
+    return "shuffled"
   }
 
   // --- Finalize a found route ---
