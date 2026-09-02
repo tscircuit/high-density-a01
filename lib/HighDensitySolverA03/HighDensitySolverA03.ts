@@ -343,6 +343,8 @@ export interface HighDensitySolverA03Props {
 }
 
 export class HighDensitySolverA03 extends BaseSolver {
+  protected preserveExactOutputEndpoints = false
+  protected includeRootConnectionNameInOutput = false
   override getSolverName(): string {
     return "HighDensitySolverA03"
   }
@@ -2142,16 +2144,20 @@ export class HighDensitySolverA03 extends BaseSolver {
             z: this.layerToZ.get(z) ?? z,
           }
         })
-        if (points.length === 1) {
+        if (points.length === 1 && this.preserveExactOutputEndpoints) {
           points[0] = { ...route.startPoint }
           points.push({ ...route.endPoint })
-        } else if (points.length > 1) {
+        } else if (points.length > 0) {
           points[0] = { ...route.startPoint }
-          points[points.length - 1] = { ...route.endPoint }
+          if (points.length > 1) {
+            points[points.length - 1] = { ...route.endPoint }
+          }
         }
         result.push({
           connectionName: connName,
-          rootConnectionName: this.connIdToRootNet[connId],
+          ...(this.includeRootConnectionNameInOutput
+            ? { rootConnectionName: this.connIdToRootNet[connId] }
+            : {}),
           regionId: this.nodeWithPortPoints.capacityMeshNodeId,
           traceThickness: this.traceThickness,
           viaDiameter: this.viaDiameter,

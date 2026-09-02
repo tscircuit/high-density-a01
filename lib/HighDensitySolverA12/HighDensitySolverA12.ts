@@ -60,6 +60,8 @@ function getPhysicalConnectionCounts(nodeWithPortPoints: NodeWithPortPoints): {
  * perimeter and a four-times coarser middle region.
  */
 export class HighDensitySolverA12 extends HighDensitySolverA03 {
+  protected override preserveExactOutputEndpoints = true
+  protected override includeRootConnectionNameInOutput = true
   fineGridCellThickness: number
 
   override getSolverName(): string {
