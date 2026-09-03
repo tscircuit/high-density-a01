@@ -1518,10 +1518,10 @@ export class HighDensitySolverA03 extends BaseSolver {
         const segKey = `${netName}|${orderedEndpoints}`
         if (seenSegmentKeys.has(segKey)) {
           this.overlapFriendlyRootNets.add(netName)
-          continue
         }
         seenSegmentKeys.add(segKey)
 
+        // Shared grid cells do not make distinct terminal pairs interchangeable.
         segs.push({
           connId,
           startZ: s.z,
