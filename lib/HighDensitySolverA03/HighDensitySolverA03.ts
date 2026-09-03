@@ -404,6 +404,8 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private usedCellsFlat!: Int32Array
   private sharedCellsFlat!: Array<number[] | undefined>
+  private usedDiagonalFlat?: Int32Array
+  private sharedDiagonalFlat?: Array<number[] | undefined>
   private portOwnerFlat!: Int32Array
   private penalty2d!: Float64Array
   private ripStateBuckets!: number
@@ -420,6 +422,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private overlapFriendlyRootNets!: Set<string>
 
   private usedIndicesByConn!: Array<number[] | undefined>
+  private usedDiagonalIndicesByConn!: Array<number[] | undefined>
   private unsolvedSegs!: ConnectionSeg[]
   private solvedRoutes!: Array<SolvedRouteInternal[] | undefined>
 
@@ -603,7 +606,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.boundsMinY = center.y - height / 2
     this.boundsMaxY = center.y + height / 2
 
-    this.traceKeepoutRadius = this.traceMargin + this.traceThickness / 2
+    this.traceKeepoutRadius = this.getTraceKeepoutRadius()
     this.viaKeepoutRadius = this.viaDiameter / 2 + this.traceKeepoutRadius
 
     this.buildFiveRegionGrid(width, height)
@@ -645,6 +648,12 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     this.usedCellsFlat = new Int32Array(totalCells).fill(-1)
     this.sharedCellsFlat = Array.from({ length: totalCells }, () => undefined)
+    this.usedDiagonalFlat = this.enableDiagonalMoves
+      ? new Int32Array(totalCells * 2).fill(-1)
+      : undefined
+    this.sharedDiagonalFlat = this.enableDiagonalMoves
+      ? Array.from({ length: totalCells * 2 }, () => undefined)
+      : undefined
     this.portOwnerFlat = new Int32Array(totalCells).fill(-1)
     this.sharedCrossRootPortFlat = new Uint8Array(totalCells)
 
@@ -679,6 +688,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
     this.solvedRoutes = []
     this.usedIndicesByConn = []
+    this.usedDiagonalIndicesByConn = []
     this.ripCount = []
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
@@ -699,6 +709,10 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.heap = new TypedMinHeap()
     this.ripChain = new TypedRipChain()
     this.seqCounter = 0
+  }
+
+  protected getTraceKeepoutRadius(): number {
+    return this.traceMargin + this.traceThickness / 2
   }
 
   override _step(): void {
@@ -1177,6 +1191,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.computeMoveCostAndRips(
         activeConn,
         z,
+        cellId,
         neighborCellId,
         false,
         rippedHead,
@@ -1225,6 +1240,7 @@ export class HighDensitySolverA03 extends BaseSolver {
           activeConn,
           nz,
           cellId,
+          cellId,
           true,
           rippedHead,
           ripCount,
@@ -1268,6 +1284,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private computeMoveCostAndRips(
     activeConn: ConnId,
     toZ: number,
+    fromCellId: number,
     toCellId: number,
     isVia: boolean,
     rippedHead: number,
@@ -1328,6 +1345,11 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
 
+      if (this.hasDiagonalCrossing(toZ, fromCellId, toCellId, activeConn)) {
+        this._moveCost = -1
+        this._moveRippedHead = head
+        return
+      }
       this.fillTraceOccupants(toFlatIdx, activeConn, this._cellOccs)
       for (let i = 0; i < this._cellOccs.length; i++) {
         const occ = this._cellOccs[i]!
@@ -1412,6 +1434,94 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.sharedCellsFlat[flatIdx] = sharedOccs
     }
     pushUnique(sharedOccs, connId)
+  }
+
+  private getDiagonalIndex(
+    z: number,
+    fromCellId: number,
+    toCellId: number,
+  ): number {
+    if (!this.usedDiagonalFlat) return -1
+    const regionId = this.cellRegion[fromCellId]!
+    if (regionId !== this.cellRegion[toCellId]!) return -1
+    const fromRow = this.cellRow[fromCellId]!
+    const fromCol = this.cellCol[fromCellId]!
+    const toRow = this.cellRow[toCellId]!
+    const toCol = this.cellCol[toCellId]!
+    const rowDelta = toRow - fromRow
+    const colDelta = toCol - fromCol
+    if (Math.abs(rowDelta) !== 1 || Math.abs(colDelta) !== 1) return -1
+    const anchorCellId = this.cellIdFor(
+      regionId,
+      Math.min(fromRow, toRow),
+      Math.min(fromCol, toCol),
+    )
+    const orientation = rowDelta * colDelta > 0 ? 0 : 1
+    return (z * this.planeSize + anchorCellId) * 2 + orientation
+  }
+
+  private hasDiagonalCrossing(
+    z: number,
+    fromCellId: number,
+    toCellId: number,
+    activeConn: ConnId,
+  ): boolean {
+    const diagonalIndex = this.getDiagonalIndex(z, fromCellId, toCellId)
+    if (diagonalIndex < 0) return false
+    const crossingIndex = diagonalIndex ^ 1
+    const primaryOcc = this.usedDiagonalFlat![crossingIndex]!
+    if (
+      primaryOcc !== -1 &&
+      primaryOcc !== activeConn &&
+      !this.allowSharedUse(activeConn, primaryOcc)
+    ) {
+      return true
+    }
+    const sharedOccs = this.sharedDiagonalFlat![crossingIndex]
+    if (!sharedOccs) return false
+    for (let i = 0; i < sharedOccs.length; i++) {
+      const occ = sharedOccs[i]!
+      if (occ === activeConn || this.allowSharedUse(activeConn, occ)) continue
+      return true
+    }
+    return false
+  }
+
+  private addDiagonalOccupant(diagonalIndex: number, connId: ConnId): void {
+    const primaryOcc = this.usedDiagonalFlat![diagonalIndex]!
+    if (primaryOcc === connId) return
+    if (primaryOcc === -1) {
+      this.usedDiagonalFlat![diagonalIndex] = connId
+      return
+    }
+    let sharedOccs = this.sharedDiagonalFlat![diagonalIndex]
+    if (!sharedOccs) {
+      sharedOccs = []
+      this.sharedDiagonalFlat![diagonalIndex] = sharedOccs
+    }
+    pushUnique(sharedOccs, connId)
+  }
+
+  private removeDiagonalOccupant(diagonalIndex: number, connId: ConnId): void {
+    const sharedOccs = this.sharedDiagonalFlat![diagonalIndex]
+    if (this.usedDiagonalFlat![diagonalIndex] === connId) {
+      if (sharedOccs && sharedOccs.length > 0) {
+        this.usedDiagonalFlat![diagonalIndex] = sharedOccs.pop()!
+        if (sharedOccs.length === 0) {
+          this.sharedDiagonalFlat![diagonalIndex] = undefined
+        }
+      } else {
+        this.usedDiagonalFlat![diagonalIndex] = -1
+      }
+      return
+    }
+    if (!sharedOccs) return
+    const idx = sharedOccs.indexOf(connId)
+    if (idx === -1) return
+    sharedOccs.splice(idx, 1)
+    if (sharedOccs.length === 0) {
+      this.sharedDiagonalFlat![diagonalIndex] = undefined
+    }
   }
 
   private replaceOccupants(flatIdx: number, connId: ConnId): void {
@@ -1614,6 +1724,40 @@ export class HighDensitySolverA03 extends BaseSolver {
       arr[i] = arr[j]!
       arr[j] = tmp
     }
+
+    const ordering = this.getInitialConnectionOrdering()
+    if (ordering === "cross-layer-longest-first") {
+      arr.sort((left, right) => {
+        const leftChangesLayer = left.startZ === left.endZ ? 0 : 1
+        const rightChangesLayer = right.startZ === right.endZ ? 0 : 1
+        if (leftChangesLayer !== rightChangesLayer) {
+          return rightChangesLayer - leftChangesLayer
+        }
+        return (
+          this.getConnectionLengthSquared(right) -
+          this.getConnectionLengthSquared(left)
+        )
+      })
+    } else if (ordering === "shortest-first") {
+      arr.sort(
+        (left, right) =>
+          this.getConnectionLengthSquared(left) -
+          this.getConnectionLengthSquared(right),
+      )
+    }
+  }
+
+  protected getInitialConnectionOrdering():
+    | "shuffled"
+    | "cross-layer-longest-first"
+    | "shortest-first" {
+    return "shuffled"
+  }
+
+  private getConnectionLengthSquared(segment: ConnectionSeg): number {
+    const dx = segment.endPoint.x - segment.startPoint.x
+    const dy = segment.endPoint.y - segment.startPoint.y
+    return dx * dx + dy * dy
   }
 
   private finalizeRoute(goalNodeIdx: number): void {
@@ -1654,6 +1798,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       const cellId = state - z * this.planeSize
       this.markTraceFootprint(connId, z, cellId, indices)
     }
+    this.markRouteDiagonals(connId, states)
 
     const displacedByVias: ConnId[] = []
     for (let i = 0; i < viaCellIds.length; i++) {
@@ -1713,6 +1858,30 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     }
     return viaCellIds
+  }
+
+  private markRouteDiagonals(connId: ConnId, states: number[]): void {
+    if (!this.usedDiagonalFlat) return
+    while (this.usedDiagonalIndicesByConn.length <= connId) {
+      this.usedDiagonalIndicesByConn.push(undefined)
+    }
+    const indices = this.usedDiagonalIndicesByConn[connId] ?? []
+    for (let i = 1; i < states.length; i++) {
+      const previous = states[i - 1]!
+      const next = states[i]!
+      const previousZ = Math.floor(previous / this.planeSize)
+      const nextZ = Math.floor(next / this.planeSize)
+      if (previousZ !== nextZ) continue
+      const diagonalIndex = this.getDiagonalIndex(
+        nextZ,
+        previous - previousZ * this.planeSize,
+        next - nextZ * this.planeSize,
+      )
+      if (diagonalIndex < 0) continue
+      this.addDiagonalOccupant(diagonalIndex, connId)
+      pushUnique(indices, diagonalIndex)
+    }
+    this.usedDiagonalIndicesByConn[connId] = indices
   }
 
   private markTraceFootprint(
@@ -1906,6 +2075,14 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.removeOccupant(indices[i]!, connId)
       }
       this.usedIndicesByConn[connId] = undefined
+    }
+
+    const diagonalIndices = this.usedDiagonalIndicesByConn[connId]
+    if (diagonalIndices) {
+      for (let i = 0; i < diagonalIndices.length; i++) {
+        this.removeDiagonalOccupant(diagonalIndices[i]!, connId)
+      }
+      this.usedDiagonalIndicesByConn[connId] = undefined
     }
 
     if (routes.length > 0) {

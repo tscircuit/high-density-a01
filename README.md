@@ -91,8 +91,11 @@ states. A12 adapts A03's five-region graph to the routing demand. Congested
 nodes use a one-trace-width fine perimeter so the coarse middle keeps most of
 the search capacity. Four-layer nodes dominated by same-layer connections use
 half the normal fine pitch to preserve narrow planar channels. Other nodes use
-the original feature-derived pitch and 16-cell perimeter. All variants use
-cells four times larger in the middle and enable diagonal moves. Set
+the original feature-derived pitch and 16-cell perimeter. Moderately congested
+nodes with many branches on a few root nets keep a small uniform fine grid so
+the router has enough interior resolution to separate those branches. All
+variants enable diagonal moves, and A12 tracks diagonal-edge occupancy so two
+different root nets cannot cross between cell centers. Set
 `fineGridCellThickness` to opt out of the adaptive default and tune the original
 fine perimeter for a particular portfolio.
 
@@ -117,16 +120,16 @@ fail exact geometry validation. At Pipeline 9 dimensions, seed 0, and a
 
 | Node | Iterations |
 | --- | ---: |
-| `sample003-cmn_70` | 265 |
-| `sample004-topology_merge_639` | 526 |
-| `sample005-cmn_45` | 373 |
+| `sample003-cmn_70` | 2,576 |
+| `sample004-topology_merge_639` | 105 |
+| `sample005-cmn_45` | 16,155 |
 | `sample007-cmn_345__sub_0_0` | 49 |
-| `sample007-cmn_345__sub_0_2` | 149 |
-| `sample008-cmn_251` | 1,067 |
-| `sample008-cmn_438` | 38,206 |
+| `sample007-cmn_345__sub_0_2` | 261 |
+| `sample008-cmn_251` | 28,650 |
+| `sample008-cmn_438` | 7,619 |
 | `sample011-cmn_56` | 1,256 |
-| `sample016-cmn_119` | 1,394 |
-| `sample016-cmn_31` | 306 |
+| `sample016-cmn_119` | 963 |
+| `sample016-cmn_31` | 4,845 |
 
 Seven of these are new beyond A11, giving the two-solver portfolio 16
 native-bounds solves.
@@ -134,10 +137,10 @@ native-bounds solves.
 Together, the A12 graphs allocate 18.1% as many search states as A11 across all
 27 dataset-hd30 nodes. On the largest grid, A12 uses 9.2% as many states. The
 reduction is concentrated in congested nodes; low-congestion nodes retain the
-original grid unless their same-layer demand requires finer planar resolution.
-Because diagonal-edge conflicts are checked by the final geometry gate rather
-than repaired during search, A12 is currently best used as a complementary
-portfolio stage alongside A11.
+original grid unless their same-layer or branching demand requires finer planar
+resolution. The final geometry gate remains authoritative after the in-search
+occupancy checks. A12 is best used as a complementary portfolio stage alongside
+A11.
 
 ### History-aware displacement in A11
 

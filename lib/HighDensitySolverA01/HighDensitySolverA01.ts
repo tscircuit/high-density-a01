@@ -682,7 +682,6 @@ export class HighDensitySolverA01 extends BaseSolver {
     const activeConn = this.activeConnId
     const rows = this.rows
     const cols = this.cols
-    const cellSizeMm = this.cellSizeMm
     const visited = this.visitedStamp
     const stamp = this.stamp
 
@@ -1340,7 +1339,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
 
     // Mark cells as used (with margin)
-    const marginCells = Math.ceil(this.traceMargin / this.cellSizeMm)
+    const marginCells = this.getTraceMarginCells()
     const indices: number[] = []
     const rows = this.rows
     const cols = this.cols
@@ -1530,6 +1529,10 @@ export class HighDensitySolverA01 extends BaseSolver {
         }
       }
     }
+  }
+
+  protected getTraceMarginCells(): number {
+    return Math.ceil(this.traceMargin / this.cellSizeMm)
   }
 
   // --- Rip a trace ---
