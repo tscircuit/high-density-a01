@@ -247,7 +247,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
+  protected allowAllSameRootOverlap = false
   protected ripHistoryCostMultiplier = 0
+  protected ripRouteCountCostMultiplier = 0
   protected useBestGPruning = false
 
   // Grid dimensions
@@ -785,9 +787,14 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Merged cost + rip computation (writes to _moveCost/_moveRipped) ---
   protected getRipCost(connId: ConnId): number {
+    const displacedRouteCount = Math.max(
+      1,
+      this.solvedRoutes.get(connId)?.length ?? 0,
+    )
     return (
       this.hyperParameters.ripCost *
-      (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0))
+      (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0)) *
+      (1 + this.ripRouteCountCostMultiplier * (displacedRouteCount - 1))
     )
   }
 
@@ -816,7 +823,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
       const allowFixedOverlap =
         fixedSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        (this.allowAllSameRootOverlap ||
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
       const seg = this.activeConnSeg
       const isSegEnd =
         !!seg &&
@@ -858,7 +866,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
       const allowFixedOverlap =
         fixedSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        (this.allowAllSameRootOverlap ||
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
       const seg = this.activeConnSeg
       const isSegEnd =
         !!seg &&
@@ -881,7 +890,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
       const allowSameRootOverlap =
         sameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        (this.allowAllSameRootOverlap ||
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
       if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
         if (!rippedContains(r, occ)) {
           cost += this.getRipCost(occ)
@@ -930,7 +940,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[activeConn]
         const allowCrossingOverlap =
           crossingSameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          (this.allowAllSameRootOverlap ||
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
         if (
           crossingOcc !== -1 &&
           crossingOcc !== activeConn &&
@@ -970,7 +981,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
         if (
           sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          (this.allowAllSameRootOverlap ||
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
         ) {
           continue
         }
@@ -1046,7 +1058,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.connIdToRootNet[owner] === this.connIdToRootNet[activeConn]
         if (
           sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          (this.allowAllSameRootOverlap ||
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
         ) {
           continue
         }
@@ -1064,7 +1077,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[connId]
     return !(
       sameRoot &&
-      this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+      (this.allowAllSameRootOverlap ||
+        this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!))
     )
   }
 
@@ -1364,7 +1378,8 @@ export class HighDensitySolverA01 extends BaseSolver {
             this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
           const allowSameRootOverlap =
             sameRoot &&
-            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+            (this.allowAllSameRootOverlap ||
+              this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!))
           if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
             continue
           }
@@ -1400,7 +1415,8 @@ export class HighDensitySolverA01 extends BaseSolver {
             this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
           const allowSameRootOverlap =
             sameRoot &&
-            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+            (this.allowAllSameRootOverlap ||
+              this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!))
           if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
             // Track displaced (small unique check)
             let seen = false
@@ -1444,7 +1460,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[connId]
       const allowCrossingOverlap =
         crossingSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+        (this.allowAllSameRootOverlap ||
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!))
       if (
         crossingOcc !== -1 &&
         crossingOcc !== connId &&
@@ -1533,6 +1550,14 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   protected getTraceMarginCells(): number {
     return Math.ceil(this.traceMargin / this.cellSizeMm)
+  }
+
+  protected rerouteConnection(connectionName: string): boolean {
+    const connId = this.connNameToId.get(connectionName)
+    if (connId === undefined || !this.solvedRoutes.has(connId)) return false
+    this.solved = false
+    this.ripTrace(connId)
+    return !this.failed
   }
 
   // --- Rip a trace ---

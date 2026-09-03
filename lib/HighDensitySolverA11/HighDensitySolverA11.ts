@@ -3,7 +3,10 @@ import {
   HighDensitySolverA01,
   type HighDensitySolverA01Props,
 } from "../HighDensitySolverA01/HighDensitySolverA01"
-import { getRouteGeometryViolationError } from "../routeGeometryValidation"
+import {
+  findRouteGeometryViolations,
+  formatRouteGeometryViolations,
+} from "../routeGeometryValidation"
 
 export type HighDensitySolverA11Props = Omit<
   HighDensitySolverA01Props,
@@ -33,10 +36,12 @@ export function getA11CellSizeMm(props: HighDensitySolverA11Props): number {
 export class HighDensitySolverA11 extends HighDensitySolverA01 {
   protected override useExactViaTraceClearance = true
   protected override ripHistoryCostMultiplier = 1
+  protected override ripRouteCountCostMultiplier = 1
   protected override useBestGPruning = true
   private physicalConnectionCount: number
   private useExactCopperOccupancy: boolean
   private routeShortestBranchesFirst: boolean
+  private geometryRepairCount = new Map<string, number>()
 
   protected override getTraceMarginCells(): number {
     return this.useExactCopperOccupancy
@@ -75,6 +80,7 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
     this.physicalConnectionCount = total
     this.useExactCopperOccupancy =
       total >= MIN_BRANCHING_CONNECTION_COUNT && extraBranches > 0
+    this.allowAllSameRootOverlap = this.useExactCopperOccupancy
     this.routeShortestBranchesFirst =
       this.useExactCopperOccupancy &&
       extraBranches >= MIN_EXTRA_BRANCH_COUNT_FOR_SHORTEST_FIRST
@@ -84,11 +90,26 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
     super._step()
     if (!this.solved) return
 
-    const geometryError = getRouteGeometryViolationError(this.getOutput())
-    if (geometryError) {
-      this.solved = false
-      this.failed = true
-      this.error = `A11 solution failed geometry validation: ${geometryError}`
-    }
+    const geometryViolations = findRouteGeometryViolations(this.getOutput())
+    if (geometryViolations.length === 0) return
+
+    const firstViolation = geometryViolations[0]!
+    const trace1RepairCount =
+      this.geometryRepairCount.get(firstViolation.trace1) ?? 0
+    const trace2RepairCount =
+      this.geometryRepairCount.get(firstViolation.trace2) ?? 0
+    const connectionToReroute =
+      trace2RepairCount <= trace1RepairCount
+        ? firstViolation.trace2
+        : firstViolation.trace1
+    this.geometryRepairCount.set(
+      connectionToReroute,
+      (this.geometryRepairCount.get(connectionToReroute) ?? 0) + 1,
+    )
+    if (this.rerouteConnection(connectionToReroute)) return
+
+    this.solved = false
+    this.failed = true
+    this.error = `A11 solution failed geometry validation: Found ${geometryViolations.length} route geometry violation(s):\n${formatRouteGeometryViolations(geometryViolations)}`
   }
 }
