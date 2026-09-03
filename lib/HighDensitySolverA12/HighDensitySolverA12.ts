@@ -29,6 +29,8 @@ const A12_MAX_ROOT_NETS_FOR_DENSE_BRANCH_ROUTING = 4
 const A12_MIN_EXTRA_BRANCHES_FOR_UNIFORM_GRID = 6
 const A12_MAX_CONNECTIONS_PER_LAYER_FOR_UNIFORM_GRID = 3
 const A12_UNIFORM_FINE_GRID_THICKNESS = 4
+const A12_STATE_BALANCED_FINE_GRID_THICKNESS = 4
+const A12_MAX_GRID_STATES_PER_CONNECTION = 1_500
 
 function getLayerCount(nodeWithPortPoints: NodeWithPortPoints): number {
   return Math.max(
@@ -39,6 +41,36 @@ function getLayerCount(nodeWithPortPoints: NodeWithPortPoints): number {
   )
 }
 
+function estimateFiveRegionStateCount({
+  width,
+  height,
+  fineCellSize,
+  fineGridCellThickness,
+  coarseCellScale,
+  layerCount,
+}: {
+  width: number
+  height: number
+  fineCellSize: number
+  fineGridCellThickness: number
+  coarseCellScale: number
+  layerCount: number
+}): number {
+  const fineCols = Math.max(1, Math.ceil(width / fineCellSize))
+  const fineRows = Math.max(1, Math.ceil(height / fineCellSize))
+  const bandCols = Math.min(fineGridCellThickness, Math.floor(fineCols / 2))
+  const bandRows = Math.min(fineGridCellThickness, Math.floor(fineRows / 2))
+  const middleFineCols = Math.max(0, fineCols - bandCols * 2)
+  const middleFineRows = Math.max(0, fineRows - bandRows * 2)
+  const perimeterCellCount =
+    2 * fineRows * bandCols + 2 * bandRows * middleFineCols
+  const middleCellCount =
+    Math.ceil(middleFineRows / coarseCellScale) *
+    Math.ceil(middleFineCols / coarseCellScale)
+
+  return (perimeterCellCount + middleCellCount) * layerCount
+}
+
 /**
  * A03's five-region grid with A11's feature-derived fine pitch around the
  * perimeter and a four-times coarser middle region.
@@ -46,6 +78,7 @@ function getLayerCount(nodeWithPortPoints: NodeWithPortPoints): number {
 export class HighDensitySolverA12 extends HighDensitySolverA03 {
   protected override preserveExactOutputEndpoints = true
   protected override includeRootConnectionNameInOutput = true
+  protected override ripHistoryCostMultiplier = 1
   fineGridCellThickness: number
   private physicalConnectionCount: number
   private useExactCopperKeepout: boolean
@@ -131,13 +164,29 @@ export class HighDensitySolverA12 extends HighDensitySolverA03 {
     const fineCellSizeMm = useFinerMultilayerGrid
       ? baseFineCellSizeMm / 2
       : baseFineCellSizeMm
+    const defaultGridStatesPerConnection =
+      estimateFiveRegionStateCount({
+        width: props.nodeWithPortPoints.width,
+        height: props.nodeWithPortPoints.height,
+        fineCellSize: fineCellSizeMm,
+        fineGridCellThickness: A12_FINE_PERIMETER_CELL_THICKNESS,
+        coarseCellScale: A12_COARSE_CELL_SCALE,
+        layerCount,
+      }) / Math.max(1, physicalConnectionCounts.total)
+    const useStateBalancedFineGrid =
+      requestedFineGridThickness === undefined &&
+      !useUniformDenseBranchGrid &&
+      !useCoarseCongestionGrid &&
+      defaultGridStatesPerConnection > A12_MAX_GRID_STATES_PER_CONNECTION
     const fineGridCellThickness =
       requestedFineGridThickness ??
       (useUniformDenseBranchGrid
         ? A12_UNIFORM_FINE_GRID_THICKNESS
         : useCoarseCongestionGrid
           ? Math.ceil((props.traceThickness ?? 0.1) / fineCellSizeMm)
-          : A12_FINE_PERIMETER_CELL_THICKNESS)
+          : useStateBalancedFineGrid
+            ? A12_STATE_BALANCED_FINE_GRID_THICKNESS
+            : A12_FINE_PERIMETER_CELL_THICKNESS)
     const coarseCellScale = useUniformDenseBranchGrid
       ? 1
       : A12_COARSE_CELL_SCALE

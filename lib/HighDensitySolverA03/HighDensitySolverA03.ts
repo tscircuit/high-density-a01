@@ -442,6 +442,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private consecutiveSkips = 0
   private penaltyCap!: number
   private baseSearchBudgetIters!: number
+  protected ripHistoryCostMultiplier = 0
 
   private _moveCost = 0
   private _moveRippedHead = -1
@@ -1281,6 +1282,13 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
   }
 
+  protected getRipCost(connId: ConnId): number {
+    return (
+      this.hyperParameters.ripCost *
+      (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0))
+    )
+  }
+
   private computeMoveCostAndRips(
     activeConn: ConnId,
     toZ: number,
@@ -1320,7 +1328,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!this.ripChain.contains(head, occ)) {
-          cost += this.hyperParameters.ripCost
+          cost += this.getRipCost(occ)
           head = this.ripChain.append(head, occ)
           ripCount++
         }
@@ -1354,7 +1362,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let i = 0; i < this._cellOccs.length; i++) {
         const occ = this._cellOccs[i]!
         if (!this.ripChain.contains(head, occ)) {
-          cost += this.hyperParameters.ripCost
+          cost += this.getRipCost(occ)
           head = this.ripChain.append(head, occ)
           ripCount++
         }

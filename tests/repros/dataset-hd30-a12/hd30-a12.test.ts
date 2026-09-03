@@ -184,6 +184,7 @@ test("A12 keeps the mixed grid connected while reducing large-node states", () =
   mixedGridSolver.setup()
   uniformGridSolver.setup()
 
+  expect(mixedGridSolver.fineGridCellThickness).toBe(4)
   const middleRegion = mixedGridSolver.regions.find(
     (region) => region.name === "middle",
   )!
