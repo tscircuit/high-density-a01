@@ -1,4 +1,9 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import {
+  ObstacleChecker,
+  type HighDensityObstacle,
+  type ObstacleConnectivityMap,
+} from "../ObstacleChecker"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
@@ -327,6 +332,8 @@ export interface HighDensitySolverA03Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  obstacles?: HighDensityObstacle[]
+  connMap?: ObstacleConnectivityMap
   /** Enable diagonal edges within each of the five grid regions. */
   enableDiagonalMoves?: boolean
   hyperParameters?: Partial<HyperParameters>
@@ -364,6 +371,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
+  private obstacleChecker?: ObstacleChecker
+  private obstacles?: HighDensityObstacle[]
+  private connMap?: ObstacleConnectivityMap
 
   boundsMinX!: number
   boundsMaxX!: number
@@ -509,6 +519,11 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   constructor(props: HighDensitySolverA03Props) {
     super()
+    this.obstacles = props.obstacles
+    this.connMap = props.connMap
+    if (props.obstacles?.length) {
+      this.obstacleChecker = new ObstacleChecker(props.obstacles, props.connMap)
+    }
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.highResolutionCellSize = props.highResolutionCellSize ?? 0.1
     this.highResolutionCellThickness = Math.max(
@@ -559,6 +574,8 @@ export class HighDensitySolverA03 extends BaseSolver {
         enableDiagonalMoves: this.enableDiagonalMoves,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
+        obstacles: this.obstacles,
+        connMap: this.connMap,
       },
     ]
   }
@@ -1175,6 +1192,8 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.computeMoveCostAndRips(
         activeConn,
         z,
+        cellId,
+        z,
         neighborCellId,
         false,
         rippedHead,
@@ -1221,6 +1240,8 @@ export class HighDensitySolverA03 extends BaseSolver {
 
         this.computeMoveCostAndRips(
           activeConn,
+          z,
+          cellId,
           nz,
           cellId,
           true,
@@ -1263,8 +1284,27 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
   }
 
+  private getObstaclePoint(
+    z: number,
+    cellId: number,
+    matchEndpoint: boolean,
+  ): { x: number; y: number; z: number } {
+    const segment = this.activeConnSeg!
+    if (matchEndpoint && z === segment.startZ && cellId === segment.startCellId)
+      return segment.startPoint
+    if (matchEndpoint && z === segment.endZ && cellId === segment.endCellId)
+      return segment.endPoint
+    const point = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+      x: this.cellCenterX[cellId]!,
+      y: this.cellCenterY[cellId]!,
+    })
+    return { ...point, z: this.layerToZ.get(z)! }
+  }
+
   private computeMoveCostAndRips(
     activeConn: ConnId,
+    fromZ: number,
+    fromCellId: number,
     toZ: number,
     toCellId: number,
     isVia: boolean,
@@ -1276,6 +1316,24 @@ export class HighDensitySolverA03 extends BaseSolver {
     let head = rippedHead
     let ripCount = currentRipCount
     const toFlatIdx = toZ * this.planeSize + toCellId
+
+    if (this.obstacleChecker) {
+      if (
+        this.obstacleChecker.isBlocked(
+          this.getObstaclePoint(fromZ, fromCellId, !isVia),
+          this.getObstaclePoint(toZ, toCellId, !isVia),
+          this.connIdToName[activeConn]!,
+          this.connIdToRootNet[activeConn]!,
+          (isVia ? this.viaDiameter : this.traceThickness) / 2 +
+            this.traceMargin,
+        )
+      ) {
+        this._moveCost = -1
+        this._moveRippedHead = rippedHead
+        this._moveRipCount = currentRipCount
+        return
+      }
+    }
 
     if (isVia) {
       cost += this.hyperParameters.viaBaseCost
@@ -1638,6 +1696,28 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     const viaCellIds = this.extractViaCellIds(states)
     const connId = this.activeConnId
+    if (this.obstacleChecker) {
+      const points = states.map((state) => {
+        const z = Math.floor(state / this.planeSize)
+        return this.getObstaclePoint(z, state - z * this.planeSize, false)
+      })
+      points[0] = this.activeConnSeg!.startPoint
+      if (points.length === 1) points.push(this.activeConnSeg!.endPoint)
+      else points[points.length - 1] = this.activeConnSeg!.endPoint
+      if (
+        this.obstacleChecker.isRouteBlocked(
+          points,
+          this.connIdToName[connId]!,
+          this.connIdToRootNet[connId]!,
+          this.traceThickness / 2 + this.traceMargin,
+          this.viaDiameter / 2 + this.traceMargin,
+        )
+      ) {
+        this.failed = true
+        this.error = "Final route intersects a foreign obstacle"
+        return
+      }
+    }
     this.ripChain.collect(this.nodePool.ripHead[goalNodeIdx]!, this._rippedIds)
 
     for (let i = 0; i < this._rippedIds.length; i++) {

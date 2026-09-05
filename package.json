@@ -45,6 +45,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@tscircuit/math-utils": "^0.0.36",
     "flatbush": "^4.5.0"
   }
 }

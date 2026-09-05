@@ -27,3 +27,7 @@ export {
 } from "./HighDensitySolverA12/HighDensitySolverA12"
 export * from "./routeGeometryValidation"
 export * from "./types"
+export type {
+  HighDensityObstacle,
+  ObstacleConnectivityMap,
+} from "./ObstacleChecker"

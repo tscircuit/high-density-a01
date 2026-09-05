@@ -6,6 +6,11 @@ import {
   computeGridToAffineTransform,
 } from "../gridToAffineTransform"
 import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
+import {
+  ObstacleChecker,
+  type HighDensityObstacle,
+  type ObstacleConnectivityMap,
+} from "../ObstacleChecker"
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
@@ -210,6 +215,8 @@ export interface HighDensitySolverA01Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  obstacles?: HighDensityObstacle[]
+  connMap?: ObstacleConnectivityMap
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -246,6 +253,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
   protected ripHistoryCostMultiplier = 0
+  private obstacleChecker?: ObstacleChecker
+  private obstacles?: HighDensityObstacle[]
+  private connMap?: ObstacleConnectivityMap
 
   // Grid dimensions
   rows!: number
@@ -352,6 +362,11 @@ export class HighDensitySolverA01 extends BaseSolver {
   constructor(props: HighDensitySolverA01Props) {
     super()
     this.nodeWithPortPoints = props.nodeWithPortPoints
+    this.obstacles = props.obstacles
+    this.connMap = props.connMap
+    if (props.obstacles?.length) {
+      this.obstacleChecker = new ObstacleChecker(props.obstacles, props.connMap)
+    }
     this.cellSizeMm = props.cellSizeMm
     this.viaDiameter = props.viaDiameter
     this.maxCellCount = props.maxCellCount
@@ -392,6 +407,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         effort: this.effort,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
+        obstacles: this.obstacles,
+        connMap: this.connMap,
       },
     ]
   }
@@ -753,6 +770,34 @@ export class HighDensitySolverA01 extends BaseSolver {
     )
   }
 
+  private getObstaclePoint(
+    z: number,
+    row: number,
+    col: number,
+    matchEndpoint: boolean,
+  ): { x: number; y: number; z: number } {
+    const segment = this.activeConnSeg!
+    if (
+      matchEndpoint &&
+      z === segment.startZ &&
+      row === segment.startRow &&
+      col === segment.startCol
+    )
+      return segment.startPoint
+    if (
+      matchEndpoint &&
+      z === segment.endZ &&
+      row === segment.endRow &&
+      col === segment.endCol
+    )
+      return segment.endPoint
+    const point = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+      x: this.gridOrigin.x + (col + 0.5) * this.cellSizeMm,
+      y: this.gridOrigin.y + (row + 0.5) * this.cellSizeMm,
+    })
+    return { ...point, z: this.layerToZ.get(z)! }
+  }
+
   private computeMoveCostAndRips(
     activeConn: ConnId,
     fromZ: number,
@@ -766,6 +811,23 @@ export class HighDensitySolverA01 extends BaseSolver {
     let cost = 0
     let r = ripped
     const cols = this.cols
+
+    if (this.obstacleChecker) {
+      if (
+        this.obstacleChecker.isBlocked(
+          this.getObstaclePoint(fromZ, fromRow, fromCol, fromZ === toZ),
+          this.getObstaclePoint(toZ, toRow, toCol, fromZ === toZ),
+          this.connIdToName[activeConn]!,
+          this.connIdToRootNet[activeConn]!,
+          (fromZ === toZ ? this.traceThickness : this.viaDiameter) / 2 +
+            this.traceMargin,
+        )
+      ) {
+        this._moveCost = -1
+        this._moveRipped = ripped
+        return
+      }
+    }
 
     if (fromZ !== toZ) {
       // Via transition
@@ -1237,6 +1299,28 @@ export class HighDensitySolverA01 extends BaseSolver {
     const connId = this.activeConnId
 
     // Collect ripped traces from goal node's persistent list
+    if (this.obstacleChecker) {
+      const points = cells.map((cell) =>
+        this.getObstaclePoint(cell.z, cell.row, cell.col, false),
+      )
+      points[0] = this.activeConnSeg!.startPoint
+      if (points.length === 1) points.push(this.activeConnSeg!.endPoint)
+      else points[points.length - 1] = this.activeConnSeg!.endPoint
+      if (
+        this.obstacleChecker.isRouteBlocked(
+          points,
+          this.connIdToName[connId]!,
+          this.connIdToRootNet[connId]!,
+          this.traceThickness / 2 + this.traceMargin,
+          this.viaDiameter / 2 + this.traceMargin,
+        )
+      ) {
+        this.failed = true
+        this.error = "Final route intersects a foreign obstacle"
+        return
+      }
+    }
+
     const goalNode = this.nodePool[goalNodeIdx]!
     const rippedIds: ConnId[] = []
     for (let cur = goalNode.ripped; cur; cur = cur.prev) {
