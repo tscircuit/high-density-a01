@@ -26,6 +26,13 @@ function rippedContains(r: RippedNode | null, id: ConnId): boolean {
   return false
 }
 
+function pushUnique(arr: number[], value: number): void {
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] === value) return
+  }
+  arr.push(value)
+}
+
 // --- A* search node (stored in a pool) ---
 interface SearchNode {
   z: number
@@ -268,8 +275,10 @@ export class HighDensitySolverA01 extends BaseSolver {
   // --- Flat arrays ---
   private planeSize!: number // rows * cols
   private usedCellsFlat!: Int32Array // layers * planeSize; -1 = empty
+  private sharedCellsFlat!: Array<number[] | undefined>
   private portOwnerFlat!: Int32Array // layers * planeSize; -1 = none, -2 = shared
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
+  private sharedDiagFlat!: Array<number[] | undefined>
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
   private sharedCrossRootPortCells!: Set<number>
@@ -309,6 +318,8 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
+  private _cellOccs: ConnId[] = []
+  private _diagOccs: ConnId[] = []
 
   // --- Convergence state ---
   private ripCount!: number[]
@@ -474,8 +485,10 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Flat used cells (Int32Array, -1 = empty)
     this.usedCellsFlat = new Int32Array(totalCells).fill(-1)
+    this.sharedCellsFlat = Array.from({ length: totalCells }, () => undefined)
     this.portOwnerFlat = new Int32Array(totalCells).fill(-1)
     this.usedDiagFlat = new Int32Array(totalDiags).fill(-1)
+    this.sharedDiagFlat = Array.from({ length: totalDiags }, () => undefined)
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
@@ -528,7 +541,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       const existing = this.portOwnerFlat[flatIdx]!
       if (existing === -1 || existing === connId) {
         this.portOwnerFlat[flatIdx] = connId
-      } else {
+      } else if (this.connIdToRootNet[existing] !== rootNet) {
         this.portOwnerFlat[flatIdx] = -2
       }
     }
@@ -678,7 +691,17 @@ export class HighDensitySolverA01 extends BaseSolver {
       const nIdx = (z * rows + nr) * cols + nc
       if (visited[nIdx] === stamp) continue
 
-      this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
+      this.computeMoveCostAndRips(
+        activeConn,
+        z,
+        row,
+        col,
+        z,
+        nr,
+        nc,
+        ripped,
+        undefined,
+      )
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
       const f2 =
@@ -707,6 +730,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       col <= this.maxViaCol
 
     if (canVia) {
+      let viaOccupants: ConnId[] | undefined
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
 
@@ -722,8 +746,10 @@ export class HighDensitySolverA01 extends BaseSolver {
           row,
           col,
           ripped,
+          viaOccupants,
         )
         if (this._moveCost < 0) continue
+        viaOccupants = this._viaOccs
         const g2 = g + this._moveCost
         const f2 =
           g2 +
@@ -762,6 +788,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     toRow: number,
     toCol: number,
     ripped: RippedNode | null,
+    viaOccupants: ConnId[] | undefined,
   ): void {
     let cost = 0
     let r = ripped
@@ -796,9 +823,12 @@ export class HighDensitySolverA01 extends BaseSolver {
         return
       }
 
-      // Via footprint occupants (reusable scratch array)
-      this.fillViaOccupants(toRow, toCol, activeConn)
-      const occs = this._viaOccs
+      // Every destination layer uses the same all-layer copper footprint.
+      // Nothing mutates this scratch array between via neighbors.
+      if (viaOccupants === undefined) {
+        this.fillViaOccupants(toRow, toCol, activeConn)
+      }
+      const occs: ConnId[] = viaOccupants ?? this._viaOccs
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!rippedContains(r, occ)) {
@@ -838,13 +868,9 @@ export class HighDensitySolverA01 extends BaseSolver {
         return
       }
 
-      const occ = this.usedCellsFlat[flatIdx]!
-      const sameRoot =
-        this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-      const allowSameRootOverlap =
-        sameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-      if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
+      this.fillTraceOccupants(flatIdx, activeConn, this._cellOccs)
+      for (let i = 0; i < this._cellOccs.length; i++) {
+        const occ = this._cellOccs[i]!
         if (!rippedContains(r, occ)) {
           cost += this.getRipCost(occ)
           r = { id: occ, prev: r }
@@ -887,17 +913,15 @@ export class HighDensitySolverA01 extends BaseSolver {
         const crossingSlot = diagSlot ^ 1
         const sqCols = this.cols - 1
         const diagBase = ((toZ * (this.rows - 1) + sqRow) * sqCols + sqCol) * 2
-        const crossingOcc = this.usedDiagFlat[diagBase + crossingSlot]!
-        const crossingSameRoot =
-          this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[activeConn]
-        const allowCrossingOverlap =
-          crossingSameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-        if (
-          crossingOcc !== -1 &&
-          crossingOcc !== activeConn &&
-          !allowCrossingOverlap
-        ) {
+        this._diagOccs.length = 0
+        this.pushFlatOccupants(
+          diagBase + crossingSlot,
+          activeConn,
+          this._diagOccs,
+          this.usedDiagFlat,
+          this.sharedDiagFlat,
+        )
+        if (this._diagOccs.length > 0) {
           this._moveCost = -1
           this._moveRipped = r
           return
@@ -918,35 +942,94 @@ export class HighDensitySolverA01 extends BaseSolver {
     const offDr = this.viaOccupantScanOffsetsDr
     const offDc = this.viaOccupantScanOffsetsDc
     const offLen = this.viaOccupantScanOffsetsLen
-    const used = this.usedCellsFlat
-
     for (let z = 0; z < this.layers; z++) {
       const zBase = z * this.planeSize
       for (let i = 0; i < offLen; i++) {
         const r = row + offDr[i]!
         const c = col + offDc[i]!
         if (r < 0 || c < 0 || r >= rows || c >= cols) continue
-        const occ = used[zBase + r * cols + c]!
-        if (occ === -1 || occ === activeConn) continue
-        const sameRoot =
-          this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-        if (
-          sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-        ) {
-          continue
-        }
-        // Small unique check (typically very few occupants)
-        let seen = false
-        for (let j = 0; j < occs.length; j++) {
-          if (occs[j] === occ) {
-            seen = true
-            break
-          }
-        }
-        if (!seen) occs.push(occ)
+        this.pushFlatOccupants(zBase + r * cols + c, activeConn, occs)
       }
     }
+  }
+
+  private fillTraceOccupants(
+    flatIdx: number,
+    activeConn: ConnId,
+    out: ConnId[],
+  ): void {
+    out.length = 0
+    this.pushFlatOccupants(flatIdx, activeConn, out)
+  }
+
+  private pushFlatOccupants(
+    flatIdx: number,
+    activeConn: ConnId,
+    out: ConnId[],
+    used: Int32Array = this.usedCellsFlat,
+    shared: Array<number[] | undefined> = this.sharedCellsFlat,
+  ): void {
+    const primaryOcc = used[flatIdx]!
+    if (
+      primaryOcc !== -1 &&
+      primaryOcc !== activeConn &&
+      !this.allowSharedUse(activeConn, primaryOcc)
+    ) {
+      pushUnique(out, primaryOcc)
+    }
+    const sharedOccs = shared[flatIdx]
+    if (!sharedOccs) return
+    for (let i = 0; i < sharedOccs.length; i++) {
+      const occ = sharedOccs[i]!
+      if (occ === activeConn || this.allowSharedUse(activeConn, occ)) continue
+      pushUnique(out, occ)
+    }
+  }
+
+  private addSharedOccupant(
+    flatIdx: number,
+    connId: ConnId,
+    used: Int32Array = this.usedCellsFlat,
+    shared: Array<number[] | undefined> = this.sharedCellsFlat,
+  ): void {
+    if (used[flatIdx] === connId) return
+    let sharedOccs = shared[flatIdx]
+    if (!sharedOccs) {
+      sharedOccs = []
+      shared[flatIdx] = sharedOccs
+    }
+    pushUnique(sharedOccs, connId)
+  }
+
+  private removeOccupant(
+    flatIdx: number,
+    connId: ConnId,
+    used: Int32Array = this.usedCellsFlat,
+    shared: Array<number[] | undefined> = this.sharedCellsFlat,
+  ): void {
+    const sharedOccs = shared[flatIdx]
+    if (used[flatIdx] === connId) {
+      if (sharedOccs && sharedOccs.length > 0) {
+        used[flatIdx] = sharedOccs.pop()!
+        if (sharedOccs.length === 0) shared[flatIdx] = undefined
+      } else {
+        used[flatIdx] = -1
+      }
+      return
+    }
+    if (!sharedOccs) return
+    const index = sharedOccs.indexOf(connId)
+    if (index === -1) return
+    sharedOccs.splice(index, 1)
+    if (sharedOccs.length === 0) shared[flatIdx] = undefined
+  }
+
+  private allowSharedUse(activeConn: ConnId, existingConn: ConnId): boolean {
+    if (existingConn < 0) return false
+    return (
+      this.connIdToRootNet[existingConn] === this.connIdToRootNet[activeConn] &&
+      this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+    )
   }
 
   private fillTraceSegmentViaOccupants(
@@ -1116,6 +1199,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     const segs: ConnectionSeg[] = []
     const seenSegmentKeys = new Set<string>()
+    const seenPhysicalSegmentKeys = new Set<string>()
 
     for (const [name, conn] of byName) {
       const pts = conn.points
@@ -1137,9 +1221,19 @@ export class HighDensitySolverA01 extends BaseSolver {
         const segKey = `${netName}|${orderedEndpoints}`
         if (seenSegmentKeys.has(segKey)) {
           this.overlapFriendlyRootNets.add(netName)
-          continue
         }
         seenSegmentKeys.add(segKey)
+
+        // Shared grid cells do not make distinct terminal pairs interchangeable.
+        const physicalEndpointA = `${startPoint.x}:${startPoint.y}:${startPoint.z}`
+        const physicalEndpointB = `${endPoint.x}:${endPoint.y}:${endPoint.z}`
+        const orderedPhysicalEndpoints =
+          physicalEndpointA < physicalEndpointB
+            ? `${physicalEndpointA}|${physicalEndpointB}`
+            : `${physicalEndpointB}|${physicalEndpointA}`
+        const physicalSegmentKey = `${netName}|${orderedPhysicalEndpoints}`
+        if (seenPhysicalSegmentKeys.has(physicalSegmentKey)) continue
+        seenPhysicalSegmentKeys.add(physicalSegmentKey)
 
         segs.push({
           connId,
@@ -1279,7 +1373,11 @@ export class HighDensitySolverA01 extends BaseSolver {
           if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
             continue
           }
-          used[flatIdx] = connId
+          if (existing !== -1 && existing !== connId) {
+            this.addSharedOccupant(flatIdx, connId)
+          } else {
+            used[flatIdx] = connId
+          }
           indices.push(flatIdx)
         }
       }
@@ -1306,24 +1404,22 @@ export class HighDensitySolverA01 extends BaseSolver {
           ) {
             continue
           }
-          const existing = used[flatIdx]!
-          const sameRoot =
-            this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
-          const allowSameRootOverlap =
-            sameRoot &&
-            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
-          if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
-            // Track displaced (small unique check)
-            let seen = false
-            for (let k = 0; k < displacedByVias.length; k++) {
-              if (displacedByVias[k] === existing) {
-                seen = true
-                break
-              }
+          this.fillTraceOccupants(flatIdx, connId, this._cellOccs)
+          if (this._cellOccs.length > 0) {
+            for (let i = 0; i < this._cellOccs.length; i++) {
+              pushUnique(displacedByVias, this._cellOccs[i]!)
             }
-            if (!seen) displacedByVias.push(existing)
+            used[flatIdx] = connId
+            this.sharedCellsFlat[flatIdx] = undefined
+            indices.push(flatIdx)
+            continue
           }
-          used[flatIdx] = connId
+          const existing = used[flatIdx]!
+          if (existing !== -1 && existing !== connId) {
+            this.addSharedOccupant(flatIdx, connId)
+          } else {
+            used[flatIdx] = connId
+          }
           indices.push(flatIdx)
         }
       }
@@ -1350,22 +1446,30 @@ export class HighDensitySolverA01 extends BaseSolver {
       const crossingSlot = diagSlot ^ 1
       const diagBase = ((prev.z * (this.rows - 1) + sqRow) * sqCols + sqCol) * 2
       const crossingIdx = diagBase + crossingSlot
-      const crossingOcc = this.usedDiagFlat[crossingIdx]!
-      const crossingSameRoot =
-        this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[connId]
-      const allowCrossingOverlap =
-        crossingSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
-      if (
-        crossingOcc !== -1 &&
-        crossingOcc !== connId &&
-        !allowCrossingOverlap
-      ) {
+      this._diagOccs.length = 0
+      this.pushFlatOccupants(
+        crossingIdx,
+        connId,
+        this._diagOccs,
+        this.usedDiagFlat,
+        this.sharedDiagFlat,
+      )
+      if (this._diagOccs.length > 0) {
         continue
       }
 
       const diagIdx = diagBase + diagSlot
-      this.usedDiagFlat[diagIdx] = connId
+      const existingDiag = this.usedDiagFlat[diagIdx]!
+      if (existingDiag !== -1 && existingDiag !== connId) {
+        this.addSharedOccupant(
+          diagIdx,
+          connId,
+          this.usedDiagFlat,
+          this.sharedDiagFlat,
+        )
+      } else {
+        this.usedDiagFlat[diagIdx] = connId
+      }
       diagIndices.push(diagIdx)
     }
 
@@ -1477,24 +1581,21 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Clear used cells using tracked indices
     const indices = this.usedIndicesByConn[connId]
     if (indices) {
-      const used = this.usedCellsFlat
       for (let i = 0; i < indices.length; i++) {
-        const flatIdx = indices[i]!
-        if (used[flatIdx] === connId) {
-          used[flatIdx] = -1
-        }
+        this.removeOccupant(indices[i]!, connId)
       }
       this.usedIndicesByConn[connId] = []
     }
 
     const diagIndices = this.usedDiagIndicesByConn[connId]
     if (diagIndices) {
-      const usedDiag = this.usedDiagFlat
       for (let i = 0; i < diagIndices.length; i++) {
-        const flatIdx = diagIndices[i]!
-        if (usedDiag[flatIdx] === connId) {
-          usedDiag[flatIdx] = -1
-        }
+        this.removeOccupant(
+          diagIndices[i]!,
+          connId,
+          this.usedDiagFlat,
+          this.sharedDiagFlat,
+        )
       }
       this.usedDiagIndicesByConn[connId] = []
     }
@@ -1728,9 +1829,32 @@ export class HighDensitySolverA01 extends BaseSolver {
           const tp = applyAffineTransformToPoint(t, { x: rawX, y: rawY })
           return { x: tp.x, y: tp.y, z: this.layerToZ.get(cell.z) ?? cell.z }
         })
-        if (points.length > 0) {
+        if (points.length === 1) {
           points[0] = { ...route.startPoint }
-          if (points.length > 1) {
+          points.push({ ...route.endPoint })
+        } else if (points.length > 1) {
+          const firstPoint = points[0]!
+          const lastPoint = points[points.length - 1]!
+          const startsWithVia: boolean = firstPoint.z !== points[1]!.z
+          const endsWithVia: boolean =
+            lastPoint.z !== points[points.length - 2]!.z
+          // Keep routed via anchors; exact terminals connect on their own layer.
+          if (
+            startsWithVia &&
+            (firstPoint.x !== route.startPoint.x ||
+              firstPoint.y !== route.startPoint.y)
+          ) {
+            points.unshift({ ...route.startPoint })
+          } else {
+            points[0] = { ...route.startPoint }
+          }
+          if (
+            endsWithVia &&
+            (lastPoint.x !== route.endPoint.x ||
+              lastPoint.y !== route.endPoint.y)
+          ) {
+            points.push({ ...route.endPoint })
+          } else {
             points[points.length - 1] = { ...route.endPoint }
           }
         }

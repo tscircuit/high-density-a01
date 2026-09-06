@@ -671,7 +671,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       const existing = this.portOwnerFlat[flatIdx]!
       if (existing === -1 || existing === connId) {
         this.portOwnerFlat[flatIdx] = connId
-      } else {
+      } else if (this.connIdToRootNet[existing] !== rootNet) {
         this.portOwnerFlat[flatIdx] = -2
       }
     }
@@ -1180,6 +1180,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         rippedHead,
         ripCount,
         this.neighborCosts[i]!,
+        undefined,
       )
       if (this._moveCost < 0) continue
 
@@ -1215,6 +1216,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
 
     if (this.viaAllowed[cellId]) {
+      let viaOccupants: ConnId[] | undefined
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
@@ -1227,8 +1229,10 @@ export class HighDensitySolverA03 extends BaseSolver {
           rippedHead,
           ripCount,
           0,
+          viaOccupants,
         )
         if (this._moveCost < 0) continue
+        viaOccupants = this._viaOccs
 
         const nextStateIdx = this.getSearchStateIdx(
           nextFlatIdx,
@@ -1271,6 +1275,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     rippedHead: number,
     currentRipCount: number,
     lateralCost: number,
+    viaOccupants: ConnId[] | undefined,
   ): void {
     let cost = 0
     let head = rippedHead
@@ -1296,8 +1301,12 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
 
-      this.fillViaOccupants(toCellId, activeConn)
-      const occs = this._viaOccs
+      // Every destination layer uses the same all-layer copper footprint.
+      // Nothing mutates this scratch array between via neighbors.
+      if (viaOccupants === undefined) {
+        this.fillViaOccupants(toCellId, activeConn)
+      }
+      const occs: ConnId[] = viaOccupants ?? this._viaOccs
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!this.ripChain.contains(head, occ)) {
@@ -1516,6 +1525,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     const segs: ConnectionSeg[] = []
     const seenSegmentKeys = new Set<string>()
+    const seenPhysicalSegmentKeys = new Set<string>()
 
     for (const [name, conn] of byName) {
       const pts = conn.points
@@ -1537,9 +1547,19 @@ export class HighDensitySolverA03 extends BaseSolver {
         const segKey = `${netName}|${orderedEndpoints}`
         if (seenSegmentKeys.has(segKey)) {
           this.overlapFriendlyRootNets.add(netName)
-          continue
         }
         seenSegmentKeys.add(segKey)
+
+        // Shared grid cells do not make distinct terminal pairs interchangeable.
+        const physicalEndpointA = `${startPoint.x}:${startPoint.y}:${startPoint.z}`
+        const physicalEndpointB = `${endPoint.x}:${endPoint.y}:${endPoint.z}`
+        const orderedPhysicalEndpoints =
+          physicalEndpointA < physicalEndpointB
+            ? `${physicalEndpointA}|${physicalEndpointB}`
+            : `${physicalEndpointB}|${physicalEndpointA}`
+        const physicalSegmentKey = `${netName}|${orderedPhysicalEndpoints}`
+        if (seenPhysicalSegmentKeys.has(physicalSegmentKey)) continue
+        seenPhysicalSegmentKeys.add(physicalSegmentKey)
 
         segs.push({
           connId,
@@ -2146,8 +2166,30 @@ export class HighDensitySolverA03 extends BaseSolver {
           points[0] = { ...route.startPoint }
           points.push({ ...route.endPoint })
         } else if (points.length > 1) {
-          points[0] = { ...route.startPoint }
-          points[points.length - 1] = { ...route.endPoint }
+          const firstPoint = points[0]!
+          const lastPoint = points[points.length - 1]!
+          const startsWithVia: boolean = firstPoint.z !== points[1]!.z
+          const endsWithVia: boolean =
+            lastPoint.z !== points[points.length - 2]!.z
+          // Keep routed via anchors; exact terminals connect on their own layer.
+          if (
+            startsWithVia &&
+            (firstPoint.x !== route.startPoint.x ||
+              firstPoint.y !== route.startPoint.y)
+          ) {
+            points.unshift({ ...route.startPoint })
+          } else {
+            points[0] = { ...route.startPoint }
+          }
+          if (
+            endsWithVia &&
+            (lastPoint.x !== route.endPoint.x ||
+              lastPoint.y !== route.endPoint.y)
+          ) {
+            points.push({ ...route.endPoint })
+          } else {
+            points[points.length - 1] = { ...route.endPoint }
+          }
         }
         result.push({
           connectionName: connName,
