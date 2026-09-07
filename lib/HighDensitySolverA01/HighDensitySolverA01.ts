@@ -872,8 +872,13 @@ export class HighDensitySolverA01 extends BaseSolver {
     activeConn: ConnId,
   ): ConnId[] {
     const cellIdx = row * this.cols + col
-    const cached = this.viaOccupantsByCell.get(cellIdx)
-    if (cached) return cached
+    // With two layers, the reverse via targets an already visited state, so
+    // this cell is scanned at most once per search. More layers can reuse it.
+    const shouldCache = this.layers > 2
+    if (shouldCache) {
+      const cached = this.viaOccupantsByCell.get(cellIdx)
+      if (cached) return cached
+    }
     const occs: ConnId[] = []
     const rows = this.rows
     const cols = this.cols
@@ -923,7 +928,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (!seen) occs.push(occ)
       }
     }
-    this.viaOccupantsByCell.set(cellIdx, occs)
+    if (shouldCache) this.viaOccupantsByCell.set(cellIdx, occs)
     return occs
   }
 

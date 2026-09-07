@@ -1351,15 +1351,20 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   private getViaOccupants(cellId: number, activeConn: ConnId): ConnId[] {
-    const cached = this.viaOccupantsByCell.get(cellId)
-    if (cached) return cached
+    // With two layers, the reverse via targets an already visited state, so
+    // this cell is scanned at most once per search. More layers can reuse it.
+    const shouldCache = this.layers > 2
+    if (shouldCache) {
+      const cached = this.viaOccupantsByCell.get(cellId)
+      if (cached) return cached
+    }
     const occs: ConnId[] = []
     for (const occCellId of this.getViaFootprint(cellId)) {
       for (let z = 0; z < this.layers; z++) {
         this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
       }
     }
-    this.viaOccupantsByCell.set(cellId, occs)
+    if (shouldCache) this.viaOccupantsByCell.set(cellId, occs)
     return occs
   }
 

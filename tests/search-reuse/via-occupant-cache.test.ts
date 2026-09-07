@@ -24,6 +24,7 @@ type SearchState = {
 class ObservedCache extends Map<number, number[]> {
   hits = 0
   misses = 0
+  writes = 0
 
   constructor(private enabled: boolean) {
     super()
@@ -37,6 +38,7 @@ class ObservedCache extends Map<number, number[]> {
   }
 
   override set(key: number, value: number[]): this {
+    this.writes++
     if (this.enabled) super.set(key, value)
     return this
   }
@@ -45,6 +47,7 @@ class ObservedCache extends Map<number, number[]> {
 function observeSearches(
   solver: Solver,
   enabled: boolean,
+  forceMemo = false,
 ): {
   cache: ObservedCache
   finalizedInvalidations: number
@@ -81,6 +84,18 @@ function observeSearches(
       throw new Error(
         "Occupant cache was read before the new search cleared it",
       )
+    }
+    if (forceMemo) {
+      // Reference behavior before the two-layer bypass: memoize every query.
+      const key =
+        solver instanceof HighDensitySolverA01
+          ? args[0]! * solver.cols + args[1]!
+          : args[0]!
+      const cached = cache.get(key)
+      if (cached) return cached
+      const occupants = getViaOccupants(...args)
+      cache.set(key, occupants)
+      return occupants
     }
     return getViaOccupants(...args)
   }
@@ -129,14 +144,32 @@ for (const { name, create } of solvers) {
     for (const [fixtureName, nodeWithPortPoints] of fixtures) {
       test(`caches via occupants without changing ${fixtureName} routes or search`, () => {
         const cached = create(nodeWithPortPoints)
-        const uncached = create(nodeWithPortPoints)
+        const reference = create(nodeWithPortPoints)
+        cached.setup()
+        reference.setup()
+        const shouldCache = cached.layers > 2
         const observed = observeSearches(cached, true)
-        observeSearches(uncached, false)
+        const referenceStats = observeSearches(
+          reference,
+          !shouldCache,
+          !shouldCache,
+        )
         cached.solve()
-        uncached.solve()
+        reference.solve()
 
-        expect(getResult(cached)).toEqual(getResult(uncached))
+        expect(getResult(cached)).toEqual(getResult(reference))
         expect(observed.cache.size).toBe(0)
+        if (!shouldCache) {
+          expect(observed.cache.hits).toBe(0)
+          expect(observed.cache.misses).toBe(0)
+          expect(observed.cache.writes).toBe(0)
+          // The reference confirms the visited-state invariant: two-layer
+          // searches never reuse a memoized occupant list.
+          expect(referenceStats.cache.hits).toBe(0)
+          if (cached.layers === 2) {
+            expect(referenceStats.cache.misses).toBeGreaterThan(0)
+          }
+        }
         hits += observed.cache.hits
         finalizedInvalidations += observed.finalizedInvalidations
         rippedInvalidations += observed.rippedInvalidations
