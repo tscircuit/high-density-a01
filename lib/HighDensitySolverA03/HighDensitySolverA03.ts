@@ -343,6 +343,8 @@ export interface HighDensitySolverA03Props {
 }
 
 export class HighDensitySolverA03 extends BaseSolver {
+  protected preserveExactOutputEndpoints = false
+  protected includeRootConnectionNameInOutput = false
   override getSolverName(): string {
     return "HighDensitySolverA03"
   }
@@ -429,6 +431,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   private seqCounter = 0
 
   private _viaOccs: ConnId[] = []
+  private viaOccupantsComputed = false
+  private occupantStampByConn!: Uint32Array
+  private occupantStamp = 0
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
@@ -620,6 +625,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.overlapFriendlyRootNets = new Set()
 
     this.unsolvedSegs = this.buildConnectionSegs()
+    this.occupantStampByConn = new Uint32Array(this.connIdToName.length)
 
     this.penalty2d = new Float64Array(this.planeSize)
     const widthInv = width > 0 ? 1 / width : 0
@@ -1215,6 +1221,10 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
 
     if (this.viaAllowed[cellId]) {
+      // Every destination layer uses the same all-layer footprint. Occupancy
+      // cannot change while expanding this state, but can change before the
+      // next expansion when a route is finalized or ripped.
+      this.viaOccupantsComputed = false
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
@@ -1344,6 +1354,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
+    if (this.viaOccupantsComputed) return
+    this.viaOccupantsComputed = true
+    this.nextOccupantStamp()
     const occs = this._viaOccs
     occs.length = 0
     const cx = this.cellCenterX[cellId]!
@@ -1374,7 +1387,22 @@ export class HighDensitySolverA03 extends BaseSolver {
     out: ConnId[],
   ): void {
     out.length = 0
+    this.nextOccupantStamp()
     this.pushFlatOccupants(flatIdx, activeConn, out)
+  }
+
+  private nextOccupantStamp(): void {
+    this.occupantStamp = (this.occupantStamp + 1) >>> 0
+    if (this.occupantStamp === 0) {
+      this.occupantStampByConn.fill(0)
+      this.occupantStamp = 1
+    }
+  }
+
+  private pushUniqueOccupant(out: ConnId[], connId: ConnId): void {
+    if (this.occupantStampByConn[connId] === this.occupantStamp) return
+    this.occupantStampByConn[connId] = this.occupantStamp
+    out.push(connId)
   }
 
   private pushFlatOccupants(
@@ -1388,7 +1416,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       primaryOcc !== activeConn &&
       !this.allowSharedUse(activeConn, primaryOcc)
     ) {
-      pushUnique(out, primaryOcc)
+      this.pushUniqueOccupant(out, primaryOcc)
     }
 
     const sharedOccs = this.sharedCellsFlat[flatIdx]
@@ -1397,7 +1425,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       const occ = sharedOccs[i]!
       if (occ === activeConn) continue
       if (this.allowSharedUse(activeConn, occ)) continue
-      pushUnique(out, occ)
+      this.pushUniqueOccupant(out, occ)
     }
   }
 
@@ -2142,16 +2170,20 @@ export class HighDensitySolverA03 extends BaseSolver {
             z: this.layerToZ.get(z) ?? z,
           }
         })
-        if (points.length === 1) {
+        if (points.length === 1 && this.preserveExactOutputEndpoints) {
           points[0] = { ...route.startPoint }
           points.push({ ...route.endPoint })
-        } else if (points.length > 1) {
+        } else if (points.length > 0) {
           points[0] = { ...route.startPoint }
-          points[points.length - 1] = { ...route.endPoint }
+          if (points.length > 1) {
+            points[points.length - 1] = { ...route.endPoint }
+          }
         }
         result.push({
           connectionName: connName,
-          rootConnectionName: this.connIdToRootNet[connId],
+          ...(this.includeRootConnectionNameInOutput
+            ? { rootConnectionName: this.connIdToRootNet[connId] }
+            : {}),
           regionId: this.nodeWithPortPoints.capacityMeshNodeId,
           traceThickness: this.traceThickness,
           viaDiameter: this.viaDiameter,
