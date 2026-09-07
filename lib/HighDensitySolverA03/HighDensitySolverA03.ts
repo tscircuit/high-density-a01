@@ -423,6 +423,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private _viaOccs: ConnId[] = []
   private viaOccupantsByCell = new Map<number, ConnId[]>()
+  private viaFootprintByCell = new Map<number, Int32Array>()
   private rootOverlapAllowed = new Uint8Array(0)
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
@@ -557,6 +558,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.viaFootprintByCell.clear()
     const { nodeWithPortPoints } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -699,6 +701,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
     if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
       this.viaOccupantsByCell.clear()
+      this.viaFootprintByCell.clear()
     }
   }
 
@@ -1326,30 +1329,42 @@ export class HighDensitySolverA03 extends BaseSolver {
     this._moveRipCount = ripCount
   }
 
+  private getViaFootprint(cellId: number): Int32Array {
+    const cached = this.viaFootprintByCell.get(cellId)
+    if (cached) return cached
+    const cells: number[] = []
+    const cx = this.cellCenterX[cellId]!
+    const cy = this.cellCenterY[cellId]!
+    // Grid geometry stays fixed when searches finalize or rip other routes.
+    this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (neighborCellId) => {
+      if (
+        circleIntersectsRect(
+          cx,
+          cy,
+          this.viaKeepoutRadius,
+          this.cellMinX[neighborCellId]!,
+          this.cellMinY[neighborCellId]!,
+          this.cellMaxX[neighborCellId]!,
+          this.cellMaxY[neighborCellId]!,
+        )
+      ) {
+        cells.push(neighborCellId)
+      }
+    })
+    const footprint = new Int32Array(cells)
+    this.viaFootprintByCell.set(cellId, footprint)
+    return footprint
+  }
+
   private getViaOccupants(cellId: number, activeConn: ConnId): ConnId[] {
     const cached = this.viaOccupantsByCell.get(cellId)
     if (cached) return cached
     const occs: ConnId[] = []
-    const cx = this.cellCenterX[cellId]!
-    const cy = this.cellCenterY[cellId]!
-    this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
-      if (
-        !circleIntersectsRect(
-          cx,
-          cy,
-          this.viaKeepoutRadius,
-          this.cellMinX[occCellId]!,
-          this.cellMinY[occCellId]!,
-          this.cellMaxX[occCellId]!,
-          this.cellMaxY[occCellId]!,
-        )
-      ) {
-        return
-      }
+    for (const occCellId of this.getViaFootprint(cellId)) {
       for (let z = 0; z < this.layers; z++) {
         this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
       }
-    })
+    }
     this.viaOccupantsByCell.set(cellId, occs)
     return occs
   }
@@ -1759,22 +1774,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     indices: number[],
     displacedByVias: ConnId[],
   ) {
-    const cx = this.cellCenterX[sourceCellId]!
-    const cy = this.cellCenterY[sourceCellId]!
-    this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (cellId) => {
-      if (
-        !circleIntersectsRect(
-          cx,
-          cy,
-          this.viaKeepoutRadius,
-          this.cellMinX[cellId]!,
-          this.cellMinY[cellId]!,
-          this.cellMaxX[cellId]!,
-          this.cellMaxY[cellId]!,
-        )
-      ) {
-        return
-      }
+    for (const cellId of this.getViaFootprint(sourceCellId)) {
       for (let z = 0; z < this.layers; z++) {
         const flatIdx = z * this.planeSize + cellId
         if (
@@ -1800,7 +1800,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         }
         indices.push(flatIdx)
       }
-    })
+    }
   }
 
   private forEachCellNearCircle(
