@@ -26,15 +26,60 @@ function rippedContains(r: RippedNode | null, id: ConnId): boolean {
   return false
 }
 
-// --- A* search node (stored in a pool) ---
-interface SearchNode {
-  z: number
-  row: number
-  col: number
-  g: number
-  f: number
-  parentIdx: number // -1 = root
-  ripped: RippedNode | null
+// Numeric search state is reused across connections without allocating a node object.
+class SearchNodePool {
+  z = new Int32Array(1024)
+  row = new Int32Array(1024)
+  col = new Int32Array(1024)
+  g = new Float64Array(1024)
+  parentIdx = new Int32Array(1024)
+  ripped: Array<RippedNode | null> = []
+  length = 0
+
+  clear(): void {
+    this.length = 0
+    this.ripped.length = 0
+  }
+
+  push(
+    z: number,
+    row: number,
+    col: number,
+    g: number,
+    parentIdx: number,
+    ripped: RippedNode | null,
+  ): number {
+    this.ensureCapacity(this.length + 1)
+    const index = this.length++
+    this.z[index] = z
+    this.row[index] = row
+    this.col[index] = col
+    this.g[index] = g
+    this.parentIdx[index] = parentIdx
+    this.ripped[index] = ripped
+    return index
+  }
+
+  private ensureCapacity(size: number): void {
+    if (size <= this.z.length) return
+    let next = this.z.length
+    while (next < size) next *= 2
+    const z = new Int32Array(next)
+    z.set(this.z)
+    this.z = z
+    const row = new Int32Array(next)
+    row.set(this.row)
+    this.row = row
+    const col = new Int32Array(next)
+    col.set(this.col)
+    this.col = col
+    const g = new Float64Array(next)
+    g.set(this.g)
+    this.g = g
+    const parentIdx = new Int32Array(next)
+    parentIdx.set(this.parentIdx)
+    this.parentIdx = parentIdx
+  }
 }
 
 // --- Connection segment ---
@@ -67,74 +112,90 @@ interface SolvedRouteInternal {
 
 // --- Min-heap for A* open set ---
 class MinHeap {
-  private f: number[] = []
-  private seq: number[] = []
-  private id: number[] = []
+  private f = new Float64Array(1024)
+  private seq = new Float64Array(1024)
+  private id = new Int32Array(1024)
   private n = 0
 
-  push(f: number, seq: number, id: number) {
+  push(f: number, seq: number, id: number): void {
+    this.ensureCapacity(this.n + 1)
+    // Move parents into the hole, then write the new tuple once.
     let i = this.n++
+    while (i > 0) {
+      const p = (i - 1) >> 1
+      const parentF = this.f[p]!
+      const parentSeq = this.seq[p]!
+      if (parentF !== f ? parentF < f : parentSeq < seq) break
+      this.f[i] = parentF
+      this.seq[i] = parentSeq
+      this.id[i] = this.id[p]!
+      i = p
+    }
     this.f[i] = f
     this.seq[i] = seq
     this.id[i] = id
-    while (i > 0) {
-      const p = (i - 1) >> 1
-      if (this.less(p, i)) break
-      this.swap(i, p)
-      i = p
-    }
   }
 
   pop(): number {
     const out = this.id[0]!
     this.n--
     if (this.n > 0) {
-      this.f[0] = this.f[this.n]!
-      this.seq[0] = this.seq[this.n]!
-      this.id[0] = this.id[this.n]!
-      this.siftDown(0)
+      const f = this.f[this.n]!
+      const seq = this.seq[this.n]!
+      const id = this.id[this.n]!
+      let i = 0
+      while (true) {
+        const left = i * 2 + 1
+        if (left >= this.n) break
+        const right = left + 1
+        let child = left
+        if (right < this.n) {
+          const leftF = this.f[left]!
+          const rightF = this.f[right]!
+          if (
+            !(leftF !== rightF
+              ? leftF < rightF
+              : this.seq[left]! < this.seq[right]!)
+          ) {
+            child = right
+          }
+        }
+        const childF = this.f[child]!
+        const childSeq = this.seq[child]!
+        if (f !== childF ? f < childF : seq < childSeq) break
+        this.f[i] = childF
+        this.seq[i] = childSeq
+        this.id[i] = this.id[child]!
+        i = child
+      }
+      this.f[i] = f
+      this.seq[i] = seq
+      this.id[i] = id
     }
     return out
   }
 
-  get size() {
+  get size(): number {
     return this.n
   }
 
-  clear() {
+  clear(): void {
     this.n = 0
   }
 
-  private siftDown(i: number) {
-    while (true) {
-      const l = i * 2 + 1
-      const r = l + 1
-      if (l >= this.n) return
-      let m = l
-      if (r < this.n && !this.less(l, r)) m = r
-      if (this.less(i, m)) return
-      this.swap(i, m)
-      i = m
-    }
-  }
-
-  private less(i: number, j: number) {
-    const fi = this.f[i]!
-    const fj = this.f[j]!
-    if (fi !== fj) return fi < fj
-    return this.seq[i]! < this.seq[j]!
-  }
-
-  private swap(i: number, j: number) {
-    const tmpF = this.f[i]!
-    this.f[i] = this.f[j]!
-    this.f[j] = tmpF
-    const tmpS = this.seq[i]!
-    this.seq[i] = this.seq[j]!
-    this.seq[j] = tmpS
-    const tmpI = this.id[i]!
-    this.id[i] = this.id[j]!
-    this.id[j] = tmpI
+  private ensureCapacity(size: number): void {
+    if (size <= this.f.length) return
+    let next = this.f.length
+    while (next < size) next *= 2
+    const f = new Float64Array(next)
+    f.set(this.f)
+    this.f = f
+    const seq = new Float64Array(next)
+    seq.set(this.seq)
+    this.seq = seq
+    const id = new Int32Array(next)
+    id.set(this.id)
+    this.id = id
   }
 }
 
@@ -253,7 +314,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private activeConnSeg: ConnectionSeg | null = null
   private activeConnId: ConnId = -1
   private crossLayerSearch = false
-  private nodePool!: SearchNode[]
+  private nodePool!: SearchNodePool
   private heap!: MinHeap
   private seqCounter = 0
 
@@ -505,7 +566,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     // A* state
     this.activeConnSeg = null
     this.activeConnId = -1
-    this.nodePool = []
+    this.nodePool = new SearchNodePool()
     this.heap = new MinHeap()
     this.seqCounter = 0
   }
@@ -533,7 +594,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.crossLayerSearch = next.startZ !== next.endZ
 
       // Reset A* state for this connection
-      this.nodePool = []
+      this.nodePool.clear()
       this.heap.clear()
       this.seqCounter = 0
       this.searchIterations = 0
@@ -549,15 +610,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endCol,
       )
       const f = h * this.hyperParameters.greedyMultiplier
-      this.nodePool.push({
-        z: next.startZ,
-        row: next.startRow,
-        col: next.startCol,
-        g: 0,
-        f,
-        parentIdx: -1,
-        ripped: null,
-      })
+      this.nodePool.push(next.startZ, next.startRow, next.startCol, 0, -1, null)
       this.heap.push(f, this.seqCounter++, 0)
       return
     }
@@ -579,7 +632,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.activeConnSeg = null
       this.activeConnId = -1
       this.heap.clear()
-      this.nodePool = []
+      this.nodePool.clear()
       this.consecutiveSkips++
       if (this.consecutiveSkips >= this.unsolvedSegs.length * 3) {
         this.error = `Convergence failure: ${this.unsolvedSegs.length} connections stuck`
@@ -597,8 +650,11 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // 3. Pop best node (O(log n))
     const nodeIdx = this.heap.pop()
-    const node = this.nodePool[nodeIdx]!
-    const { z, row, col, g, ripped } = node
+    const z = this.nodePool.z[nodeIdx]!
+    const row = this.nodePool.row[nodeIdx]!
+    const col = this.nodePool.col[nodeIdx]!
+    const g = this.nodePool.g[nodeIdx]!
+    const ripped = this.nodePool.ripped[nodeIdx]!
 
     // 4. Skip if already visited (stamp check)
     const cellIdx = (z * this.rows + row) * this.cols + col
@@ -642,16 +698,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
           this.hyperParameters.greedyMultiplier
 
-      const newNodeIdx = this.nodePool.length
-      this.nodePool.push({
-        z,
-        row: nr,
-        col: nc,
-        g: g2,
-        f: f2,
-        parentIdx: nodeIdx,
-        ripped: this._moveRipped,
-      })
+      const newNodeIdx = this.nodePool.push(z, nr, nc, g2, nodeIdx, this._moveRipped)
       this.heap.push(f2, this.seqCounter++, newNodeIdx)
     }
 
@@ -686,16 +733,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.computeH(nz, row, col, endZ, endRow, endCol) *
             this.hyperParameters.greedyMultiplier
 
-        const newNodeIdx = this.nodePool.length
-        this.nodePool.push({
-          z: nz,
-          row,
-          col,
-          g: g2,
-          f: f2,
-          parentIdx: nodeIdx,
-          ripped: this._moveRipped,
-        })
+        const newNodeIdx = this.nodePool.push(nz, row, col, g2, nodeIdx, this._moveRipped)
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
@@ -1067,9 +1105,12 @@ export class HighDensitySolverA01 extends BaseSolver {
     const cells: Array<{ z: number; row: number; col: number }> = []
     let idx = goalNodeIdx
     while (idx >= 0) {
-      const n = this.nodePool[idx]!
-      cells.push({ z: n.z, row: n.row, col: n.col })
-      idx = n.parentIdx
+      cells.push({
+        z: this.nodePool.z[idx]!,
+        row: this.nodePool.row[idx]!,
+        col: this.nodePool.col[idx]!,
+      })
+      idx = this.nodePool.parentIdx[idx]!
     }
     cells.reverse()
 
@@ -1101,9 +1142,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     const connId = this.activeConnId
 
     // Collect ripped traces from goal node's persistent list
-    const goalNode = this.nodePool[goalNodeIdx]!
     const rippedIds: ConnId[] = []
-    for (let cur = goalNode.ripped; cur; cur = cur.prev) {
+    for (let cur = this.nodePool.ripped[goalNodeIdx]; cur; cur = cur.prev) {
       rippedIds.push(cur.id)
     }
 
