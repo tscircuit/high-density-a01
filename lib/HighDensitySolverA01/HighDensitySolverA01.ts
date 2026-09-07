@@ -321,6 +321,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
   private viaOccupantsByCell = new Map<number, ConnId[]>()
+  private rootOverlapAllowed = new Uint8Array(0)
 
   // --- Convergence state ---
   private ripCount!: number[]
@@ -761,11 +762,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       const toFlatIdx = (toZ * this.rows + toRow) * cols + toCol
       const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const fixedSameRoot =
-        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
-      const allowFixedOverlap =
-        fixedSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+      const allowFixedOverlap = this.rootOverlapAllowed[fixedOwner] === 1
       const seg = this.activeConnSeg
       const isSegEnd =
         !!seg &&
@@ -801,11 +798,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       const flatIdx = (toZ * this.rows + toRow) * cols + toCol
       const fixedOwner = this.portOwnerFlat[flatIdx]!
-      const fixedSameRoot =
-        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
-      const allowFixedOverlap =
-        fixedSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+      const allowFixedOverlap = this.rootOverlapAllowed[fixedOwner] === 1
       const seg = this.activeConnSeg
       const isSegEnd =
         !!seg &&
@@ -824,11 +817,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       }
 
       const occ = this.usedCellsFlat[flatIdx]!
-      const sameRoot =
-        this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-      const allowSameRootOverlap =
-        sameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+      const allowSameRootOverlap = this.rootOverlapAllowed[occ] === 1
       if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
         if (!rippedContains(r, occ)) {
           cost += this.hyperParameters.ripCost
@@ -851,11 +840,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         const sqCols = this.cols - 1
         const diagBase = ((toZ * (this.rows - 1) + sqRow) * sqCols + sqCol) * 2
         const crossingOcc = this.usedDiagFlat[diagBase + crossingSlot]!
-        const crossingSameRoot =
-          this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[activeConn]
-        const allowCrossingOverlap =
-          crossingSameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        const allowCrossingOverlap = this.rootOverlapAllowed[crossingOcc] === 1
         if (
           crossingOcc !== -1 &&
           crossingOcc !== activeConn &&
@@ -893,12 +878,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (r < 0 || c < 0 || r >= rows || c >= cols) continue
         const occ = used[zBase + r * cols + c]!
         if (occ === -1 || occ === activeConn) continue
-        const sameRoot =
-          this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-        if (
-          sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-        ) {
+        if (this.rootOverlapAllowed[occ] === 1) {
           continue
         }
         // Small unique check (typically very few occupants)
@@ -934,6 +914,18 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Occupancy and the active connection remain fixed during each search.
     // Finalizing or ripping routes can change both before the next search.
     this.viaOccupantsByCell.clear()
+    const roots = this.connIdToRootNet
+    if (this.rootOverlapAllowed.length !== roots.length) {
+      this.rootOverlapAllowed = new Uint8Array(roots.length)
+    }
+    const activeRoot = roots[this.activeConnId]!
+    if (this.overlapFriendlyRootNets.has(activeRoot)) {
+      for (let conn = 0; conn < roots.length; conn++) {
+        this.rootOverlapAllowed[conn] = roots[conn] === activeRoot ? 1 : 0
+      }
+    } else {
+      this.rootOverlapAllowed.fill(0)
+    }
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)

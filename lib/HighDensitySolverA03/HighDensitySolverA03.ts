@@ -423,6 +423,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private _viaOccs: ConnId[] = []
   private viaOccupantsByCell = new Map<number, ConnId[]>()
+  private rootOverlapAllowed = new Uint8Array(0)
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
@@ -1265,7 +1266,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
 
       const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const allowFixedOverlap = this.allowSharedUse(activeConn, fixedOwner)
+      const allowFixedOverlap = this.rootOverlapAllowed[fixedOwner] === 1
       const seg = this.activeConnSeg
       const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
       if (
@@ -1294,7 +1295,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
 
       const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const allowFixedOverlap = this.allowSharedUse(activeConn, fixedOwner)
+      const allowFixedOverlap = this.rootOverlapAllowed[fixedOwner] === 1
       const seg = this.activeConnSeg
       const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
       if (
@@ -1371,7 +1372,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     if (
       primaryOcc !== -1 &&
       primaryOcc !== activeConn &&
-      !this.allowSharedUse(activeConn, primaryOcc)
+      this.rootOverlapAllowed[primaryOcc] !== 1
     ) {
       pushUnique(out, primaryOcc)
     }
@@ -1381,7 +1382,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     for (let i = 0; i < sharedOccs.length; i++) {
       const occ = sharedOccs[i]!
       if (occ === activeConn) continue
-      if (this.allowSharedUse(activeConn, occ)) continue
+      if (this.rootOverlapAllowed[occ] === 1) continue
       pushUnique(out, occ)
     }
   }
@@ -1444,6 +1445,14 @@ export class HighDensitySolverA03 extends BaseSolver {
     // Occupancy and the active connection remain fixed during each search.
     // Finalizing or ripping routes can change both before the next search.
     this.viaOccupantsByCell.clear()
+    const roots = this.connIdToRootNet
+    if (this.rootOverlapAllowed.length !== roots.length) {
+      this.rootOverlapAllowed = new Uint8Array(roots.length)
+    }
+    const activeRoot = roots[this.activeConnId]!
+    for (let conn = 0; conn < roots.length; conn++) {
+      this.rootOverlapAllowed[conn] = roots[conn] === activeRoot ? 1 : 0
+    }
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
