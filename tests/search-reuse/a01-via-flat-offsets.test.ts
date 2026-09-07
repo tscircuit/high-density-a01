@@ -16,7 +16,12 @@ type SearchState = {
   nextStamp(): void
 }
 
-function originalOccupants(state: SearchState, row: number, col: number, radius: number): number[] {
+function originalOccupants(
+  state: SearchState,
+  row: number,
+  col: number,
+  radius: number,
+): number[] {
   const occupants: number[] = []
   for (let z = 0; z < state.layers; z++) {
     for (let dr = -radius; dr <= radius; dr++) {
@@ -25,7 +30,8 @@ function originalOccupants(state: SearchState, row: number, col: number, radius:
         const r = row + dr
         const c = col + dc
         if (r < 0 || c < 0 || r >= state.rows || c >= state.cols) continue
-        const owner = state.usedCellsFlat[z * state.planeSize + r * state.cols + c]!
+        const owner =
+          state.usedCellsFlat[z * state.planeSize + r * state.cols + c]!
         if (owner === -1 || owner === state.activeConnId) continue
         if (state.rootOverlapAllowed[owner] === 1) continue
         if (!occupants.includes(owner)) occupants.push(owner)

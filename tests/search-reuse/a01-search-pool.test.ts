@@ -43,6 +43,7 @@ test("A01 reuses numeric search storage while preserving its baseline route and 
     error: null,
     iterations: 3625,
     rips: 7,
-    routeHash: "037cb669ef0f106257d7dfb02b43410a81f60e988777552e1e82189d9e6a5f6f",
+    routeHash:
+      "037cb669ef0f106257d7dfb02b43410a81f60e988777552e1e82189d9e6a5f6f",
   })
 })

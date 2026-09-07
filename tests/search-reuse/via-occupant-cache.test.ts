@@ -1,7 +1,8 @@
-import { expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { defaultA03Params, defaultParams } from "../../lib/default-params"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import { HighDensitySolverA03 } from "../../lib/HighDensitySolverA03/HighDensitySolverA03"
+import type { NodeWithPortPoints } from "../../lib/types"
 import sample002 from "../dataset01/sample002/sample002.json"
 import sample003 from "../dataset01/sample003/sample003.json"
 import sample007 from "../dataset01/sample007/sample007.json"
@@ -41,7 +42,10 @@ class ObservedCache extends Map<number, number[]> {
   }
 }
 
-function observeSearches(solver: Solver, enabled: boolean): {
+function observeSearches(
+  solver: Solver,
+  enabled: boolean,
+): {
   cache: ObservedCache
   finalizedInvalidations: number
   rippedInvalidations: number
@@ -74,7 +78,9 @@ function observeSearches(solver: Solver, enabled: boolean): {
   const getViaOccupants = state.getViaOccupants.bind(solver)
   state.getViaOccupants = (...args: number[]): number[] => {
     if (finalized || ripped) {
-      throw new Error("Occupant cache was read before the new search cleared it")
+      throw new Error(
+        "Occupant cache was read before the new search cleared it",
+      )
     }
     return getViaOccupants(...args)
   }
@@ -92,38 +98,55 @@ function getResult(solver: Solver): object {
   }
 }
 
-test("A01 and A03 cache via occupants without changing routes across searches and rip-ups", () => {
-  const fixtures = [
-    sample002,
-    sample003,
-    sample007.nodeWithPortPoints,
-    prevNext,
-    repro03.nodeWithPortPoints,
-    repro05[0]!.nodeWithPortPoints,
-  ]
-  for (const [SolverClass, params] of [
-    [HighDensitySolverA01, defaultParams],
-    [HighDensitySolverA03, defaultA03Params],
-  ] as const) {
+const fixtures = [
+  ["sample002", sample002],
+  ["sample003", sample003],
+  ["sample007", sample007.nodeWithPortPoints],
+  ["prev-next", prevNext],
+  ["repro03", repro03.nodeWithPortPoints],
+  ["repro05", repro05[0]!.nodeWithPortPoints],
+] as const
+
+const solvers = [
+  {
+    name: "A01",
+    create: (nodeWithPortPoints: NodeWithPortPoints) =>
+      new HighDensitySolverA01({ ...defaultParams, nodeWithPortPoints }),
+  },
+  {
+    name: "A03",
+    create: (nodeWithPortPoints: NodeWithPortPoints) =>
+      new HighDensitySolverA03({ ...defaultA03Params, nodeWithPortPoints }),
+  },
+]
+
+for (const { name, create } of solvers) {
+  describe(name, () => {
     let hits = 0
     let finalizedInvalidations = 0
     let rippedInvalidations = 0
-    for (const nodeWithPortPoints of fixtures) {
-      const cached = new SolverClass({ ...params, nodeWithPortPoints })
-      const uncached = new SolverClass({ ...params, nodeWithPortPoints })
-      const observed = observeSearches(cached, true)
-      observeSearches(uncached, false)
-      cached.solve()
-      uncached.solve()
 
-      expect(getResult(cached)).toEqual(getResult(uncached))
-      expect(observed.cache.size).toBe(0)
-      hits += observed.cache.hits
-      finalizedInvalidations += observed.finalizedInvalidations
-      rippedInvalidations += observed.rippedInvalidations
+    for (const [fixtureName, nodeWithPortPoints] of fixtures) {
+      test(`caches via occupants without changing ${fixtureName} routes or search`, () => {
+        const cached = create(nodeWithPortPoints)
+        const uncached = create(nodeWithPortPoints)
+        const observed = observeSearches(cached, true)
+        observeSearches(uncached, false)
+        cached.solve()
+        uncached.solve()
+
+        expect(getResult(cached)).toEqual(getResult(uncached))
+        expect(observed.cache.size).toBe(0)
+        hits += observed.cache.hits
+        finalizedInvalidations += observed.finalizedInvalidations
+        rippedInvalidations += observed.rippedInvalidations
+      })
     }
-    expect(hits).toBeGreaterThan(0)
-    expect(finalizedInvalidations).toBeGreaterThan(0)
-    expect(rippedInvalidations).toBeGreaterThan(0)
-  }
-})
+
+    afterAll(() => {
+      expect(hits).toBeGreaterThan(0)
+      expect(finalizedInvalidations).toBeGreaterThan(0)
+      expect(rippedInvalidations).toBeGreaterThan(0)
+    })
+  })
+}

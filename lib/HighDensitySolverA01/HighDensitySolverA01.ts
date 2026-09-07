@@ -703,7 +703,14 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.getCachedH(z, nr, nc, endZ, endRow, endCol) *
           this.hyperParameters.greedyMultiplier
 
-      const newNodeIdx = this.nodePool.push(z, nr, nc, g2, nodeIdx, this._moveRipped)
+      const newNodeIdx = this.nodePool.push(
+        z,
+        nr,
+        nc,
+        g2,
+        nodeIdx,
+        this._moveRipped,
+      )
       this.heap.push(f2, this.seqCounter++, newNodeIdx)
     }
 
@@ -738,7 +745,14 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.getCachedH(nz, row, col, endZ, endRow, endCol) *
             this.hyperParameters.greedyMultiplier
 
-        const newNodeIdx = this.nodePool.push(nz, row, col, g2, nodeIdx, this._moveRipped)
+        const newNodeIdx = this.nodePool.push(
+          nz,
+          row,
+          col,
+          g2,
+          nodeIdx,
+          this._moveRipped,
+        )
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
@@ -862,7 +876,11 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // Occupant lists are immutable until the active search ends.
-  private getViaOccupants(row: number, col: number, activeConn: ConnId): ConnId[] {
+  private getViaOccupants(
+    row: number,
+    col: number,
+    activeConn: ConnId,
+  ): ConnId[] {
     const cellIdx = row * this.cols + col
     const cached = this.viaOccupantsByCell.get(cellIdx)
     if (cached) return cached
@@ -886,7 +904,10 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
     const radius = this.viaScanRadius
     const isInterior =
-      row >= radius && col >= radius && row + radius < rows && col + radius < cols
+      row >= radius &&
+      col >= radius &&
+      row + radius < rows &&
+      col + radius < cols
 
     for (let z = 0; z < this.layers; z++) {
       const base = z * this.planeSize + cellIdx

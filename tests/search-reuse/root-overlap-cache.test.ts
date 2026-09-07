@@ -25,21 +25,62 @@ const nodeWithPortPoints: NodeWithPortPoints = {
   height: 4,
   availableZ: [0, 1],
   portPoints: [
-    { portPointId: "a0", connectionName: "a", rootConnectionName: "shared", x: -2, y: -1, z: 0 },
-    { portPointId: "a1", connectionName: "a", rootConnectionName: "shared", x: 2, y: 1, z: 0 },
-    { portPointId: "b0", connectionName: "b", rootConnectionName: "shared", x: -2, y: 1, z: 1 },
-    { portPointId: "b1", connectionName: "b", rootConnectionName: "shared", x: 2, y: -1, z: 1 },
-    { portPointId: "c0", connectionName: "c", rootConnectionName: "other", x: -1, y: -2, z: 0 },
-    { portPointId: "c1", connectionName: "c", rootConnectionName: "other", x: 1, y: 2, z: 0 },
+    {
+      portPointId: "a0",
+      connectionName: "a",
+      rootConnectionName: "shared",
+      x: -2,
+      y: -1,
+      z: 0,
+    },
+    {
+      portPointId: "a1",
+      connectionName: "a",
+      rootConnectionName: "shared",
+      x: 2,
+      y: 1,
+      z: 0,
+    },
+    {
+      portPointId: "b0",
+      connectionName: "b",
+      rootConnectionName: "shared",
+      x: -2,
+      y: 1,
+      z: 1,
+    },
+    {
+      portPointId: "b1",
+      connectionName: "b",
+      rootConnectionName: "shared",
+      x: 2,
+      y: -1,
+      z: 1,
+    },
+    {
+      portPointId: "c0",
+      connectionName: "c",
+      rootConnectionName: "other",
+      x: -1,
+      y: -2,
+      z: 0,
+    },
+    {
+      portPointId: "c1",
+      connectionName: "c",
+      rootConnectionName: "other",
+      x: 1,
+      y: 2,
+      z: 0,
+    },
   ],
 }
 
 test("cached root overlap preserves sentinel and owner exemptions and refreshes per active connection", () => {
-  for (const [SolverClass, params] of [
-    [HighDensitySolverA01, defaultParams],
-    [HighDensitySolverA03, defaultA03Params],
-  ] as const) {
-    const solver = new SolverClass({ ...params, nodeWithPortPoints })
+  for (const solver of [
+    new HighDensitySolverA01({ ...defaultParams, nodeWithPortPoints }),
+    new HighDensitySolverA03({ ...defaultA03Params, nodeWithPortPoints }),
+  ]) {
     solver.setup()
     const state = solver as unknown as SearchState
     const a = state.connNameToId.get("a")!
@@ -52,11 +93,12 @@ test("cached root overlap preserves sentinel and owner exemptions and refreshes 
       else state.overlapFriendlyRootNets.delete("shared")
       state.activeConnId = a
       state.nextStamp()
-      const sharesRoot = allowSharedRoot || SolverClass === HighDensitySolverA03
+      const sharesRoot =
+        allowSharedRoot || solver instanceof HighDensitySolverA03
       expect(state.rootOverlapAllowed[b] === 1).toBe(sharesRoot)
       expect(state.rootOverlapAllowed[c]).toBe(0)
       for (const owner of [-2, -1, a, b, c]) {
-        if (SolverClass === HighDensitySolverA01) {
+        if (solver instanceof HighDensitySolverA01) {
           const row = Math.floor(state.rows / 2)
           const col = Math.floor(state.cols / 2)
           const target = row * state.cols + col

@@ -1336,21 +1336,26 @@ export class HighDensitySolverA03 extends BaseSolver {
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     // Grid geometry stays fixed when searches finalize or rip other routes.
-    this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (neighborCellId) => {
-      if (
-        circleIntersectsRect(
-          cx,
-          cy,
-          this.viaKeepoutRadius,
-          this.cellMinX[neighborCellId]!,
-          this.cellMinY[neighborCellId]!,
-          this.cellMaxX[neighborCellId]!,
-          this.cellMaxY[neighborCellId]!,
-        )
-      ) {
-        cells.push(neighborCellId)
-      }
-    })
+    this.forEachCellNearCircle(
+      cx,
+      cy,
+      this.viaKeepoutRadius,
+      (neighborCellId) => {
+        if (
+          circleIntersectsRect(
+            cx,
+            cy,
+            this.viaKeepoutRadius,
+            this.cellMinX[neighborCellId]!,
+            this.cellMinY[neighborCellId]!,
+            this.cellMaxX[neighborCellId]!,
+            this.cellMaxY[neighborCellId]!,
+          )
+        ) {
+          cells.push(neighborCellId)
+        }
+      },
+    )
     const footprint = new Int32Array(cells)
     this.viaFootprintByCell.set(cellId, footprint)
     return footprint

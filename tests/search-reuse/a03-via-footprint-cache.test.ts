@@ -14,18 +14,32 @@ type GeometryState = {
   totalRipEvents: number
   getViaFootprint(cellId: number): Int32Array
   nextStamp(): void
-  forEachCellNearCircle(cx: number, cy: number, radius: number, visitor: (cellId: number) => void): void
+  forEachCellNearCircle(
+    cx: number,
+    cy: number,
+    radius: number,
+    visitor: (cellId: number) => void,
+  ): void
 }
 
-function originalFootprint(solver: HighDensitySolverA03, cellId: number): number[] {
+function originalFootprint(
+  solver: HighDensitySolverA03,
+  cellId: number,
+): number[] {
   const state = solver as unknown as GeometryState
   const cx = solver.cellCenterX[cellId]!
   const cy = solver.cellCenterY[cellId]!
   const radius = state.viaKeepoutRadius
   const result: number[] = []
   state.forEachCellNearCircle(cx, cy, radius, (candidate) => {
-    const qx = Math.max(solver.cellMinX[candidate]!, Math.min(solver.cellMaxX[candidate]!, cx))
-    const qy = Math.max(solver.cellMinY[candidate]!, Math.min(solver.cellMaxY[candidate]!, cy))
+    const qx = Math.max(
+      solver.cellMinX[candidate]!,
+      Math.min(solver.cellMaxX[candidate]!, cx),
+    )
+    const qy = Math.max(
+      solver.cellMinY[candidate]!,
+      Math.min(solver.cellMaxY[candidate]!, cy),
+    )
     const dx = cx - qx
     const dy = cy - qy
     if (dx * dx + dy * dy <= radius * radius) result.push(candidate)
@@ -45,7 +59,12 @@ function getResult(solver: HighDensitySolverA03): object {
 }
 
 test("A03 reuses exact via footprint geometry across searches without retaining stale occupants", () => {
-  for (const [width, height] of [[4, 4], [0.8, 3.2], [3.2, 0.8], [0.4, 0.4]]) {
+  for (const [width, height] of [
+    [4, 4],
+    [0.8, 3.2],
+    [3.2, 0.8],
+    [0.4, 0.4],
+  ]) {
     const solver = new HighDensitySolverA03({
       ...defaultA03Params,
       highResolutionCellThickness: 0.4,
@@ -68,9 +87,19 @@ test("A03 reuses exact via footprint geometry across searches without retaining 
   }
 
   let reuseAcrossSearches = 0
-  for (const nodeWithPortPoints of [sample002, sample003, repro03.nodeWithPortPoints]) {
-    const cached = new HighDensitySolverA03({ ...defaultA03Params, nodeWithPortPoints })
-    const reference = new HighDensitySolverA03({ ...defaultA03Params, nodeWithPortPoints })
+  for (const nodeWithPortPoints of [
+    sample002,
+    sample003,
+    repro03.nodeWithPortPoints,
+  ]) {
+    const cached = new HighDensitySolverA03({
+      ...defaultA03Params,
+      nodeWithPortPoints,
+    })
+    const reference = new HighDensitySolverA03({
+      ...defaultA03Params,
+      nodeWithPortPoints,
+    })
     const state = cached as unknown as GeometryState
     const referenceState = reference as unknown as GeometryState
     const cache = state.viaFootprintByCell
@@ -83,7 +112,8 @@ test("A03 reuses exact via footprint geometry across searches without retaining 
       return value
     }
     referenceState.viaFootprintByCell.get = (): undefined => undefined
-    referenceState.viaFootprintByCell.set = (): Map<number, Int32Array> => referenceState.viaFootprintByCell
+    referenceState.viaFootprintByCell.set = (): Map<number, Int32Array> =>
+      referenceState.viaFootprintByCell
     cached.solve()
     reference.solve()
     expect(getResult(cached)).toEqual(getResult(reference))

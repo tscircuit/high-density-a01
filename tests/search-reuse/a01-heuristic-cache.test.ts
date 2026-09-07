@@ -8,7 +8,14 @@ import prevNext from "../prev-next/prev-next.json"
 import repro03 from "../repros/repro03/repro03.json"
 import repro05 from "../repros/repro05/repro05.json"
 
-type Heuristic = (z: number, row: number, col: number, toZ: number, toRow: number, toCol: number) => number
+type Heuristic = (
+  z: number,
+  row: number,
+  col: number,
+  toZ: number,
+  toRow: number,
+  toCol: number,
+) => number
 
 type SearchState = {
   getCachedH: Heuristic
@@ -42,8 +49,14 @@ test("A01 reuses exact heuristic values across duplicate nodes and invalidates o
     repro03.nodeWithPortPoints,
     repro05[0]!.nodeWithPortPoints,
   ]) {
-    const cached = new HighDensitySolverA01({ ...defaultParams, nodeWithPortPoints })
-    const reference = new HighDensitySolverA01({ ...defaultParams, nodeWithPortPoints })
+    const cached = new HighDensitySolverA01({
+      ...defaultParams,
+      nodeWithPortPoints,
+    })
+    const reference = new HighDensitySolverA01({
+      ...defaultParams,
+      nodeWithPortPoints,
+    })
     const cachedState = cached as unknown as SearchState
     const referenceState = reference as unknown as SearchState
     const getCachedH = cachedState.getCachedH.bind(cached)
@@ -68,7 +81,10 @@ test("A01 reuses exact heuristic values across duplicate nodes and invalidates o
   expect(requests).toBeGreaterThan(computations)
   expect(computations).toBeGreaterThan(0)
 
-  const solver = new HighDensitySolverA01({ ...defaultParams, nodeWithPortPoints: sample003 })
+  const solver = new HighDensitySolverA01({
+    ...defaultParams,
+    nodeWithPortPoints: sample003,
+  })
   solver.setup()
   const state = solver as unknown as SearchState
   state.activeConnId = 0
