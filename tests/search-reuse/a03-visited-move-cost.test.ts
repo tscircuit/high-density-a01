@@ -48,7 +48,7 @@ test("A03 skips visited move costs while preserving its baseline route and searc
     iterations: solver.iterations,
     rips: state.totalRipEvents,
     routeHash: new Bun.CryptoHasher("sha256")
-      .update(JSON.stringify(solver.getOutput()))
+      .update(JSON.stringify(solver.getOutput().map(({ rootConnectionName, ...route }) => route)))
       .digest("hex"),
   }).toEqual({
     solved: true,

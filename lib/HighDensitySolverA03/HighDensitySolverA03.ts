@@ -697,8 +697,11 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved || this.failed) break
       this.stepOnce()
+    }
+    if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
+      this.viaOccupantsByCell.clear()
     }
   }
 
@@ -1280,8 +1283,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
 
-      this.fillViaOccupants(toCellId, activeConn)
-      const occs = this._viaOccs
+      const occs = this.getViaOccupants(toCellId, activeConn)
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!this.ripChain.contains(head, occ)) {
@@ -1327,14 +1329,10 @@ export class HighDensitySolverA03 extends BaseSolver {
     this._moveRipCount = ripCount
   }
 
-  private fillViaOccupants(cellId: number, activeConn: ConnId): void {
+  private getViaOccupants(cellId: number, activeConn: ConnId): ConnId[] {
     const cached = this.viaOccupantsByCell.get(cellId)
-    if (cached) {
-      this._viaOccs = cached
-      return
-    }
+    if (cached) return cached
     const occs: ConnId[] = []
-    this._viaOccs = occs
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
@@ -1356,6 +1354,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       }
     })
     this.viaOccupantsByCell.set(cellId, occs)
+    return occs
   }
 
   private fillTraceOccupants(

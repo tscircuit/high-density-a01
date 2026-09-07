@@ -512,8 +512,11 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved || this.failed) break
       this.stepOnce()
+    }
+    if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
+      this.viaOccupantsByCell.clear()
     }
   }
 
@@ -742,9 +745,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         return
       }
 
-      // Via footprint occupants (reusable scratch array)
-      this.fillViaOccupants(toRow, toCol, activeConn)
-      const occs = this._viaOccs
+      const occs = this.getViaOccupants(toRow, toCol, activeConn)
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!rippedContains(r, occ)) {
@@ -833,16 +834,12 @@ export class HighDensitySolverA01 extends BaseSolver {
     this._moveRipped = r
   }
 
-  // --- Via footprint unique occupants (fills _viaOccs scratch array) ---
-  private fillViaOccupants(row: number, col: number, activeConn: ConnId): void {
+  // Occupant lists are immutable until the active search ends.
+  private getViaOccupants(row: number, col: number, activeConn: ConnId): ConnId[] {
     const cellIdx = row * this.cols + col
     const cached = this.viaOccupantsByCell.get(cellIdx)
-    if (cached) {
-      this._viaOccs = cached
-      return
-    }
+    if (cached) return cached
     const occs: ConnId[] = []
-    this._viaOccs = occs
     const rows = this.rows
     const cols = this.cols
     const offDr = this.viaOffsetsDr
@@ -878,6 +875,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       }
     }
     this.viaOccupantsByCell.set(cellIdx, occs)
+    return occs
   }
 
   private shouldSkipFixedPortHalo(flatIdx: number, connId: ConnId) {

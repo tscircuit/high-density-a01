@@ -16,7 +16,7 @@ type SearchState = {
   nextStamp(): void
   finalizeRoute(nodeIndex: number): void
   ripTrace(connectionId: number): void
-  fillViaOccupants(...args: number[]): void
+  getViaOccupants(...args: number[]): number[]
   totalRipEvents: number
 }
 
@@ -71,12 +71,12 @@ function observeSearches(solver: Solver, enabled: boolean): {
     ripTrace(connectionId)
     ripped = true
   }
-  const fillViaOccupants = state.fillViaOccupants.bind(solver)
-  state.fillViaOccupants = (...args: number[]): void => {
+  const getViaOccupants = state.getViaOccupants.bind(solver)
+  state.getViaOccupants = (...args: number[]): number[] => {
     if (finalized || ripped) {
       throw new Error("Occupant cache was read before the new search cleared it")
     }
-    fillViaOccupants(...args)
+    return getViaOccupants(...args)
   }
   return stats
 }
@@ -117,6 +117,7 @@ test("A01 and A03 cache via occupants without changing routes across searches an
       uncached.solve()
 
       expect(getResult(cached)).toEqual(getResult(uncached))
+      expect(observed.cache.size).toBe(0)
       hits += observed.cache.hits
       finalizedInvalidations += observed.finalizedInvalidations
       rippedInvalidations += observed.rippedInvalidations
