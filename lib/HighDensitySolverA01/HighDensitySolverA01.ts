@@ -282,7 +282,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array
   private heuristicStamp!: Uint32Array
-  private heuristicValue!: Float64Array // layers * planeSize
+  private weightedHeuristicValue!: Float64Array // layers * planeSize
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -489,7 +489,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
     this.heuristicStamp = new Uint32Array(totalCells)
-    this.heuristicValue = new Float64Array(totalCells)
+    this.weightedHeuristicValue = new Float64Array(totalCells)
     this.stamp = 0
 
     // Precompute via footprint offsets
@@ -600,7 +600,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.nextStamp()
 
       // Push start node
-      const h = this.getCachedH(
+      const startFlatIdx =
+        (next.startZ * this.rows + next.startRow) * this.cols + next.startCol
+      const f = this.getCachedWeightedH(
+        startFlatIdx,
         next.startZ,
         next.startRow,
         next.startCol,
@@ -608,7 +611,6 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endRow,
         next.endCol,
       )
-      const f = h * this.hyperParameters.greedyMultiplier
       this.nodePool.push(next.startZ, next.startRow, next.startCol, 0, -1, null)
       this.heap.push(f, 0)
       return
@@ -689,9 +691,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
       const f2 =
-        g2 +
-        this.getCachedH(z, nr, nc, endZ, endRow, endCol) *
-          this.hyperParameters.greedyMultiplier
+        g2 + this.getCachedWeightedH(nIdx, z, nr, nc, endZ, endRow, endCol)
 
       const newNodeIdx = this.nodePool.push(
         z,
@@ -731,9 +731,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
         const f2 =
-          g2 +
-          this.getCachedH(nz, row, col, endZ, endRow, endCol) *
-            this.hyperParameters.greedyMultiplier
+          g2 + this.getCachedWeightedH(nIdx, nz, row, col, endZ, endRow, endCol)
 
         const newNodeIdx = this.nodePool.push(
           nz,
@@ -977,7 +975,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
-  private getCachedH(
+  private getCachedWeightedH(
+    flatIdx: number,
     z: number,
     row: number,
     col: number,
@@ -985,15 +984,17 @@ export class HighDensitySolverA01 extends BaseSolver {
     toRow: number,
     toCol: number,
   ): number {
-    const flatIdx = (z * this.rows + row) * this.cols + col
     if (this.heuristicStamp[flatIdx] === this.stamp) {
-      return this.heuristicValue[flatIdx]!
+      return this.weightedHeuristicValue[flatIdx]!
     }
-    // The destination and heuristic parameters stay fixed for the search.
-    const h = this.computeH(z, row, col, toZ, toRow, toCol)
+    // The destination and heuristic parameters, including greedyMultiplier,
+    // stay fixed for the search. Preserve h * multiplier before adding g.
+    const weightedH =
+      this.computeH(z, row, col, toZ, toRow, toCol) *
+      this.hyperParameters.greedyMultiplier
     this.heuristicStamp[flatIdx] = this.stamp
-    this.heuristicValue[flatIdx] = h
-    return h
+    this.weightedHeuristicValue[flatIdx] = weightedH
+    return weightedH
   }
 
   // --- Heuristic: Manhattan + via-zone awareness for cross-layer ---

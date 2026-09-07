@@ -17,8 +17,13 @@ type Heuristic = (
   toCol: number,
 ) => number
 
+type IndexedWeightedHeuristic = (
+  flatIdx: number,
+  ...coordinates: Parameters<Heuristic>
+) => number
+
 type SearchState = {
-  getCachedH: Heuristic
+  getCachedWeightedH: IndexedWeightedHeuristic
   computeH: Heuristic
   totalRipEvents: number
   activeConnId: number
@@ -59,21 +64,33 @@ test("A01 reuses exact heuristic values across duplicate nodes and invalidates o
     })
     const cachedState = cached as unknown as SearchState
     const referenceState = reference as unknown as SearchState
-    const getCachedH = cachedState.getCachedH.bind(cached)
+    const getCachedWeightedH = cachedState.getCachedWeightedH.bind(cached)
     const computeH = cachedState.computeH.bind(cached)
     cachedState.computeH = (...args): number => {
       computations++
       return computeH(...args)
     }
-    cachedState.getCachedH = (...args): number => {
+    cachedState.getCachedWeightedH = (flatIdx, ...coordinates): number => {
       requests++
-      const value = getCachedH(...args)
-      if (!Object.is(value, computeH(...args))) {
-        throw new Error("Cached heuristic differs from the original expression")
+      const [z, row, col] = coordinates
+      if (flatIdx !== (z * cached.rows + row) * cached.cols + col) {
+        throw new Error(
+          "Heuristic cache index differs from the original expression",
+        )
+      }
+      const value = getCachedWeightedH(flatIdx, ...coordinates)
+      const originalValue =
+        computeH(...coordinates) * cached.hyperParameters.greedyMultiplier
+      if (!Object.is(value, originalValue)) {
+        throw new Error(
+          "Cached weighted heuristic differs from the original expression",
+        )
       }
       return value
     }
-    referenceState.getCachedH = referenceState.computeH.bind(reference)
+    referenceState.getCachedWeightedH = (_flatIdx, ...coordinates): number =>
+      referenceState.computeH(...coordinates) *
+      reference.hyperParameters.greedyMultiplier
     cached.solve()
     reference.solve()
     expect(getResult(cached)).toEqual(getResult(reference))
@@ -90,11 +107,15 @@ test("A01 reuses exact heuristic values across duplicate nodes and invalidates o
   state.activeConnId = 0
   state.crossLayerSearch = true
   state.nextStamp()
-  const previous = state.getCachedH(0, 1, 1, 1, 2, 2)
+  const flatIdx = solver.cols + 1
+  const previous = state.getCachedWeightedH(flatIdx, 0, 1, 1, 1, 2, 2)
   state.stamp = 0xffffffff
+  solver.hyperParameters.greedyMultiplier = 2.25
   state.nextStamp()
-  const current = state.getCachedH(0, 1, 1, 1, 4, 4)
+  const current = state.getCachedWeightedH(flatIdx, 0, 1, 1, 1, 4, 4)
   expect(state.stamp).toBe(1)
-  expect(current).toBe(state.computeH(0, 1, 1, 1, 4, 4))
+  expect(current).toBe(
+    state.computeH(0, 1, 1, 1, 4, 4) * solver.hyperParameters.greedyMultiplier,
+  )
   expect(current).not.toBe(previous)
 })
