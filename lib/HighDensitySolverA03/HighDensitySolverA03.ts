@@ -65,27 +65,25 @@ interface HyperParameters {
 
 class TypedMinHeap {
   private f = new Float64Array(1024)
-  private seq = new Uint32Array(1024)
   private id = new Int32Array(1024)
   private n = 0
 
-  push(f: number, seq: number, id: number): void {
+  // Nodes are enqueued once, immediately after allocation. Their pool index is
+  // the insertion order, so equal priorities need no separate sequence array.
+  push(f: number, id: number): void {
     this.ensureCapacity(this.n + 1)
-    seq >>>= 0
     // Move parents into the hole, then write the new tuple once.
     let i = this.n++
     while (i > 0) {
       const p = (i - 1) >> 1
       const parentF = this.f[p]!
-      const parentSeq = this.seq[p]!
-      if (parentF !== f ? parentF < f : parentSeq < seq) break
+      const parentId = this.id[p]!
+      if (parentF !== f ? parentF < f : parentId < id) break
       this.f[i] = parentF
-      this.seq[i] = parentSeq
-      this.id[i] = this.id[p]!
+      this.id[i] = parentId
       i = p
     }
     this.f[i] = f
-    this.seq[i] = seq
     this.id[i] = id
   }
 
@@ -94,7 +92,6 @@ class TypedMinHeap {
     this.n--
     if (this.n > 0) {
       const f = this.f[this.n]!
-      const seq = this.seq[this.n]!
       const id = this.id[this.n]!
       let i = 0
       while (true) {
@@ -108,21 +105,19 @@ class TypedMinHeap {
           if (
             !(leftF !== rightF
               ? leftF < rightF
-              : this.seq[left]! < this.seq[right]!)
+              : this.id[left]! < this.id[right]!)
           ) {
             child = right
           }
         }
         const childF = this.f[child]!
-        const childSeq = this.seq[child]!
-        if (f !== childF ? f < childF : seq < childSeq) break
+        const childId = this.id[child]!
+        if (f !== childF ? f < childF : id < childId) break
         this.f[i] = childF
-        this.seq[i] = childSeq
-        this.id[i] = this.id[child]!
+        this.id[i] = childId
         i = child
       }
       this.f[i] = f
-      this.seq[i] = seq
       this.id[i] = id
     }
     return out
@@ -143,9 +138,6 @@ class TypedMinHeap {
     const f = new Float64Array(next)
     f.set(this.f)
     this.f = f
-    const seq = new Uint32Array(next)
-    seq.set(this.seq)
-    this.seq = seq
     const id = new Int32Array(next)
     id.set(this.id)
     this.id = id
@@ -419,7 +411,6 @@ export class HighDensitySolverA03 extends BaseSolver {
   private nodePool!: TypedNodePool
   private heap!: TypedMinHeap
   private ripChain!: TypedRipChain
-  private seqCounter = 0
 
   private _viaOccs: ConnId[] = []
   private viaOccupantsByCell = new Map<number, ConnId[]>()
@@ -691,7 +682,6 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.nodePool = new TypedNodePool()
     this.heap = new TypedMinHeap()
     this.ripChain = new TypedRipChain()
-    this.seqCounter = 0
   }
 
   override _step(): void {
@@ -1068,7 +1058,6 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.nodePool.clear()
       this.ripChain.clear()
       this.heap.clear()
-      this.seqCounter = 0
       this.searchIterations = 0
       this.nextStamp()
 
@@ -1091,7 +1080,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       const startStateIdx = this.getSearchStateIdx(startFlatIdx, 0)
       this.bestGStamp[startStateIdx] = this.stamp
       this.bestGValue[startStateIdx] = 0
-      this.heap.push(f, this.seqCounter++, startIdx)
+      this.heap.push(f, startIdx)
       return
     }
 
@@ -1197,7 +1186,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         this._moveRippedHead,
         this._moveRipCount,
       )
-      this.heap.push(f2, this.seqCounter++, newNodeIdx)
+      this.heap.push(f2, newNodeIdx)
     }
 
     if (this.viaAllowed[cellId]) {
@@ -1245,7 +1234,7 @@ export class HighDensitySolverA03 extends BaseSolver {
           this._moveRippedHead,
           this._moveRipCount,
         )
-        this.heap.push(f2, this.seqCounter++, newNodeIdx)
+        this.heap.push(f2, newNodeIdx)
       }
     }
   }

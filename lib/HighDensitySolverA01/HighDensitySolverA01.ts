@@ -113,26 +113,25 @@ interface SolvedRouteInternal {
 // --- Min-heap for A* open set ---
 class MinHeap {
   private f = new Float64Array(1024)
-  private seq = new Float64Array(1024)
   private id = new Int32Array(1024)
   private n = 0
 
-  push(f: number, seq: number, id: number): void {
+  // Nodes are enqueued once, immediately after allocation. Their pool index is
+  // the insertion order, so equal priorities need no separate sequence array.
+  push(f: number, id: number): void {
     this.ensureCapacity(this.n + 1)
     // Move parents into the hole, then write the new tuple once.
     let i = this.n++
     while (i > 0) {
       const p = (i - 1) >> 1
       const parentF = this.f[p]!
-      const parentSeq = this.seq[p]!
-      if (parentF !== f ? parentF < f : parentSeq < seq) break
+      const parentId = this.id[p]!
+      if (parentF !== f ? parentF < f : parentId < id) break
       this.f[i] = parentF
-      this.seq[i] = parentSeq
-      this.id[i] = this.id[p]!
+      this.id[i] = parentId
       i = p
     }
     this.f[i] = f
-    this.seq[i] = seq
     this.id[i] = id
   }
 
@@ -141,7 +140,6 @@ class MinHeap {
     this.n--
     if (this.n > 0) {
       const f = this.f[this.n]!
-      const seq = this.seq[this.n]!
       const id = this.id[this.n]!
       let i = 0
       while (true) {
@@ -155,21 +153,19 @@ class MinHeap {
           if (
             !(leftF !== rightF
               ? leftF < rightF
-              : this.seq[left]! < this.seq[right]!)
+              : this.id[left]! < this.id[right]!)
           ) {
             child = right
           }
         }
         const childF = this.f[child]!
-        const childSeq = this.seq[child]!
-        if (f !== childF ? f < childF : seq < childSeq) break
+        const childId = this.id[child]!
+        if (f !== childF ? f < childF : id < childId) break
         this.f[i] = childF
-        this.seq[i] = childSeq
-        this.id[i] = this.id[child]!
+        this.id[i] = childId
         i = child
       }
       this.f[i] = f
-      this.seq[i] = seq
       this.id[i] = id
     }
     return out
@@ -190,9 +186,6 @@ class MinHeap {
     const f = new Float64Array(next)
     f.set(this.f)
     this.f = f
-    const seq = new Float64Array(next)
-    seq.set(this.seq)
-    this.seq = seq
     const id = new Int32Array(next)
     id.set(this.id)
     this.id = id
@@ -318,7 +311,6 @@ export class HighDensitySolverA01 extends BaseSolver {
   private crossLayerSearch = false
   private nodePool!: SearchNodePool
   private heap!: MinHeap
-  private seqCounter = 0
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
@@ -577,7 +569,6 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.activeConnId = -1
     this.nodePool = new SearchNodePool()
     this.heap = new MinHeap()
-    this.seqCounter = 0
   }
 
   override _step(): void {
@@ -605,7 +596,6 @@ export class HighDensitySolverA01 extends BaseSolver {
       // Reset A* state for this connection
       this.nodePool.clear()
       this.heap.clear()
-      this.seqCounter = 0
       this.searchIterations = 0
       this.nextStamp()
 
@@ -620,7 +610,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       )
       const f = h * this.hyperParameters.greedyMultiplier
       this.nodePool.push(next.startZ, next.startRow, next.startCol, 0, -1, null)
-      this.heap.push(f, this.seqCounter++, 0)
+      this.heap.push(f, 0)
       return
     }
 
@@ -711,7 +701,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         nodeIdx,
         this._moveRipped,
       )
-      this.heap.push(f2, this.seqCounter++, newNodeIdx)
+      this.heap.push(f2, newNodeIdx)
     }
 
     // 6b. Via moves (to other layers at same position)
@@ -753,7 +743,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           nodeIdx,
           this._moveRipped,
         )
-        this.heap.push(f2, this.seqCounter++, newNodeIdx)
+        this.heap.push(f2, newNodeIdx)
       }
     }
   }

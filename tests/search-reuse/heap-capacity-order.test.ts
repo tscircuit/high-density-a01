@@ -5,16 +5,16 @@ import { HighDensitySolverA03 } from "../../lib/HighDensitySolverA03/HighDensity
 import prevNext from "../prev-next/prev-next.json"
 
 type Heap = {
-  push(f: number, seq: number, id: number): void
+  push(f: number, id: number): void
   pop(): number
   clear(): void
   size: number
 }
 
-type Entry = { f: number; seq: number; id: number }
+type Entry = { f: number; id: number }
 
 function compareEntries(a: Entry, b: Entry): number {
-  return a.f === b.f ? a.seq - b.seq : a.f - b.f
+  return a.f === b.f ? a.id - b.id : a.f - b.f
 }
 
 test("search heaps preserve priority and sequence order across growth, reuse, and layer solvers", () => {
@@ -33,13 +33,11 @@ test("search heaps preserve priority and sequence order across growth, reuse, an
     let entries: Entry[] = []
     for (let id = 0; id < 4096; id++) {
       const f = id % 503 === 0 ? Infinity : (id * 97) % 31
-      const seq = 0x100000000 - 2048 + id
-      heap.push(f, seq, id)
-      entries.push({
-        f,
-        seq: solver instanceof HighDensitySolverA03 ? seq >>> 0 : seq,
-        id,
-      })
+      // Near the top of the nonnegative Int32 node-index range, still ordered
+      // exactly as their allocation sequence when priorities are equal.
+      const nodeId = 0x7fffffff - 6144 + id
+      heap.push(f, nodeId)
+      entries.push({ f, id: nodeId })
     }
     entries.sort(compareEntries)
     expect(heap.size).toBe(4096)
@@ -48,15 +46,16 @@ test("search heaps preserve priority and sequence order across growth, reuse, an
     entries = entries.slice(2048)
     for (let id = 4096; id < 6144; id++) {
       const f = (id * 53) % 31
-      heap.push(f, id, id)
-      entries.push({ f, seq: id, id })
+      const nodeId = 0x7fffffff - 6144 + id
+      heap.push(f, nodeId)
+      entries.push({ f, id: nodeId })
     }
     entries.sort(compareEntries)
     for (const entry of entries) expect(heap.pop()).toBe(entry.id)
     expect(heap.size).toBe(0)
-    heap.push(100, 1, 1)
+    heap.push(100, 1)
     heap.clear()
-    heap.push(0, 2, 2)
+    heap.push(0, 2)
     expect(heap.pop()).toBe(2)
     expect(heap.size).toBe(0)
   }
