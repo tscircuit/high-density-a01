@@ -14,6 +14,7 @@ type Solver = HighDensitySolverA01 | HighDensitySolverA03
 
 type SearchState = {
   viaOccupantsByCell: Map<number, number[]>
+  _viaOccs: number[]
   nextStamp(): void
   finalizeRoute(nodeIndex: number): void
   ripTrace(connectionId: number): void
@@ -26,7 +27,10 @@ class ObservedCache extends Map<number, number[]> {
   misses = 0
   writes = 0
 
-  constructor(private enabled: boolean) {
+  constructor(
+    private enabled: boolean,
+    private scratch: number[],
+  ) {
     super()
   }
 
@@ -38,6 +42,9 @@ class ObservedCache extends Map<number, number[]> {
   }
 
   override set(key: number, value: number[]): this {
+    if (value === this.scratch) {
+      throw new Error("Mutable via scratch was retained in the occupant cache")
+    }
     this.writes++
     if (this.enabled) super.set(key, value)
     return this
@@ -54,7 +61,7 @@ function observeSearches(
   rippedInvalidations: number
 } {
   const state = solver as unknown as SearchState
-  const cache = new ObservedCache(enabled)
+  const cache = new ObservedCache(enabled, state._viaOccs)
   state.viaOccupantsByCell = cache
   const stats = { cache, finalizedInvalidations: 0, rippedInvalidations: 0 }
   let finalized = false
@@ -93,11 +100,16 @@ function observeSearches(
           : args[0]!
       const cached = cache.get(key)
       if (cached) return cached
-      const occupants = getViaOccupants(...args)
+      // The old memo stored an independent array for each cell.
+      const occupants = getViaOccupants(...args).slice()
       cache.set(key, occupants)
       return occupants
     }
-    return getViaOccupants(...args)
+    const occupants = getViaOccupants(...args)
+    if (solver.layers <= 2 && occupants !== state._viaOccs) {
+      throw new Error("Uncached via queries did not reuse their scratch array")
+    }
+    return occupants
   }
   return stats
 }

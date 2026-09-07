@@ -1358,7 +1358,10 @@ export class HighDensitySolverA03 extends BaseSolver {
       const cached = this.viaOccupantsByCell.get(cellId)
       if (cached) return cached
     }
-    const occs: ConnId[] = []
+    // Uncached callers consume the list synchronously. Cached lists must stay
+    // independent of the scratch array used by later moves.
+    const occs: ConnId[] = shouldCache ? [] : this._viaOccs
+    occs.length = 0
     for (const occCellId of this.getViaFootprint(cellId)) {
       for (let z = 0; z < this.layers; z++) {
         this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
