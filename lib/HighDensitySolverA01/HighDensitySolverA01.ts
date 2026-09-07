@@ -287,7 +287,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   private portOwnerFlat!: Int32Array // layers * planeSize; -1 = none, -2 = shared
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
-  private visitedStamp!: Uint32Array // layers * planeSize
+  private visitedStamp!: Uint32Array
+  private heuristicStamp!: Uint32Array
+  private heuristicValue!: Float64Array // layers * planeSize
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -330,6 +332,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private consecutiveSkips = 0
   private penaltyCap!: number
   private baseSearchBudgetIters!: number
+  private searchBudgetIters = 0
 
   // --- Reusable scratch for computeMoveCostAndRips ---
   private _moveCost = 0
@@ -490,6 +493,8 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
+    this.heuristicStamp = new Uint32Array(totalCells)
+    this.heuristicValue = new Float64Array(totalCells)
     this.stamp = 0
 
     // Precompute via footprint offsets
@@ -602,7 +607,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.nextStamp()
 
       // Push start node
-      const h = this.computeH(
+      const h = this.getCachedH(
         next.startZ,
         next.startRow,
         next.startCol,
@@ -618,11 +623,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // 2. Per-search budget check
     this.searchIterations++
-    const connRips = this.ripCount[this.activeConnId] ?? 0
-    const budget = Math.round(
-      this.baseSearchBudgetIters * (1 + Math.min(connRips, 10) * 0.25),
-    )
-    if (this.searchIterations > budget) {
+    if (this.searchIterations > this.searchBudgetIters) {
       // Global penalty decay on budget-skip: gradually makes penalized zones
       // accessible to stuck connections without affecting non-skipping searches
       const pen = this.penalty2d
@@ -696,7 +697,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       const g2 = g + this._moveCost
       const f2 =
         g2 +
-        this.computeH(z, nr, nc, endZ, endRow, endCol) *
+        this.getCachedH(z, nr, nc, endZ, endRow, endCol) *
           this.hyperParameters.greedyMultiplier
 
       const newNodeIdx = this.nodePool.push(z, nr, nc, g2, nodeIdx, this._moveRipped)
@@ -731,7 +732,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         const g2 = g + this._moveCost
         const f2 =
           g2 +
-          this.computeH(nz, row, col, endZ, endRow, endCol) *
+          this.getCachedH(nz, row, col, endZ, endRow, endCol) *
             this.hyperParameters.greedyMultiplier
 
         const newNodeIdx = this.nodePool.push(nz, row, col, g2, nodeIdx, this._moveRipped)
@@ -914,6 +915,10 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Occupancy and the active connection remain fixed during each search.
     // Finalizing or ripping routes can change both before the next search.
     this.viaOccupantsByCell.clear()
+    const connRips = this.ripCount[this.activeConnId] ?? 0
+    this.searchBudgetIters = Math.round(
+      this.baseSearchBudgetIters * (1 + Math.min(connRips, 10) * 0.25),
+    )
     const roots = this.connIdToRootNet
     if (this.rootOverlapAllowed.length !== roots.length) {
       this.rootOverlapAllowed = new Uint8Array(roots.length)
@@ -929,8 +934,28 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
+      this.heuristicStamp.fill(0)
       this.stamp = 1
     }
+  }
+
+  private getCachedH(
+    z: number,
+    row: number,
+    col: number,
+    toZ: number,
+    toRow: number,
+    toCol: number,
+  ): number {
+    const flatIdx = (z * this.rows + row) * this.cols + col
+    if (this.heuristicStamp[flatIdx] === this.stamp) {
+      return this.heuristicValue[flatIdx]!
+    }
+    // The destination and heuristic parameters stay fixed for the search.
+    const h = this.computeH(z, row, col, toZ, toRow, toCol)
+    this.heuristicStamp[flatIdx] = this.stamp
+    this.heuristicValue[flatIdx] = h
+    return h
   }
 
   // --- Heuristic: Manhattan + via-zone awareness for cross-layer ---
