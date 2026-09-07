@@ -323,6 +323,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
   private viaOccupantsByCell = new Map<number, ConnId[]>()
+  private viaScanFlatOffsets: Int32Array | null = null
+  private viaScanRadius = 0
   private rootOverlapAllowed = new Uint8Array(0)
 
   // --- Convergence state ---
@@ -413,6 +415,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.viaScanFlatOffsets = null
     const { nodeWithPortPoints, cellSizeMm } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -870,14 +873,30 @@ export class HighDensitySolverA01 extends BaseSolver {
     const offDc = this.viaOffsetsDc
     const offLen = this.viaOffsetsLen
     const used = this.usedCellsFlat
+    let flatOffsets = this.viaScanFlatOffsets
+    if (!flatOffsets) {
+      flatOffsets = new Int32Array(offLen)
+      let radius = 0
+      for (let i = 0; i < offLen; i++) {
+        flatOffsets[i] = offDr[i]! * cols + offDc[i]!
+        radius = Math.max(radius, Math.abs(offDr[i]!), Math.abs(offDc[i]!))
+      }
+      this.viaScanFlatOffsets = flatOffsets
+      this.viaScanRadius = radius
+    }
+    const radius = this.viaScanRadius
+    const isInterior =
+      row >= radius && col >= radius && row + radius < rows && col + radius < cols
 
     for (let z = 0; z < this.layers; z++) {
-      const zBase = z * this.planeSize
+      const base = z * this.planeSize + cellIdx
       for (let i = 0; i < offLen; i++) {
-        const r = row + offDr[i]!
-        const c = col + offDc[i]!
-        if (r < 0 || c < 0 || r >= rows || c >= cols) continue
-        const occ = used[zBase + r * cols + c]!
+        if (!isInterior) {
+          const r = row + offDr[i]!
+          const c = col + offDc[i]!
+          if (r < 0 || c < 0 || r >= rows || c >= cols) continue
+        }
+        const occ = used[base + flatOffsets[i]!]!
         if (occ === -1 || occ === activeConn) continue
         if (this.rootOverlapAllowed[occ] === 1) {
           continue
