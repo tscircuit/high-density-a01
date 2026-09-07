@@ -426,6 +426,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private seqCounter = 0
 
   private _viaOccs: ConnId[] = []
+  private viaOccupantsByCell = new Map<number, ConnId[]>()
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
@@ -1152,6 +1153,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     for (let i = neighborStart; i < neighborEnd; i++) {
       const neighborCellId = this.neighborIds[i]!
       const nextFlatIdx = z * this.planeSize + neighborCellId
+      if (visited[nextFlatIdx] === stamp) continue
 
       this.computeMoveCostAndRips(
         activeConn,
@@ -1199,6 +1201,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+        if (visited[nextFlatIdx] === stamp) continue
 
         this.computeMoveCostAndRips(
           activeConn,
@@ -1325,8 +1328,13 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
-    const occs = this._viaOccs
-    occs.length = 0
+    const cached = this.viaOccupantsByCell.get(cellId)
+    if (cached) {
+      this._viaOccs = cached
+      return
+    }
+    const occs: ConnId[] = []
+    this._viaOccs = occs
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
@@ -1347,6 +1355,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
       }
     })
+    this.viaOccupantsByCell.set(cellId, occs)
   }
 
   private fillTraceOccupants(
@@ -1437,6 +1446,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   private nextStamp(): void {
+    // Occupancy and the active connection remain fixed during each search.
+    // Finalizing or ripping routes can change both before the next search.
+    this.viaOccupantsByCell.clear()
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)

@@ -259,6 +259,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
+  private viaOccupantsByCell = new Map<number, ConnId[]>()
 
   // --- Convergence state ---
   private ripCount!: number[]
@@ -834,8 +835,14 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Via footprint unique occupants (fills _viaOccs scratch array) ---
   private fillViaOccupants(row: number, col: number, activeConn: ConnId): void {
-    const occs = this._viaOccs
-    occs.length = 0
+    const cellIdx = row * this.cols + col
+    const cached = this.viaOccupantsByCell.get(cellIdx)
+    if (cached) {
+      this._viaOccs = cached
+      return
+    }
+    const occs: ConnId[] = []
+    this._viaOccs = occs
     const rows = this.rows
     const cols = this.cols
     const offDr = this.viaOffsetsDr
@@ -870,6 +877,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (!seen) occs.push(occ)
       }
     }
+    this.viaOccupantsByCell.set(cellIdx, occs)
   }
 
   private shouldSkipFixedPortHalo(flatIdx: number, connId: ConnId) {
@@ -887,6 +895,9 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Visited stamp management ---
   private nextStamp(): void {
+    // Occupancy and the active connection remain fixed during each search.
+    // Finalizing or ripping routes can change both before the next search.
+    this.viaOccupantsByCell.clear()
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
