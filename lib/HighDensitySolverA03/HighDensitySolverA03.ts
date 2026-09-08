@@ -1252,25 +1252,26 @@ export class HighDensitySolverA03 extends BaseSolver {
     let head = rippedHead
     let ripCount = currentRipCount
     const toFlatIdx = toZ * this.planeSize + toCellId
-
-    if (isVia) {
-      cost += this.hyperParameters.viaBaseCost
-      cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
-
-      const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const allowFixedOverlap = this.rootOverlapAllowed[fixedOwner] === 1
+    const fixedOwner = this.portOwnerFlat[toFlatIdx]!
+    // Empty and self-owned cells need neither an overlap lookup nor an end
+    // exemption. In particular, avoid indexing the typed table with -1/-2.
+    if (
+      fixedOwner >= 0 &&
+      fixedOwner !== activeConn &&
+      this.rootOverlapAllowed[fixedOwner] !== 1
+    ) {
       const seg = this.activeConnSeg
       const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
-      if (
-        fixedOwner >= 0 &&
-        fixedOwner !== activeConn &&
-        !allowFixedOverlap &&
-        !isSegEnd
-      ) {
+      if (!isSegEnd) {
         this._moveCost = -1
         this._moveRippedHead = head
         return
       }
+    }
+
+    if (isVia) {
+      cost += this.hyperParameters.viaBaseCost
+      cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
 
       const occs = this.getViaOccupants(toCellId, activeConn)
       for (let i = 0; i < occs.length; i++) {
@@ -1285,21 +1286,6 @@ export class HighDensitySolverA03 extends BaseSolver {
     } else {
       cost += lateralCost
       cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
-
-      const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const allowFixedOverlap = this.rootOverlapAllowed[fixedOwner] === 1
-      const seg = this.activeConnSeg
-      const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
-      if (
-        fixedOwner >= 0 &&
-        fixedOwner !== activeConn &&
-        !allowFixedOverlap &&
-        !isSegEnd
-      ) {
-        this._moveCost = -1
-        this._moveRippedHead = head
-        return
-      }
 
       this.fillTraceOccupants(toFlatIdx, activeConn, this._cellOccs)
       for (let i = 0; i < this._cellOccs.length; i++) {

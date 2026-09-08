@@ -760,31 +760,32 @@ export class HighDensitySolverA01 extends BaseSolver {
     let cost = 0
     let r = ripped
     const cols = this.cols
-
-    if (fromZ !== toZ) {
-      // Via transition
-      cost += this.hyperParameters.viaBaseCost
-      cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
-
-      const toFlatIdx = (toZ * this.rows + toRow) * cols + toCol
-      const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const allowFixedOverlap = this.rootOverlapAllowed[fixedOwner] === 1
+    const toFlatIdx = (toZ * this.rows + toRow) * cols + toCol
+    const fixedOwner = this.portOwnerFlat[toFlatIdx]!
+    // Empty and self-owned cells need neither an overlap lookup nor an end
+    // exemption. In particular, avoid indexing the typed table with -1/-2.
+    if (
+      fixedOwner >= 0 &&
+      fixedOwner !== activeConn &&
+      this.rootOverlapAllowed[fixedOwner] !== 1
+    ) {
       const seg = this.activeConnSeg
       const isSegEnd =
         !!seg &&
         toZ === seg.endZ &&
         toRow === seg.endRow &&
         toCol === seg.endCol
-      if (
-        fixedOwner >= 0 &&
-        fixedOwner !== activeConn &&
-        !allowFixedOverlap &&
-        !isSegEnd
-      ) {
+      if (!isSegEnd) {
         this._moveCost = -1
         this._moveRipped = r
         return
       }
+    }
+
+    if (fromZ !== toZ) {
+      // Via transition
+      cost += this.hyperParameters.viaBaseCost
+      cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
 
       const occs = this.getViaOccupants(toRow, toCol, activeConn)
       for (let i = 0; i < occs.length; i++) {
@@ -802,29 +803,12 @@ export class HighDensitySolverA01 extends BaseSolver {
       cost += (dr + dc > 1 ? Math.SQRT2 : 1) * this.cellSizeMm
       cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
 
-      const flatIdx = (toZ * this.rows + toRow) * cols + toCol
-      const fixedOwner = this.portOwnerFlat[flatIdx]!
-      const allowFixedOverlap = this.rootOverlapAllowed[fixedOwner] === 1
-      const seg = this.activeConnSeg
-      const isSegEnd =
-        !!seg &&
-        toZ === seg.endZ &&
-        toRow === seg.endRow &&
-        toCol === seg.endCol
+      const occ = this.usedCellsFlat[toFlatIdx]!
       if (
-        fixedOwner >= 0 &&
-        fixedOwner !== activeConn &&
-        !allowFixedOverlap &&
-        !isSegEnd
+        occ !== -1 &&
+        occ !== activeConn &&
+        this.rootOverlapAllowed[occ] !== 1
       ) {
-        this._moveCost = -1
-        this._moveRipped = r
-        return
-      }
-
-      const occ = this.usedCellsFlat[flatIdx]!
-      const allowSameRootOverlap = this.rootOverlapAllowed[occ] === 1
-      if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
         if (!rippedContains(r, occ)) {
           cost += this.hyperParameters.ripCost
           r = { id: occ, prev: r }
@@ -846,11 +830,10 @@ export class HighDensitySolverA01 extends BaseSolver {
         const sqCols = this.cols - 1
         const diagBase = ((toZ * (this.rows - 1) + sqRow) * sqCols + sqCol) * 2
         const crossingOcc = this.usedDiagFlat[diagBase + crossingSlot]!
-        const allowCrossingOverlap = this.rootOverlapAllowed[crossingOcc] === 1
         if (
           crossingOcc !== -1 &&
           crossingOcc !== activeConn &&
-          !allowCrossingOverlap
+          this.rootOverlapAllowed[crossingOcc] !== 1
         ) {
           this._moveCost = -1
           this._moveRipped = r
