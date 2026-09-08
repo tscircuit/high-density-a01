@@ -115,6 +115,7 @@ impl Heap {
     }
 }
 
+#[repr(C, packed(4))]
 struct SearchNode {
     cell: u32,
     g: f64,

@@ -329,16 +329,16 @@ fn integer_cell_preserves_full_partial_state_at_each_trap_boundary() {
 
 #[test]
 fn integer_cell_boundaries_keep_f64_result_abi_and_pool_layout() {
-    assert_eq!(
-        std::mem::size_of::<SearchNode>(),
-        std::mem::size_of::<ReferenceSearchNode>()
-    );
-    assert_eq!(
-        std::mem::align_of::<SearchNode>(),
-        std::mem::align_of::<ReferenceSearchNode>()
-    );
-    assert_eq!(std::mem::size_of::<SearchNode>(), 24);
+    assert_eq!(std::mem::size_of::<SearchNode>(), 20);
+    assert_eq!(std::mem::size_of::<ReferenceSearchNode>(), 24);
+    assert_eq!(std::mem::align_of::<SearchNode>(), 4);
+    assert_eq!(std::mem::align_of::<ReferenceSearchNode>(), 8);
+    assert_eq!(std::mem::offset_of!(SearchNode, cell), 0);
+    assert_eq!(std::mem::offset_of!(SearchNode, g), 4);
+    assert_eq!(std::mem::offset_of!(SearchNode, parent), 12);
+    assert_eq!(std::mem::offset_of!(SearchNode, ripped), 16);
     assert_eq!(std::mem::size_of::<HeapEntry>(), 16);
+    assert_eq!(std::mem::size_of::<Rip>(), 8);
     let mut actual = Kernel::new(1, 1, 1, 0, 1);
     let mut reference = ReferenceKernel::new(1, 1, 1, 0, 1);
     let cells = [
@@ -362,6 +362,14 @@ fn integer_cell_boundaries_keep_f64_result_abi_and_pool_layout() {
         assert_eq!(actual.pool.nodes[id as usize].cell as usize, cell);
         parent = id as i32;
     }
+    assert_eq!(
+        actual.pool.nodes.as_ptr().wrapping_add(1) as usize - actual.pool.nodes.as_ptr() as usize,
+        20,
+    );
+    assert_eq!(
+        actual.pool.nodes.capacity() * std::mem::size_of::<SearchNode>() * 6,
+        reference.pool.nodes.capacity() * std::mem::size_of::<ReferenceSearchNode>() * 5,
+    );
     actual.goal = parent;
     reference.goal = parent;
     actual.collect_goal();
