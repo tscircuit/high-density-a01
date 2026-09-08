@@ -5,7 +5,7 @@ import sample003 from "../dataset01/sample003/sample003.json"
 
 type SearchState = {
   nodePool: {
-    z: Int32Array
+    cellIdx: Float64Array
     g: Float64Array
     length: number
     ripped: Array<unknown>
@@ -24,7 +24,7 @@ test("A01 reuses numeric search storage while preserving its baseline route and 
   solver.solve()
 
   expect(state.nodePool).toBe(pool)
-  expect(pool.z).toBeInstanceOf(Int32Array)
+  expect(pool.cellIdx).toBeInstanceOf(Float64Array)
   expect(pool.g).toBeInstanceOf(Float64Array)
   expect(pool.ripped.length).toBe(pool.length)
   // Captured from the unoptimized 9a3a3d solver, including every route point.

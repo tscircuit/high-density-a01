@@ -28,9 +28,9 @@ function rippedContains(r: RippedNode | null, id: ConnId): boolean {
 
 // Numeric search state is reused across connections without allocating a node object.
 class SearchNodePool {
-  z = new Int32Array(1024)
-  row = new Int32Array(1024)
-  col = new Int32Array(1024)
+  // Flat cell IDs can exceed signed 32-bit range even when each coordinate
+  // fits, so retain the Number domain used by grid indexing.
+  cellIdx = new Float64Array(1024)
   g = new Float64Array(1024)
   parentIdx = new Int32Array(1024)
   ripped: Array<RippedNode | null> = []
@@ -42,18 +42,14 @@ class SearchNodePool {
   }
 
   push(
-    z: number,
-    row: number,
-    col: number,
+    cellIdx: number,
     g: number,
     parentIdx: number,
     ripped: RippedNode | null,
   ): number {
     this.ensureCapacity(this.length + 1)
     const index = this.length++
-    this.z[index] = z
-    this.row[index] = row
-    this.col[index] = col
+    this.cellIdx[index] = cellIdx
     this.g[index] = g
     this.parentIdx[index] = parentIdx
     this.ripped[index] = ripped
@@ -61,18 +57,12 @@ class SearchNodePool {
   }
 
   private ensureCapacity(size: number): void {
-    if (size <= this.z.length) return
-    let next = this.z.length
+    if (size <= this.cellIdx.length) return
+    let next = this.cellIdx.length
     while (next < size) next *= 2
-    const z = new Int32Array(next)
-    z.set(this.z)
-    this.z = z
-    const row = new Int32Array(next)
-    row.set(this.row)
-    this.row = row
-    const col = new Int32Array(next)
-    col.set(this.col)
-    this.col = col
+    const cellIdx = new Float64Array(next)
+    cellIdx.set(this.cellIdx)
+    this.cellIdx = cellIdx
     const g = new Float64Array(next)
     g.set(this.g)
     this.g = g
@@ -611,7 +601,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endRow,
         next.endCol,
       )
-      this.nodePool.push(next.startZ, next.startRow, next.startCol, 0, -1, null)
+      this.nodePool.push(startFlatIdx, 0, -1, null)
       this.heap.push(f, 0)
       return
     }
@@ -647,16 +637,28 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // 3. Pop best node (O(log n))
     const nodeIdx = this.heap.pop()
-    const z = this.nodePool.z[nodeIdx]!
-    const row = this.nodePool.row[nodeIdx]!
-    const col = this.nodePool.col[nodeIdx]!
-    const g = this.nodePool.g[nodeIdx]!
-    const ripped = this.nodePool.ripped[nodeIdx]!
+    const cellIdx = this.nodePool.cellIdx[nodeIdx]!
 
-    // 4. Skip if already visited (stamp check)
-    const cellIdx = (z * this.rows + row) * this.cols + col
+    // 4. Skip duplicates before decoding coordinates or loading move state.
     if (this.visitedStamp[cellIdx] === this.stamp) return
     this.visitedStamp[cellIdx] = this.stamp
+    let z: number
+    let row: number
+    let col: number
+    if (this.planeSize !== 0) {
+      z = Math.floor(cellIdx / this.planeSize)
+      const cellInPlane = cellIdx - z * this.planeSize
+      row = Math.floor(cellInPlane / this.cols)
+      col = cellInPlane - row * this.cols
+    } else {
+      // Sub-cell regions have no valid neighbors. Their sole start node
+      // retains its coordinates even though the physical flat key loses them.
+      z = this.activeConnSeg.startZ
+      row = this.activeConnSeg.startRow
+      col = this.activeConnSeg.startCol
+    }
+    const g = this.nodePool.g[nodeIdx]!
+    const ripped = this.nodePool.ripped[nodeIdx]!
 
     // 5. Check end condition
     const seg = this.activeConnSeg
@@ -693,14 +695,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       const f2 =
         g2 + this.getCachedWeightedH(nIdx, z, nr, nc, endZ, endRow, endCol)
 
-      const newNodeIdx = this.nodePool.push(
-        z,
-        nr,
-        nc,
-        g2,
-        nodeIdx,
-        this._moveRipped,
-      )
+      const newNodeIdx = this.nodePool.push(nIdx, g2, nodeIdx, this._moveRipped)
       this.heap.push(f2, newNodeIdx)
     }
 
@@ -734,9 +729,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           g2 + this.getCachedWeightedH(nIdx, nz, row, col, endZ, endRow, endCol)
 
         const newNodeIdx = this.nodePool.push(
-          nz,
-          row,
-          col,
+          nIdx,
           g2,
           nodeIdx,
           this._moveRipped,
@@ -1144,11 +1137,20 @@ export class HighDensitySolverA01 extends BaseSolver {
     const cells: Array<{ z: number; row: number; col: number }> = []
     let idx = goalNodeIdx
     while (idx >= 0) {
-      cells.push({
-        z: this.nodePool.z[idx]!,
-        row: this.nodePool.row[idx]!,
-        col: this.nodePool.col[idx]!,
-      })
+      const cellIdx = this.nodePool.cellIdx[idx]!
+      if (this.planeSize !== 0) {
+        const z = Math.floor(cellIdx / this.planeSize)
+        const cellInPlane = cellIdx - z * this.planeSize
+        const row = Math.floor(cellInPlane / this.cols)
+        const col = cellInPlane - row * this.cols
+        cells.push({ z, row, col })
+      } else {
+        cells.push({
+          z: this.activeConnSeg!.startZ,
+          row: this.activeConnSeg!.startRow,
+          col: this.activeConnSeg!.startCol,
+        })
+      }
       idx = this.nodePool.parentIdx[idx]!
     }
     cells.reverse()
