@@ -262,7 +262,6 @@ export class HighDensitySolverA01 extends BaseSolver {
   private connNameToId!: Map<string, ConnId>
   private connIdToName!: string[]
   private connIdToRootNet!: string[]
-  private overlapFriendlyRootNets!: Set<string>
 
   // --- Flat arrays ---
   private planeSize!: number // rows * cols
@@ -449,7 +448,6 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.connNameToId = new Map()
     this.connIdToName = []
     this.connIdToRootNet = []
-    this.overlapFriendlyRootNets = new Set()
 
     // Flat penalty map (Float64Array is zero-initialized)
     this.penalty2d = new Float64Array(this.planeSize)
@@ -913,10 +911,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     if (fixedOwner < 0) return false
     const sameRoot =
       this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[connId]
-    return !(
-      sameRoot &&
-      this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
-    )
+    return !sameRoot
   }
 
   // --- Visited stamp management ---
@@ -933,12 +928,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.rootOverlapAllowed = new Uint8Array(roots.length)
     }
     const activeRoot = roots[this.activeConnId]!
-    if (this.overlapFriendlyRootNets.has(activeRoot)) {
-      for (let conn = 0; conn < roots.length; conn++) {
-        this.rootOverlapAllowed[conn] = roots[conn] === activeRoot ? 1 : 0
-      }
-    } else {
-      this.rootOverlapAllowed.fill(0)
+    for (let conn = 0; conn < roots.length; conn++) {
+      this.rootOverlapAllowed[conn] = roots[conn] === activeRoot ? 1 : 0
     }
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
@@ -1067,7 +1058,6 @@ export class HighDensitySolverA01 extends BaseSolver {
         const netName = conn.rootConnectionName ?? name
         const segKey = `${netName}|${orderedEndpoints}`
         if (seenSegmentKeys.has(segKey)) {
-          this.overlapFriendlyRootNets.add(netName)
           continue
         }
         seenSegmentKeys.add(segKey)
@@ -1244,10 +1234,7 @@ export class HighDensitySolverA01 extends BaseSolver {
           const existing = used[flatIdx]!
           const sameRoot =
             this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
-          const allowSameRootOverlap =
-            sameRoot &&
-            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
-          if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
+          if (existing !== -1 && existing !== connId && !sameRoot) {
             continue
           }
           this.markOwner(used, this.cellOwners, flatIdx, connId)
@@ -1282,12 +1269,9 @@ export class HighDensitySolverA01 extends BaseSolver {
             for (const existing of owners) {
               const sameRoot =
                 this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
-              const allowSameRootOverlap =
-                sameRoot &&
-                this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
               if (
                 existing !== connId &&
-                !allowSameRootOverlap &&
+                !sameRoot &&
                 !displacedByVias.includes(existing)
               ) {
                 displacedByVias.push(existing)
