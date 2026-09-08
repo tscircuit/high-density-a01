@@ -50,12 +50,17 @@ struct HeapEntry {
 #[derive(Default)]
 struct Heap {
     entries: Vec<HeapEntry>,
+    // A single unordered priority keeps legacy heap behavior until the next
+    // search clear, even after that entry has already been popped.
+    has_nan_priority: bool,
 }
 impl Heap {
     fn clear(&mut self) {
         self.entries.clear();
+        self.has_nan_priority = false;
     }
     fn push(&mut self, f: f64, id: u32) {
+        self.has_nan_priority |= f.is_nan();
         let entry = HeapEntry { f, id };
         let mut i = self.entries.len();
         self.entries.push(entry);
@@ -74,7 +79,7 @@ impl Heap {
         }
         self.entries[i] = entry;
     }
-    fn pop(&mut self) -> u32 {
+    fn pop_legacy(&mut self) -> u32 {
         let out = self.entries[0].id;
         let entry = self.entries.pop().unwrap();
         let n = self.entries.len();
@@ -108,6 +113,55 @@ impl Heap {
                 }
                 self.entries[i] = child_entry;
                 i = child;
+            }
+            self.entries[i] = entry;
+        }
+        out
+    }
+
+    fn pop(&mut self) -> u32 {
+        // NaNs make the existing comparator non-total. Ordered searches can
+        // use Floyd's sift-to-leaf and restore without changing the heap array.
+        if self.has_nan_priority {
+            return self.pop_legacy();
+        }
+        let out = self.entries[0].id;
+        let entry = self.entries.pop().unwrap();
+        let n = self.entries.len();
+        if n > 0 {
+            let mut i = 0;
+            loop {
+                let left = i * 2 + 1;
+                if left >= n {
+                    break;
+                }
+                let right = left + 1;
+                let mut child = left;
+                if right < n {
+                    let l = self.entries[left];
+                    let r = self.entries[right];
+                    if !(if l.f != r.f { l.f < r.f } else { l.id < r.id }) {
+                        child = right;
+                    }
+                }
+                self.entries[i] = self.entries[child];
+                i = child;
+            }
+            // The selected-child path is ordered. Bubbling the saved entry
+            // back reverses exactly the extra assignments below the position
+            // where the legacy entry-versus-child comparison would stop.
+            while i > 0 {
+                let parent = (i - 1) >> 1;
+                let p = self.entries[parent];
+                if !(if entry.f != p.f {
+                    entry.f < p.f
+                } else {
+                    entry.id < p.id
+                }) {
+                    break;
+                }
+                self.entries[i] = p;
+                i = parent;
             }
             self.entries[i] = entry;
         }
@@ -698,3 +752,6 @@ mod batch_tests {
         assert_eq!(k.state[0], 1);
     }
 }
+
+#[cfg(test)]
+mod heap_tests;
