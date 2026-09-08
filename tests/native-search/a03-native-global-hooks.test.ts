@@ -32,11 +32,13 @@ test("native A03 materializes before replaced globals without extra removed call
     [Array.prototype, "push"],
     [Array.prototype, "includes"],
     [Array.prototype, "slice"],
+    [Array.prototype, Symbol.iterator],
     [Map.prototype, "get"],
     [Map.prototype, "set"],
     [Map.prototype, "clear"],
     [typed, "set"],
     [typed, "fill"],
+    [typed, Symbol.iterator],
     [typed, "length"],
     [typed, "buffer"],
   ]

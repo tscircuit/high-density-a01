@@ -31,6 +31,7 @@ jobs:
           bun native-search-a03/tests/wasm-oracle.ts
           bun native-search-a03/tests/wasm-lifecycle.ts
           bun native-search-a03/tests/distance-seed-oracle.ts
+          bun native-search-a03/tests/distance-view-oracle.ts
       - name: Build uncached A03 host-order reference module
         env:
           RUSTFLAGS: -C link-arg=-zstack-size=65536

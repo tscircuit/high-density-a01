@@ -8,7 +8,7 @@ The module imports the same engine's `Math.hypot` and the original lazy TypeScri
 
 The original TypeScript start heuristic runs before each native search. Its completed cache slot seeds the native memo before the first pop. The additive cache snapshot exports every table in insertion order, including unused raw float slots and validity bytes. Materialization restores the TypeScript Map, surviving table identities and FIFO accounting before customized callbacks can observe them. Search and distance caches survive subsequent native searches and clear at setup/release.
 
-`ABI-DRAFT.md` describes the implemented ABI, including search-state kind40 and distance-cache kind41. Full materialization retains heap/node/rip backing slots, both visited arrays, best-G values/stamps, move scratch outputs, ordered occupants and layer stamps. The original TypeScript footprint Map keeps its independent lifetime. Decoders copy floating backing bytes through integer views, preserving NaN payloads and signed zero.
+`ABI-DRAFT.md` describes the implemented ABI. Search-state kind40 and distance-cache kind41 remain complete serialized correctness oracles. Production kinds42/43 expose bulk array spans and FIFO distance-buffer metadata, avoiding serialized copies and temporary distance arrays. Full materialization still retains heap/node/rip backing slots, both visited arrays, best-G values/stamps, move scratch outputs, ordered occupants and layer stamps. The original TypeScript footprint Map keeps its independent lifetime, so bulk transfer omits duplicate native footprint contents. Decoders preserve raw floating backing bytes, NaN payloads, signed zero, existing cache-array identities and FIFO order. All borrowed views are copied synchronously before another mutating export or memory growth.
 
 The bridge prevents reentry. A host footprint callback copies only into its supplied preallocated destination and does not call exports or grow native memory. Imported exceptions propagate without replay. No Rust borrow guard or temporary allocation needs destruction across an import. After unwind, `a03_publish_state` exposes the partial heap and attempted/completed counters.
 
@@ -23,11 +23,12 @@ git diff --exit-code -- lib/native-search/a03SearchWasmBytes.ts
 bun native-search-a03/tests/wasm-oracle.ts
 bun native-search-a03/tests/wasm-lifecycle.ts
 bun native-search-a03/tests/distance-seed-oracle.ts
+bun native-search-a03/tests/distance-view-oracle.ts
 RUSTFLAGS="-C link-arg=-zstack-size=65536" cargo +1.93.1 build --locked --manifest-path native-search-a03/Cargo.toml --target wasm32-unknown-unknown --release --features uncached-distance-oracle --target-dir native-search-a03/target-oracle
 bun native-search-a03/tests/wasm-oracle.ts --uncached native-search-a03/target-oracle/wasm32-unknown-unknown/release/a03_exact_search_preparation.wasm
 ```
 
-The test-only `uncached-distance-oracle` feature preserves the original complete host-call sequence. Production builds enable the memo. Generated test summary JSON is ignored; the reference manifests and compressed inputs are committed.
+The test-only `uncached-distance-oracle` feature preserves the original complete host-call sequence. Production builds enable the memo. Both module search oracles also compare every bulk-view backing value against the unchanged full snapshot, including partial host failures. The direct distance-view oracle compares all 55 frozen C49 seed/FIFO boundaries against kind41. Graph-only validation controls retain every graph check and require full ownership validation at begin. Generated test summary JSON is ignored; the reference manifests and compressed inputs are committed.
 
 ## Reference provenance
 

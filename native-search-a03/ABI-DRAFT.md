@@ -39,6 +39,8 @@ Imports can throw. They must not be wrapped as capability failures or retried. U
 |33|u32|4|distance cache slots, table count, hits, misses|
 |40|u64|snapshotWords|versioned complete search materialization state, below|
 |41|u64|distanceWords|versioned distance-cache materialization state, below|
+|42|u32|50|bulk search materialization header and twenty spans, below|
+|43|u32|4+6*tableCount|distance-cache FIFO direct-buffer metadata, below|
 
 Kinds 20–23 exist only after a successful begin. These buffers expose the current native search stamps and values. The integration attempts native only on the first search; once it declines, it stays in JavaScript until setup is reset. It does not adopt a later JavaScript search. Input pointers can change after an allocating export and must be reacquired.
 
@@ -50,6 +52,7 @@ P=plane cells, S=P*layers, E=CSR edge count, N=shared IDs, C=root mask length. S
 - `a03_setup(P, layers, E, N, C: u32) -> u32`: allocate/reset arrays and caches for one solver, return 1 if dimensions supported, 0 otherwise. Host then fills input arrays.
 - `a03_resize_shared(N: u32)`: allocate the next search's shared-owner ID array only; refresh views before writes.
 - `a03_validate_inputs() -> u32`: validate current graph/array contents without consuming any pop; return 1/0. The bridge must materialize JS for unsupported live replacements, not throw a routing error or restart a search.
+- `a03_validate_graph() -> u32`: retain every dimension, center, neighbor CSR/ID and edge-cost check, including cheap shared-array endpoint/length checks; omit only the full shared-offset monotonicity scan. Use only after the original full create/begin validation, when the guarded bridge has copied graph fields and ownership arrays are unchanged within the search. Direct full validation and begin retain the original complete checks.
 - `a03_begin(stamp:u32, active:i32, startZ:i32, startCell:i32, endZ:i32, endCell:i32, startF:f64, clearStamps:u32, via:f64, rip:f64, traceRip:f64, viaRip:f64, greedy:f64, cap:f64) -> u32`: TS already performed original start H computation and owns iteration/budget setup. Reset heap/node/rip/whole-query cache; keep footprints; initialize exact node0, best-G and priority. clearStamps reproduces the explicit wrap-clearing step. Return 1/0 before any pop.
 - `a03_seed_distance(goal:u32, cell:u32, dx:f64, dy:f64, distance:f64) -> u32`: after a successful begin and before the first pop, mirror the completed original TypeScript start-heuristic cache slot. Apply the same FIFO allocation rule; repeated identical seeds are idempotent and do not change hit/miss diagnostics. Invalid IDs, disabled capacity or absent kernel return 0 without changing state.
 - `a03_export_distance_cache()`: prepare kind41 without changing kind40 or consuming search work. Refresh views after this allocating export.
@@ -58,6 +61,8 @@ P=plane cells, S=P*layers, E=CSR edge count, N=shared IDs, C=root mask length. S
 - `a03_publish_state()`: update status/heap/pool/rip diagnostics from current partial state without advancing or allocating. Use after a thrown import once the WASM call has unwound.
 - `a03_collect_goal()`: prepare kind31/32 arrays for unchanged TS finalizer. Does not clear residual heap/state.
 - `a03_export_snapshot()`: prepare kind40 complete materialization words; no algorithm step. Refresh views afterward.
+- `a03_export_materialization()`: prepare kind42. Reuse private SoA scratch for every heap/node/rip backing entry and expose unchanged native array/list vectors directly. Omit native footprint copies; the original complete TypeScript footprint Map already owns them. The full kind40 oracle is unchanged.
+- `a03_export_distance_views()`: prepare kind43 FIFO metadata pointing directly to native dx/dy/distance/valid vectors. It neither serializes their contents nor changes the full kind41 oracle.
 - `a03_clear()`: clear the entire solver state, input arrays, footprint copies, occupancy lists, snapshots, and scratch for release/setup; no ownership registry. `begin` instead keeps footprint geometry across searches and resets only active whole-query occupancy lists, with the original stamp lifecycle for per-cell lists. The TS bridge preserves public heap/visited diagnostics before release.
 
 Kind30 (u32[8]): 0=last returned status, 1=current heap size, 2=goal node ID (i32 bits; -1 before goal), 3=attempts in last advance/bulk call, 4=completed pops in that call, 5=node-pool length, 6=rip-pool length, 7=stamp. Attempts/completed must be volatile-published at original boundaries in a WASM adapter. An import throw leaves attempts including the current failed pop and completed excluding it. Unlike a completed-count convention, original A03 openSet reads the current partially mutated heap: the bridge must call a03_publish_state after unwind for that value. The core snapshot retains the actual partial arrays.
@@ -81,3 +86,20 @@ Search metadata, costs and the public TS counters are held by the bridge separat
 Kind41 is a separate u64-word payload. It does not change kind40. Its header is `[version=1, fixedCapacity, totalSlots, tableCount]`. Fixed capacity is P when `1 <= P <= 65,536`, otherwise 0. Tables appear in insertion/FIFO order. Each table contains `[goalCellId, length]`, then all dx words, all dy words, all distance words and all validity words. Floating words retain raw IEEE bits, including unused zero slots; validity bytes and integer fields use low32 bits with high32 zero.
 
 The exported lengths sum to totalSlots, bounded by 65,536. Begin retains these tables, and each TypeScript-computed start slot is seeded before a native pop. Materialization uses the complete surviving FIFO list to remove evicted TypeScript goals and restore table contents/accounting. The original Map and surviving table identities remain observable after fallback. Setup/release clears the cache and exported buffers. The production ABI has no arbitrary whole-search snapshot import; Rust `Kernel::restore` exists only for the frozen search controls.
+
+## Additive bulk transfer views
+
+Kind42 contains exactly 50 u32 words. Its ten-word header is `[1, heapLength, nodeLength, ripLength, moveHeadAsU32, 0, moveCostLow, moveCostHigh, moveRipCountLow, moveRipCountHigh]`. Scalar float pairs are raw little-endian IEEE words; the metadata allocation is only required to be four-byte aligned, so a decoder must not assume the header can be viewed directly as Float64 values. Twenty `(pointer, elementLength)` spans follow in this order:
+
+1. heap f:f64, heap ID:i32;
+2. node z:i32, cell:i32, g:f64, parent:i32, ripHead:i32, ripCount:i32;
+3. rip owner:i32, previous:i32;
+4. visited:u32, visitedFlat:u32, bestStamp:u32, bestG:f64;
+5. via scratch:i32, trace scratch:i32, layer scratch:i32, layer stamps:u32;
+6. via-list metadata:u32, layer-list metadata:u32.
+
+Both list metadata spans contain triplets `[keyOrIndexAsU32, valuesPointer, valuesLength]` pointing to i32 values. Via entries follow original insertion order. Layer entries include only present lists, in ascending cell order, including present-but-empty lists. Missing entries remain undefined; the full layer length comes from the layer-stamp span. Every heap/node/rip backing slot is included, even beyond logical length. The native footprint map is deliberately absent only from this transfer; kind40 still exports it for exact controls.
+
+Kind43 contains `[1, fixedCapacity, totalSlots, tableCount]`, followed by FIFO records `[goalCellId, length, dxPointer, dyPointer, distancePointer, validPointer]`. The first three pointers address f64 arrays of `length` elements; the final pointer addresses u8 validity. Capacity/accounting, all unused raw slots, identities and FIFO semantics remain those of kind41. Restoring directly into the existing TypeScript arrays avoids intermediate copies; captured intrinsics preserve raw bits and skip customized collection callbacks.
+
+Both view exports may allocate before returning. Reacquire memory.buffer after the export and read-only pointer/length lookups. Complete structural validation and all owned JavaScript copies synchronously without another mutating export, import callback or memory growth. Never retain borrowed views or pointers for a later step. Scratch capacity may be reused, and clear/setup releases all transfer buffers. These exports consume no search step and remain usable after a host exception has unwound.

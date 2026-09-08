@@ -36,12 +36,10 @@ const nativeString = String
 const nativeIsInteger = Number.isInteger
 const nativeIsSafeInteger = Number.isSafeInteger
 const nativeMapGet = Map.prototype.get
-const nativeTypedSet = Uint8Array.prototype.set
 const nativeMapClear = Map.prototype.clear
 const nativeMapSet = Map.prototype.set
 const nativeMapForEach = Map.prototype.forEach
 const nativeTypedPrototype = Object.getPrototypeOf(Uint8Array.prototype)
-const nativeTypedLength = nativeDescriptor(nativeTypedPrototype, "length")!.get!
 const nativeGetters: Array<[object, PropertyKey, unknown]> = [
   [Map.prototype, "size", nativeDescriptor(Map.prototype, "size")!.get],
   [
@@ -1121,7 +1119,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       return false
     }
     this.nativeKernel!.copyGraph(this)
-    if (!this.nativeKernel!.validateInputs()) {
+    if (!this.nativeKernel!.validateGraph()) {
       this.declineNativeSearch()
       return false
     }
@@ -1130,7 +1128,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private materializeNativeSearch(): void {
     if (!this.nativeActive) return
-    const snapshot = this.nativeKernel!.snapshot()
+    const snapshot = this.nativeKernel!.materializationSnapshot()
     applyFunction(nativeHeapImport, this.heap, [snapshot.heap])
     const nodes = snapshot.nodes
     this.nodePool.length = nodes.length
@@ -1168,36 +1166,12 @@ export class HighDensitySolverA03 extends BaseSolver {
     ])
     // Host calls already populated the complete original footprint Map. A
     // bounded native copy cache must never replace that solver-lifetime memo.
-    const distances = this.nativeKernel!.distanceSnapshot()
-    const restored: Array<[number, DistanceCacheTable]> = []
-    applyFunction(nativeMapForEach, distances.tables, [
-      (value: DistanceCacheTable, key: number): void => {
-        const previous = applyFunction(nativeMapGet, this.distanceByGoal, [
-          key,
-        ]) as DistanceCacheTable | undefined
-        const table =
-          previous &&
-          applyFunction(nativeTypedLength, previous.valid, []) ===
-            applyFunction(nativeTypedLength, value.valid, [])
-            ? previous
-            : value
-        if (table !== value) {
-          applyFunction(nativeTypedSet, table.dx, [value.dx])
-          applyFunction(nativeTypedSet, table.dy, [value.dy])
-          applyFunction(nativeTypedSet, table.distance, [value.distance])
-          applyFunction(nativeTypedSet, table.valid, [value.valid])
-        }
-        restored[restored.length] = [key, table]
-      },
-    ])
-    // Preserve Map and surviving table identities while importing native FIFO
-    // evictions. Captured intrinsics also make fallback safe after global hooks
-    // change; the first subsequent JS computeH sees the original warmed slots.
-    applyFunction(nativeMapClear, this.distanceByGoal, [])
-    for (let i = 0; i < restored.length; i++) {
-      const entry = restored[i]!
-      applyFunction(nativeMapSet, this.distanceByGoal, [entry[0], entry[1]])
-    }
+    // The bridge bulk-copies native tables with captured intrinsics, retaining
+    // the original Map, surviving table arrays, and exact FIFO order before any
+    // subsequent TypeScript callback observes the warmed distance memo.
+    const distances = this.nativeKernel!.restoreDistanceCache(
+      this.distanceByGoal,
+    )
     this.distanceCacheCapacity = distances.capacity
     this.distanceCacheSlots = distances.slots
     this.nativeActive = false

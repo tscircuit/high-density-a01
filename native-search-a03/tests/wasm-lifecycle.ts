@@ -112,6 +112,7 @@ assert.equal(
   0,
   "raw Float32 NaN payload must select JS before a pop",
 )
+assert.equal(e.a03_validate_graph(), 0)
 assert.equal(e.a03_begin(2, 0, 0, 0, 1, 2, 1, 0, ...costs), 0)
 e.a03_export_snapshot()
 assert.deepEqual(
@@ -122,8 +123,10 @@ assert.deepEqual(
 )
 array(5, Float32Array)[0] = Infinity
 assert.equal(e.a03_validate_inputs(), 1)
+assert.equal(e.a03_validate_graph(), 1)
 array(5, Float32Array)[0] = -Infinity
 assert.equal(e.a03_validate_inputs(), 1)
+assert.equal(e.a03_validate_graph(), 1)
 array(5, Float32Array)[0] = 1
 for (const kind of [1, 2]) {
   const original = array(kind, Float64Array)[0]
@@ -134,6 +137,7 @@ for (const kind of [1, 2]) {
       0,
       "nonfinite centers must select JS before a pop",
     )
+    assert.equal(e.a03_validate_graph(), 0)
     e.a03_export_snapshot()
     assert.deepEqual(
       Array.from(
@@ -154,6 +158,14 @@ assert.equal(
 array(9, Int32Array).set([0, 0, 0, 0, 0, 0, 2])
 array(10, Int32Array).set([1, 2])
 assert.equal(e.a03_validate_inputs(), 1)
+assert.equal(e.a03_validate_graph(), 1)
+array(9, Int32Array)[1] = -1
+assert.equal(e.a03_validate_inputs(), 0)
+assert.equal(
+  e.a03_validate_graph(),
+  1,
+  "unchanged owner CSR is validated at begin",
+)
 console.log(
   JSON.stringify({
     passed: true,

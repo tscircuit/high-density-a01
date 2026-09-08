@@ -47,6 +47,8 @@ static mut DISTANCE_STATS: [u32; 4] = [0; 4];
 static mut PUBLISHED: [u32; 8] = [0, 0, u32::MAX, 0, 0, 0, 0, 0];
 static mut SNAPSHOT: Vec<u64> = Vec::new();
 static mut DISTANCE_SNAPSHOT: Vec<u64> = Vec::new();
+static mut MATERIALIZATION: Option<materialization::Materialization> = None;
+static mut DISTANCE_VIEWS: Vec<u32> = Vec::new();
 static mut GOAL_CELLS: Vec<i32> = Vec::new();
 static mut GOAL_RIPS: Vec<i32> = Vec::new();
 
@@ -160,6 +162,11 @@ pub extern "C" fn a03_resize_shared(length: u32) {
 #[no_mangle]
 pub extern "C" fn a03_validate_inputs() -> u32 {
     unsafe { problem().is_some_and(|p| p.validate().is_ok()) as u32 }
+}
+
+#[no_mangle]
+pub extern "C" fn a03_validate_graph() -> u32 {
+    unsafe { problem().is_some_and(|p| p.validate_graph().is_ok()) as u32 }
 }
 
 #[no_mangle]
@@ -359,6 +366,27 @@ pub extern "C" fn a03_export_distance_cache() {
 }
 
 #[no_mangle]
+pub extern "C" fn a03_export_materialization() {
+    unsafe {
+        let k = kernel().expect("active A03 search required");
+        (*core::ptr::addr_of_mut!(MATERIALIZATION))
+            .get_or_insert_with(materialization::Materialization::default)
+            .prepare(&k.state);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn a03_export_distance_views() {
+    unsafe {
+        let k = kernel().expect("active A03 search required");
+        k.distance_cache.view_words(
+            k.problem.plane,
+            &mut *core::ptr::addr_of_mut!(DISTANCE_VIEWS),
+        );
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn a03_clear() {
     unsafe {
         KERNEL = None;
@@ -368,6 +396,8 @@ pub extern "C" fn a03_clear() {
         };
         SNAPSHOT = Vec::new();
         DISTANCE_SNAPSHOT = Vec::new();
+        MATERIALIZATION = None;
+        DISTANCE_VIEWS = Vec::new();
         GOAL_CELLS = Vec::new();
         GOAL_RIPS = Vec::new();
         PUBLISHED = [0, 0, u32::MAX, 0, 0, 0, 0, 0];
@@ -420,6 +450,11 @@ unsafe fn span(kind: u32) -> (u32, u32) {
         33 => (core::ptr::addr_of!(DISTANCE_STATS) as u32, 4),
         40 => buffer!(*core::ptr::addr_of!(SNAPSHOT)),
         41 => buffer!(*core::ptr::addr_of!(DISTANCE_SNAPSHOT)),
+        42 => match (*core::ptr::addr_of!(MATERIALIZATION)).as_ref() {
+            Some(value) => buffer!(value.metadata),
+            None => (0, 0),
+        },
+        43 => buffer!(*core::ptr::addr_of!(DISTANCE_VIEWS)),
         _ => (0, 0),
     }
 }

@@ -6,7 +6,10 @@ import {
 import {
   decodeNativeA03DistanceSnapshot,
   type NativeA03DistanceSnapshot,
+  type NativeA03DistanceTable,
 } from "./decodeNativeA03DistanceSnapshot"
+import { decodeNativeA03Materialization } from "./decodeNativeA03Materialization"
+import { restoreNativeA03DistanceViews } from "./restoreNativeA03DistanceViews"
 
 export type NativeA03Costs = {
   viaBaseCost: number
@@ -66,6 +69,7 @@ type KernelExports = {
   a03_pointer(kind: number): number
   a03_length(kind: number): number
   a03_validate_inputs(): number
+  a03_validate_graph(): number
   a03_begin(
     stamp: number,
     active: number,
@@ -102,6 +106,7 @@ type KernelExports = {
   a03_publish_state(): void
   a03_collect_goal(): void
   a03_export_snapshot(): void
+  a03_export_materialization(): void
   a03_seed_distance(
     goal: number,
     cell: number,
@@ -110,6 +115,7 @@ type KernelExports = {
     distance: number,
   ): number
   a03_export_distance_cache(): void
+  a03_export_distance_views(): void
   a03_clear(): void
 }
 
@@ -445,6 +451,11 @@ export class NativeA03SearchKernel {
     return this.exports.a03_validate_inputs() === 1
   }
 
+  validateGraph(): boolean {
+    this.assertIdle()
+    return this.exports.a03_validate_graph() === 1
+  }
+
   begin(start: NativeA03Start): boolean {
     this.assertIdle()
     const result = this.exports.a03_begin(
@@ -539,6 +550,18 @@ export class NativeA03SearchKernel {
     )
   }
 
+  materializationSnapshot(): NativeA03Snapshot {
+    this.assertIdle()
+    const exports = this.exports
+    exports.a03_export_materialization()
+    this.refreshState()
+    return decodeNativeA03Materialization(
+      kernelBuffer(exports),
+      exports.a03_pointer(42),
+      exports.a03_length(42),
+    )
+  }
+
   seedDistance(
     goal: number,
     cell: number,
@@ -561,6 +584,22 @@ export class NativeA03SearchKernel {
       kernelBuffer(exports),
       exports.a03_pointer(41),
       exports.a03_length(41),
+    )
+  }
+
+  restoreDistanceCache(target: Map<number, NativeA03DistanceTable>): {
+    capacity: number
+    slots: number
+  } {
+    this.assertIdle()
+    const exports = this.exports
+    exports.a03_export_distance_views()
+    this.refreshState()
+    return restoreNativeA03DistanceViews(
+      kernelBuffer(exports),
+      exports.a03_pointer(43),
+      exports.a03_length(43),
+      target,
     )
   }
 

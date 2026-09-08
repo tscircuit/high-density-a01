@@ -5,6 +5,10 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { gunzipSync } from "node:zlib"
 import { a03SearchWasmBase64 } from "../../lib/native-search/a03SearchWasmBytes"
+import {
+  assertBulkMaterialization,
+  assertDistanceViews,
+} from "./bulk-view-controls"
 
 class Reader {
   at = 0
@@ -265,6 +269,8 @@ for (const name of readdirSync(resolve(import.meta.dir, "fixtures")).filter(
           expectedRips,
         )
       }
+      assertBulkMaterialization(e, last.expected)
+      assertDistanceViews(e)
       nativeSteps += count
       if (!ordinary) batchedSteps += count
       boundaries++
@@ -283,6 +289,8 @@ for (const name of readdirSync(resolve(import.meta.dir, "fixtures")).filter(
       [0, 0, 0, 0],
     )
     assert.equal(e.a03_length(40), 0)
+    assert.equal(e.a03_length(42), 0)
+    assert.equal(e.a03_length(43), 0)
     assert.equal(e.a03_length(20), 0)
     assert.deepEqual(
       Array.from(new Uint32Array(memory.buffer, e.a03_pointer(30), 8)),

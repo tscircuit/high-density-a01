@@ -525,6 +525,46 @@ fn tiny_search(stamp: u32) -> Search {
         end_cell: 2,
     }
 }
+
+pub(crate) fn read_fixture_state_for_bulk_test() -> SearchState {
+    let mut reader = Bytes::read(&fixtures()[0]);
+    initial(&mut reader).0.state
+}
+
+#[test]
+fn graph_validation_retains_all_live_graph_checks_without_rescanning_owners() {
+    let original = tiny_problem();
+    assert!(original.validate_graph().is_ok());
+    let mut owners_changed = original.clone();
+    owners_changed.shared_offsets[1] = -1;
+    assert!(owners_changed.validate().is_err());
+    assert!(owners_changed.validate_graph().is_ok());
+    let variants: Vec<Box<dyn Fn(&mut Problem)>> = vec![
+        Box::new(|p| p.layers = 0),
+        Box::new(|p| p.x.pop().map(|_| ()).unwrap()),
+        Box::new(|p| p.y[0] = f64::INFINITY),
+        Box::new(|p| p.via_allowed.clear()),
+        Box::new(|p| p.offsets[0] = 1),
+        Box::new(|p| p.offsets[1] = -1),
+        Box::new(|p| p.offsets[3] = 1),
+        Box::new(|p| p.neighbors[0] = -1),
+        Box::new(|p| p.neighbors[0] = 3),
+        Box::new(|p| p.edge_costs.pop().map(|_| ()).unwrap()),
+        Box::new(|p| p.edge_costs[0] = f32::from_bits(0xffc0_0042)),
+    ];
+    for change in variants {
+        let mut problem = original.clone();
+        change(&mut problem);
+        assert!(problem.validate().is_err());
+        assert!(problem.validate_graph().is_err());
+    }
+    for edge in [f32::INFINITY, f32::NEG_INFINITY, -0.0, 0.0] {
+        let mut problem = original.clone();
+        problem.edge_costs[0] = edge;
+        assert!(problem.validate().is_ok());
+        assert!(problem.validate_graph().is_ok());
+    }
+}
 #[test]
 fn capability_limits_start_reset_growth_and_numeric_scratch_are_explicit() {
     let p = tiny_problem();

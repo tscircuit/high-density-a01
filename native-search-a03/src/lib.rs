@@ -23,6 +23,47 @@ pub struct Problem {
 }
 
 impl Problem {
+    /// Revalidate only fields copied before each pop/quantum. Owners and shared
+    /// occupancy are unchanged during a search and retain full begin validation.
+    pub fn validate_graph(&self) -> Result<(), &'static str> {
+        let states = self
+            .plane
+            .checked_mul(self.layers)
+            .ok_or("state overflow")?;
+        if self.plane == 0 || self.layers == 0 || states > MAX_STATES {
+            return Err("unsupported grid dimensions");
+        }
+        if self.x.len() != self.plane
+            || self.y.len() != self.plane
+            || self.via_allowed.len() != self.plane
+            || self.penalties.len() != self.plane
+            || self.owners.len() != states
+            || self.port_owners.len() != states
+            || self.edge_costs.len() != self.neighbors.len()
+        {
+            return Err("array dimensions");
+        }
+        if self.x.iter().chain(&self.y).any(|v| !v.is_finite()) {
+            return Err("unsupported nonfinite centers");
+        }
+        if self.offsets.len() != self.plane + 1
+            || self.offsets[0] != 0
+            || self.offsets[self.plane] as usize != self.neighbors.len()
+            || !self.offsets.windows(2).all(|p| p[0] >= 0 && p[0] <= p[1])
+            || self.shared_offsets.len() != states + 1
+            || self.shared_offsets[0] != 0
+            || self.shared_offsets[states] as usize != self.shared_ids.len()
+            || self
+                .neighbors
+                .iter()
+                .zip(&self.edge_costs)
+                .any(|(&id, &cost)| id < 0 || id as usize >= self.plane || cost.is_nan())
+        {
+            return Err("unsupported CSR");
+        }
+        Ok(())
+    }
+
     /// Initial capability validation only. A future bridge must materialize JS
     /// before unsupported live inputs; this is not an earlier routing error.
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -1028,6 +1069,8 @@ impl SearchState {
 
 #[cfg(test)]
 mod tests;
+
+mod materialization;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
