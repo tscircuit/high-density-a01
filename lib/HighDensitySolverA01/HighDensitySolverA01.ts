@@ -6,6 +6,11 @@ import {
   computeGridToAffineTransform,
 } from "../gridToAffineTransform"
 import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
+import {
+  canRunNativeA01Search,
+  NativeA01SearchKernel,
+  type NativeA01SearchInput,
+} from "../native-search/NativeA01SearchKernel"
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
@@ -205,6 +210,10 @@ export interface HighDensitySolverA01Props {
   viaDiameter: number
   maxCellCount?: number
   stepMultiplier?: number
+  /** Opt in to the exact WASM search kernel. Grid/occupancy stay fixed during
+   * each connection search; numeric move costs remain live between steps.
+   * Unsupported domains or unavailable WASM use JS before search begins. */
+  useNativeSearch?: boolean
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
@@ -243,6 +252,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   showUsedCellMap: boolean
   effort: number
   stepMultiplier: number
+  useNativeSearch: boolean
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
 
@@ -301,6 +311,10 @@ export class HighDensitySolverA01 extends BaseSolver {
   private crossLayerSearch = false
   private nodePool!: SearchNodePool
   private heap!: MinHeap
+  private nativeSearchKernel: NativeA01SearchKernel | null = null
+  private nativeSearchForActiveConnection = false
+  private nativeOpenSetLength: number | null = null
+  private nativeStepCount = 0
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
@@ -339,7 +353,13 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
   get openSet() {
-    return { length: this.heap?.size ?? 0 }
+    return { length: this.nativeOpenSetLength ?? this.heap?.size ?? 0 }
+  }
+  get nativeSearchActive(): boolean {
+    return this.nativeSearchForActiveConnection
+  }
+  get nativeSearchSteps(): number {
+    return this.nativeStepCount
   }
   get gridStats() {
     return {
@@ -362,6 +382,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
+    this.useNativeSearch = props.useNativeSearch ?? false
     this.hyperParameters = {
       shuffleSeed: 0,
       ripCost: 10,
@@ -384,6 +405,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         viaDiameter: this.viaDiameter,
         maxCellCount: this.maxCellCount,
         stepMultiplier: this.stepMultiplier,
+        useNativeSearch: this.useNativeSearch,
         traceThickness: this.traceThickness,
         traceMargin: this.traceMargin,
         viaMinDistFromBorder: this.viaMinDistFromBorder,
@@ -397,6 +419,10 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.nativeSearchKernel = null
+    this.nativeSearchForActiveConnection = false
+    this.nativeOpenSetLength = null
+    this.nativeStepCount = 0
     this.viaScanFlatOffsets = null
     const { nodeWithPortPoints, cellSizeMm } = this
     const { width, height, center } = nodeWithPortPoints
@@ -568,6 +594,13 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
     if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
       this.viaOccupantsByCell.clear()
+      if (this.nativeSearchForActiveConnection) {
+        this.nativeSearchKernel!.copyVisitedTo(this.visitedStamp)
+      }
+      // Preserve public heap/debug state while allowing the Instance and its
+      // maximum linear-memory allocation to be collected with no host registry.
+      this.nativeSearchForActiveConnection = false
+      this.nativeSearchKernel = null
     }
   }
 
@@ -588,6 +621,9 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.heap.clear()
       this.searchIterations = 0
       this.nextStamp()
+      this.nativeSearchForActiveConnection = false
+      this.nativeOpenSetLength = null
+      if (this.tryBeginNativeSearch(next)) return
 
       // Push start node
       const startFlatIdx =
@@ -620,11 +656,21 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.activeConnId = -1
       this.heap.clear()
       this.nodePool.clear()
+      if (this.nativeSearchForActiveConnection) {
+        this.nativeSearchKernel!.clear()
+        this.nativeSearchForActiveConnection = false
+        this.nativeOpenSetLength = 0
+      }
       this.consecutiveSkips++
       if (this.consecutiveSkips >= this.unsolvedSegs.length * 3) {
         this.error = `Convergence failure: ${this.unsolvedSegs.length} connections stuck`
         this.failed = true
       }
+      return
+    }
+
+    if (this.nativeSearchForActiveConnection) {
+      this.advanceNativeSearch()
       return
     }
 
@@ -740,6 +786,127 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // --- Merged cost + rip computation (writes to _moveCost/_moveRipped) ---
+  private tryBeginNativeSearch(seg: ConnectionSeg): boolean {
+    if (!this.useNativeSearch) return false
+    const original = HighDensitySolverA01.prototype
+    if (
+      this.getCachedWeightedH !== original.getCachedWeightedH ||
+      this.computeH !== original.computeH ||
+      this.computeMoveCostAndRips !== original.computeMoveCostAndRips ||
+      this.getViaOccupants !== original.getViaOccupants
+    )
+      return false
+    // Accessors can change a cost per neighbor, rather than per public step.
+    // Check descriptors without invoking them before deciding the backend.
+    const isDataProperty = (object: object, name: string): boolean => {
+      for (
+        let current: object | null = object;
+        current;
+        current = Object.getPrototypeOf(current)
+      ) {
+        const descriptor = Object.getOwnPropertyDescriptor(current, name)
+        if (descriptor) return "value" in descriptor
+      }
+      return false
+    }
+    if (
+      !["hyperParameters", "cellSizeMm", "penaltyCap"].every((name) =>
+        isDataProperty(this, name),
+      )
+    )
+      return false
+    const hp = this.hyperParameters
+    if (
+      ![
+        "viaBaseCost",
+        "ripCost",
+        "ripTracePenalty",
+        "ripViaPenalty",
+        "greedyMultiplier",
+      ].every((name) => isDataProperty(hp, name))
+    )
+      return false
+    const input: NativeA01SearchInput = {
+      rows: this.rows,
+      cols: this.cols,
+      layers: this.layers,
+      startZ: seg.startZ,
+      startRow: seg.startRow,
+      startCol: seg.startCol,
+      endZ: seg.endZ,
+      endRow: seg.endRow,
+      endCol: seg.endCol,
+      activeConnId: this.activeConnId,
+      stamp: this.stamp,
+      minViaRow: this.minViaRow,
+      maxViaRow: this.maxViaRow,
+      minViaCol: this.minViaCol,
+      maxViaCol: this.maxViaCol,
+      cellSizeMm: this.cellSizeMm,
+      viaBaseCost: hp.viaBaseCost,
+      ripCost: hp.ripCost,
+      ripTracePenalty: hp.ripTracePenalty,
+      ripViaPenalty: hp.ripViaPenalty,
+      greedyMultiplier: hp.greedyMultiplier,
+      penaltyCap: this.penaltyCap,
+      usedCells: this.usedCellsFlat,
+      portOwners: this.portOwnerFlat,
+      usedDiagonals: this.usedDiagFlat,
+      penalties: this.penalty2d,
+      rootOverlap: this.rootOverlapAllowed,
+      viaOffsetsDr: this.viaOffsetsDr,
+      viaOffsetsDc: this.viaOffsetsDc,
+    }
+    if (!canRunNativeA01Search(input)) return false
+    this.nativeSearchKernel ??= NativeA01SearchKernel.create(input)
+    if (!this.nativeSearchKernel) return false
+    this.nativeSearchKernel.begin(input)
+    this.nativeSearchForActiveConnection = true
+    this.nativeOpenSetLength = this.nativeSearchKernel.heapSize
+    return true
+  }
+
+  private advanceNativeSearch(): void {
+    const kernel = this.nativeSearchKernel!
+    // Ordinary public scalar writes between steps remain live. Existing
+    // weighted-H cache hits intentionally keep their earlier values, as in JS.
+    const status = kernel.advance(
+      this.cellSizeMm,
+      this.hyperParameters,
+      this.penaltyCap,
+    )
+    this.nativeStepCount++
+    this.nativeOpenSetLength = kernel.heapSize
+    if (status === 0) return
+    if (status === 2) {
+      this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
+      this.failed = true
+      return
+    }
+    if (status !== 1)
+      throw new Error(`Unexpected native search status ${status}`)
+    const { cellIds, rippedIds } = kernel.readGoal()
+    if (cellIds.length === 0)
+      throw new Error("Native search returned an empty goal chain")
+    // Finalization reads only the chosen chain and its persistent rip list.
+    // Keep all cell marking, rip ordering, penalties and output logic in TS.
+    this.nodePool.clear()
+    let parent = -1
+    for (const cell of cellIds)
+      parent = this.nodePool.push(cell, 0, parent, null)
+    let ripped: RippedNode | null = null
+    for (let i = rippedIds.length - 1; i >= 0; i--)
+      ripped = { id: rippedIds[i]!, prev: ripped }
+    this.nodePool.ripped[parent] = ripped
+    this.finalizeRoute(parent)
+    this.activeConnSeg = null
+    this.activeConnId = -1
+    kernel.clear()
+    this.nativeSearchForActiveConnection = false
+    // The original heap retains its remaining entries after reaching a goal.
+    // nativeOpenSetLength retains that public value until the next clear/start.
+  }
+
   private computeMoveCostAndRips(
     activeConn: ConnId,
     fromZ: number,
@@ -1447,6 +1614,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override visualize() {
+    if (this.nativeSearchForActiveConnection) {
+      this.nativeSearchKernel!.copyVisitedTo(this.visitedStamp)
+    }
     const LAYER_COLORS = ["red", "blue", "orange", "green"]
 
     const points: Array<{
