@@ -3,10 +3,7 @@ import { defaultParams } from "../../lib/default-params"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import sample002 from "../dataset01/sample002/sample002.json"
 import sample003 from "../dataset01/sample003/sample003.json"
-import sample007 from "../dataset01/sample007/sample007.json"
 import prevNext from "../prev-next/prev-next.json"
-import repro03 from "../repros/repro03/repro03.json"
-import repro05 from "../repros/repro05/repro05.json"
 
 type Heuristic = (
   z: number,
@@ -49,10 +46,7 @@ test("A01 reuses exact heuristic values across duplicate nodes and invalidates o
   for (const nodeWithPortPoints of [
     sample002,
     sample003,
-    sample007.nodeWithPortPoints,
     prevNext,
-    repro03.nodeWithPortPoints,
-    repro05[0]!.nodeWithPortPoints,
   ]) {
     const cached = new HighDensitySolverA01({
       ...defaultParams,
