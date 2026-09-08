@@ -446,6 +446,10 @@ impl Kernel {
             return 0;
         }
         self.visited[cell] = self.stamp;
+        self.expand_unvisited(id, cell)
+    }
+
+    fn expand_unvisited(&mut self, id: usize, cell: usize) -> u32 {
         let z = cell / self.plane;
         let in_plane = cell - z * self.plane;
         let row = in_plane / self.cols;
@@ -525,8 +529,15 @@ impl Kernel {
                 self.publish_batch_state(3, self.state[4]);
                 break;
             }
-            let status = self.advance();
-            assert_eq!(status, 0, "batch must stop before terminal pops");
+            // The preflight already read this immutable pool payload. Pop still
+            // precedes the visited read, including a potentially trapping index.
+            self.heap.pop();
+            let cell = cell as usize;
+            if self.visited[cell] != self.stamp {
+                self.visited[cell] = self.stamp;
+                let status = self.expand_unvisited(next, cell);
+                assert_eq!(status, 0, "batch must stop before terminal pops");
+            }
             self.publish_batch_state(0, self.heap.entries.len() as u32);
             self.publish_batch_state(4, self.state[4] + 1);
         }
@@ -698,3 +709,6 @@ mod batch_tests {
         assert_eq!(k.state[0], 1);
     }
 }
+
+#[cfg(test)]
+mod batch_prefix_tests;
