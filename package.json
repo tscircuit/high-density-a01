@@ -45,6 +45,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "flatbush": "github:seveibar/flatbush#1dfd023dded570d9a8a63880e5d80e60751a9d77"
+    "flatbush": "git+https://github.com/seveibar/flatbush.git#1dfd023dded570d9a8a63880e5d80e60751a9d77"
   }
 }
