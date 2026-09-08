@@ -77,11 +77,13 @@ type KernelExports = {
 }
 
 const MAX_NATIVE_CELLS = 1_048_576
-const MAX_IDLE_INSTANCES = 4
+const MAX_IDLE_INSTANCES = 32
 const MAX_IDLE_MEMORY_BYTES = 32 * 1024 * 1024
+const MAX_TOTAL_IDLE_MEMORY_BYTES = 128 * 1024 * 1024
 // Only explicitly released owners enter this bounded idle pool. Live solvers
 // are never registered here, so abandoning one still lets GC reclaim it.
 const idleExports: KernelExports[] = []
+let idleMemoryBytes = 0
 const releasedBuffer = new ArrayBuffer(0)
 const releasedState = new Uint32Array(releasedBuffer)
 const throwReleased = (): never => {
@@ -200,7 +202,10 @@ export class NativeA01SearchKernel {
     }
     if (!compiledModule) return null
     const pooled = idleExports.pop()
-    if (pooled) return new NativeA01SearchKernel(pooled, input)
+    if (pooled) {
+      idleMemoryBytes -= pooled.memory.buffer.byteLength
+      return new NativeA01SearchKernel(pooled, input)
+    }
     let instance: WebAssembly.Instance
     try {
       instance = new WebAssembly.Instance(compiledModule)
@@ -404,11 +409,14 @@ export class NativeA01SearchKernel {
     this.state = releasedState
     this.currentHeapSize = 0
     exports.kernel_clear()
+    const memoryBytes = exports.memory.buffer.byteLength
     if (
       idleExports.length < MAX_IDLE_INSTANCES &&
-      exports.memory.buffer.byteLength <= MAX_IDLE_MEMORY_BYTES
+      memoryBytes <= MAX_IDLE_MEMORY_BYTES &&
+      memoryBytes <= MAX_TOTAL_IDLE_MEMORY_BYTES - idleMemoryBytes
     ) {
       idleExports.push(exports)
+      idleMemoryBytes += memoryBytes
     }
   }
 }

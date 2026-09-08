@@ -43,11 +43,11 @@ test("released native instances are isolated, reset and retained within count an
   const input = inputFor()
   // Drain any prior tests' idle pool without relinquishing these owners yet.
   const held = Array.from(
-    { length: 4 },
+    { length: 32 },
     () => NativeA01SearchKernel.create(input)!,
   )
   const original = Array.from(
-    { length: 6 },
+    { length: 34 },
     () => NativeA01SearchKernel.create(input)!,
   )
   const originalMemories = new Set(original.map(memoryOf))
@@ -58,13 +58,13 @@ test("released native instances are isolated, reset and retained within count an
     kernel.release()
   }
   const borrowed = Array.from(
-    { length: 6 },
+    { length: 34 },
     () => NativeA01SearchKernel.create(input)!,
   )
   expect(
     borrowed.filter((kernel) => originalMemories.has(memoryOf(kernel))),
-  ).toHaveLength(4)
-  expect(new Set(borrowed.map(memoryOf)).size).toBe(6)
+  ).toHaveLength(32)
+  expect(new Set(borrowed.map(memoryOf)).size).toBe(34)
   for (const kernel of held)
     expect(borrowed.map(memoryOf)).not.toContain(memoryOf(kernel))
 
@@ -77,6 +77,7 @@ test("released native instances are isolated, reset and retained within count an
     (): void => old.begin(input),
     (): number => old.advance(input.cellSizeMm, input, input.penaltyCap),
     (): unknown => old.readGoal(),
+    (): number => old.advanceMany(1, input.cellSizeMm, input, input.penaltyCap),
     (): void => old.copyVisitedTo(new Uint32Array(1)),
     (): void => old.clear(),
   ]
