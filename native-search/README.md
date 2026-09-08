@@ -25,6 +25,10 @@ endpoints, finite nonnegative initial penalties and costs, and footprint offsets
 whose flat arithmetic fits signed 32-bit integers. Empty via zones are supported.
 Unsupported inputs use the existing JavaScript search.
 
+The upstream A11 configuration, exact segment/via clearance, nonzero rip-history
+cost multipliers, and overridden `getRipCost` hooks also select JavaScript.
+These solver configuration fields must remain fixed during a connection search.
+
 The opt-in backend assumes grid dimensions, fixed port ownership, and ordered
 via footprint offsets remain fixed for the solver. Occupancy, diagonal ownership,
 penalties, endpoint coordinates, and root-overlap data are snapshotted at the

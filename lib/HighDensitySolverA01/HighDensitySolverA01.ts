@@ -105,6 +105,49 @@ interface SolvedRouteInternal {
   viaCells: Array<{ row: number; col: number }>
 }
 
+interface CircularGridOffsets {
+  rowOffsets: Int32Array
+  columnOffsets: Int32Array
+  length: number
+}
+
+function createCircularGridOffsets(params: {
+  radiusMm: number
+  cellSizeMm: number
+}): CircularGridOffsets {
+  const radiusCellRatio = params.radiusMm / params.cellSizeMm
+  const nearestRadiusCellCount = Math.round(radiusCellRatio)
+  const radiusCells =
+    Math.abs(radiusCellRatio - nearestRadiusCellCount) <= 1e-9
+      ? nearestRadiusCellCount
+      : Math.ceil(radiusCellRatio)
+  const radiusCellsSquared = radiusCells * radiusCells
+  const rowOffsets: number[] = []
+  const columnOffsets: number[] = []
+
+  for (let rowOffset = -radiusCells; rowOffset <= radiusCells; rowOffset++) {
+    for (
+      let columnOffset = -radiusCells;
+      columnOffset <= radiusCells;
+      columnOffset++
+    ) {
+      if (
+        rowOffset * rowOffset + columnOffset * columnOffset <=
+        radiusCellsSquared
+      ) {
+        rowOffsets.push(rowOffset)
+        columnOffsets.push(columnOffset)
+      }
+    }
+  }
+
+  return {
+    rowOffsets: new Int32Array(rowOffsets),
+    columnOffsets: new Int32Array(columnOffsets),
+    length: rowOffsets.length,
+  }
+}
+
 // --- Min-heap for A* open set ---
 class MinHeap {
   private f = new Float64Array(1024)
@@ -255,6 +298,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   useNativeSearch: boolean
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
+  protected useExactViaTraceClearance = false
+  protected ripHistoryCostMultiplier = 0
 
   // Grid dimensions
   rows!: number
@@ -287,9 +332,14 @@ export class HighDensitySolverA01 extends BaseSolver {
   private stamp = 0
 
   // --- Precomputed via footprint offsets ---
-  private viaOffsetsDr!: Int32Array
-  private viaOffsetsDc!: Int32Array
-  private viaOffsetsLen!: number
+  private viaOccupantScanOffsetsDr!: Int32Array
+  private viaOccupantScanOffsetsDc!: Int32Array
+  private viaOccupantScanOffsetsLen!: number
+  private viaOwnersByCell!: Map<number, Set<ConnId>>
+  private viaCenterIndicesByConn!: number[][]
+  private viaTraceClearanceMm!: number
+  private outputCellStepX!: number
+  private outputCellStepY!: number
 
   // --- Via zone boundaries (cell coordinates) ---
   private minViaRow!: number
@@ -468,6 +518,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       width,
       height,
     })
+    this.outputCellStepX = this.cols > 1 ? width / (this.cols - 1) : width
+    this.outputCellStepY = this.rows > 1 ? height / (this.rows - 1) : height
 
     // Intern connections
     this.connNameToId = new Map()
@@ -508,22 +560,18 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.weightedHeuristicValue = new Float64Array(totalCells)
     this.stamp = 0
 
-    // Precompute via footprint offsets
-    const viaRadiusCells = Math.ceil(this.viaDiameter / 2 / cellSizeMm)
-    const r2 = viaRadiusCells * viaRadiusCells
-    const drList: number[] = []
-    const dcList: number[] = []
-    for (let dr = -viaRadiusCells; dr <= viaRadiusCells; dr++) {
-      for (let dc = -viaRadiusCells; dc <= viaRadiusCells; dc++) {
-        if (dr * dr + dc * dc <= r2) {
-          drList.push(dr)
-          dcList.push(dc)
-        }
-      }
-    }
-    this.viaOffsetsLen = drList.length
-    this.viaOffsetsDr = new Int32Array(drList)
-    this.viaOffsetsDc = new Int32Array(dcList)
+    // Existing traces already occupy their traceMargin halo, so a prospective
+    // via only needs to scan its own copper radius around that occupancy.
+    const viaOccupantScanOffsets = createCircularGridOffsets({
+      radiusMm: this.viaDiameter / 2,
+      cellSizeMm,
+    })
+    this.viaOccupantScanOffsetsLen = viaOccupantScanOffsets.length
+    this.viaOccupantScanOffsetsDr = viaOccupantScanOffsets.rowOffsets
+    this.viaOccupantScanOffsetsDc = viaOccupantScanOffsets.columnOffsets
+    this.viaOwnersByCell = new Map()
+    this.viaCenterIndicesByConn = []
+    this.viaTraceClearanceMm = this.viaDiameter / 2 + this.traceThickness / 2
 
     // Precompute via zone boundaries
     if (this.viaMinDistFromBorder > 0) {
@@ -786,6 +834,13 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // --- Merged cost + rip computation (writes to _moveCost/_moveRipped) ---
+  protected getRipCost(connId: ConnId): number {
+    return (
+      this.hyperParameters.ripCost *
+      (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0))
+    )
+  }
+
   private tryBeginNativeSearch(seg: ConnectionSeg): boolean {
     if (!this.useNativeSearch) return false
     const original = HighDensitySolverA01.prototype
@@ -793,7 +848,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.getCachedWeightedH !== original.getCachedWeightedH ||
       this.computeH !== original.computeH ||
       this.computeMoveCostAndRips !== original.computeMoveCostAndRips ||
-      this.getViaOccupants !== original.getViaOccupants
+      this.getViaOccupants !== original.getViaOccupants ||
+      this.getRipCost !== original.getRipCost
     )
       return false
     // Accessors can change a cost per neighbor, rather than per public step.
@@ -809,6 +865,15 @@ export class HighDensitySolverA01 extends BaseSolver {
       }
       return false
     }
+    // A11 adds history-based rip costs and exact segment/via clearance.
+    // Those solver configurations remain in JS until the kernel supports them.
+    if (
+      !isDataProperty(this, "ripHistoryCostMultiplier") ||
+      !isDataProperty(this, "useExactViaTraceClearance") ||
+      this.ripHistoryCostMultiplier !== 0 ||
+      this.useExactViaTraceClearance
+    )
+      return false
     if (
       !["hyperParameters", "cellSizeMm", "penaltyCap"].every((name) =>
         isDataProperty(this, name),
@@ -854,8 +919,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       usedDiagonals: this.usedDiagFlat,
       penalties: this.penalty2d,
       rootOverlap: this.rootOverlapAllowed,
-      viaOffsetsDr: this.viaOffsetsDr,
-      viaOffsetsDc: this.viaOffsetsDc,
+      viaOffsetsDr: this.viaOccupantScanOffsetsDr,
+      viaOffsetsDc: this.viaOccupantScanOffsetsDc,
     }
     if (!canRunNativeA01Search(input)) return false
     this.nativeSearchKernel ??= NativeA01SearchKernel.create(input)
@@ -951,7 +1016,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!rippedContains(r, occ)) {
-          cost += this.hyperParameters.ripCost
+          cost += this.getRipCost(occ)
           r = { id: occ, prev: r }
         }
         cost += this.hyperParameters.ripViaPenalty
@@ -970,10 +1035,32 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.rootOverlapAllowed[occ] !== 1
       ) {
         if (!rippedContains(r, occ)) {
-          cost += this.hyperParameters.ripCost
+          cost += this.getRipCost(occ)
           r = { id: occ, prev: r }
         }
         cost += this.hyperParameters.ripTracePenalty
+      }
+
+      // usedCellsFlat only records occupied grid points. A diagonal segment
+      // can pass between those points and clip a via, so check the actual
+      // output-space segment against nearby via centers as well.
+      if (this.viaOwnersByCell.size > 0) {
+        this.fillTraceSegmentViaOccupants(
+          fromRow,
+          fromCol,
+          toRow,
+          toCol,
+          activeConn,
+        )
+        const viaOccs = this._viaOccs
+        for (let i = 0; i < viaOccs.length; i++) {
+          const viaOwner = viaOccs[i]!
+          if (!rippedContains(r, viaOwner)) {
+            cost += this.getRipCost(viaOwner)
+            r = { id: viaOwner, prev: r }
+          }
+          cost += this.hyperParameters.ripViaPenalty
+        }
       }
 
       // Prevent unmodeled same-layer diagonal X-crossings.
@@ -1026,9 +1113,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     occs.length = 0
     const rows = this.rows
     const cols = this.cols
-    const offDr = this.viaOffsetsDr
-    const offDc = this.viaOffsetsDc
-    const offLen = this.viaOffsetsLen
+    const offDr = this.viaOccupantScanOffsetsDr
+    const offDc = this.viaOccupantScanOffsetsDc
+    const offLen = this.viaOccupantScanOffsetsLen
     const used = this.usedCellsFlat
     let flatOffsets = this.viaScanFlatOffsets
     if (!flatOffsets) {
@@ -1074,6 +1161,74 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
     if (shouldCache) this.viaOccupantsByCell.set(cellIdx, occs)
     return occs
+  }
+
+  private fillTraceSegmentViaOccupants(
+    fromRow: number,
+    fromCol: number,
+    toRow: number,
+    toCol: number,
+    activeConn: ConnId,
+  ): void {
+    const occs = this._viaOccs
+    occs.length = 0
+    const minRow = Math.min(fromRow, toRow)
+    const maxRow = Math.max(fromRow, toRow)
+    const minCol = Math.min(fromCol, toCol)
+    const maxCol = Math.max(fromCol, toCol)
+    const rowClearance = this.viaTraceClearanceMm / this.outputCellStepY
+    const colClearance = this.viaTraceClearanceMm / this.outputCellStepX
+    const segmentX = (toCol - fromCol) * this.outputCellStepX
+    const segmentY = (toRow - fromRow) * this.outputCellStepY
+    const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY
+    const clearanceSquared = this.viaTraceClearanceMm * this.viaTraceClearanceMm
+
+    for (const [viaIndex, owners] of this.viaOwnersByCell) {
+      const row = Math.floor(viaIndex / this.cols)
+      const col = viaIndex - row * this.cols
+      if (
+        row < minRow - rowClearance ||
+        row > maxRow + rowClearance ||
+        col < minCol - colClearance ||
+        col > maxCol + colClearance
+      ) {
+        continue
+      }
+
+      const viaFromX = (col - fromCol) * this.outputCellStepX
+      const viaFromY = (row - fromRow) * this.outputCellStepY
+      const projection =
+        segmentLengthSquared === 0
+          ? 0
+          : Math.max(
+              0,
+              Math.min(
+                1,
+                (viaFromX * segmentX + viaFromY * segmentY) /
+                  segmentLengthSquared,
+              ),
+            )
+      const closestX = segmentX * projection
+      const closestY = segmentY * projection
+      const distanceX = viaFromX - closestX
+      const distanceY = viaFromY - closestY
+      if (distanceX * distanceX + distanceY * distanceY >= clearanceSquared) {
+        continue
+      }
+
+      for (const owner of owners) {
+        if (owner === activeConn) continue
+        const sameRoot =
+          this.connIdToRootNet[owner] === this.connIdToRootNet[activeConn]
+        if (
+          sameRoot &&
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        ) {
+          continue
+        }
+        if (!occs.includes(owner)) occs.push(owner)
+      }
+    }
   }
 
   private shouldSkipFixedPortHalo(flatIdx: number, connId: ConnId) {
@@ -1399,9 +1554,9 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Mark via footprint cells
     const displacedByVias: ConnId[] = []
-    const offDr = this.viaOffsetsDr
-    const offDc = this.viaOffsetsDc
-    const offLen = this.viaOffsetsLen
+    const offDr = this.viaOccupantScanOffsetsDr
+    const offDc = this.viaOccupantScanOffsetsDc
+    const offLen = this.viaOccupantScanOffsetsLen
 
     for (let vi = 0; vi < viaCells.length; vi++) {
       const via = viaCells[vi]!
@@ -1512,6 +1667,23 @@ export class HighDensitySolverA01 extends BaseSolver {
     })
     this.solvedRoutes.set(connId, solvedRoutes)
 
+    if (this.useExactViaTraceClearance) {
+      while (this.viaCenterIndicesByConn.length <= connId) {
+        this.viaCenterIndicesByConn.push([])
+      }
+      const viaCenterIndices = this.viaCenterIndicesByConn[connId] ?? []
+      for (const via of viaCells) {
+        const viaCenterIndex = via.row * this.cols + via.col
+        const owners = this.viaOwnersByCell.get(viaCenterIndex) ?? new Set()
+        if (!owners.has(connId)) {
+          owners.add(connId)
+          viaCenterIndices.push(viaCenterIndex)
+        }
+        this.viaOwnersByCell.set(viaCenterIndex, owners)
+      }
+      this.viaCenterIndicesByConn[connId] = viaCenterIndices
+    }
+
     // Rip connections displaced by via footprints
     for (let i = 0; i < displacedByVias.length; i++) {
       this.ripTrace(displacedByVias[i]!)
@@ -1592,6 +1764,19 @@ export class HighDensitySolverA01 extends BaseSolver {
         }
       }
       this.usedDiagIndicesByConn[connId] = []
+    }
+
+    const viaCenterIndices = this.viaCenterIndicesByConn[connId]
+    if (viaCenterIndices) {
+      for (const viaCenterIndex of viaCenterIndices) {
+        const owners = this.viaOwnersByCell.get(viaCenterIndex)
+        if (!owners) continue
+        owners.delete(connId)
+        if (owners.size === 0) {
+          this.viaOwnersByCell.delete(viaCenterIndex)
+        }
+      }
+      this.viaCenterIndicesByConn[connId] = []
     }
 
     // Move from solved back to unsolved
