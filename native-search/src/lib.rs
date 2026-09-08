@@ -370,6 +370,7 @@ impl Kernel {
             self.via_stamp[cell] = self.stamp;
         }
     }
+    #[inline(always)]
     fn move_cost(
         &mut self,
         z: usize,
