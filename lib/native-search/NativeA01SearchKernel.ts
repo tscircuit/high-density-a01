@@ -63,6 +63,16 @@ type KernelExports = {
     cap: number,
   ): number
   kernel_collect_goal(): void
+  kernel_advance_many(
+    limit: number,
+    cell: number,
+    via: number,
+    rip: number,
+    trace: number,
+    viaRip: number,
+    greedy: number,
+    cap: number,
+  ): number
   kernel_clear(): void
 }
 
@@ -191,7 +201,7 @@ export class NativeA01SearchKernel {
     )
     this.statePointer = exports.kernel_pointer(8)
     this.buffer = exports.memory.buffer
-    this.state = new Uint32Array(this.buffer, this.statePointer, 3)
+    this.state = new Uint32Array(this.buffer, this.statePointer, 5)
     // Port ownership and the ordered footprint offsets are immutable per solver.
     new Int32Array(
       this.buffer,
@@ -212,6 +222,14 @@ export class NativeA01SearchKernel {
 
   get heapSize(): number {
     return this.currentHeapSize
+  }
+
+  get lastBatchAttempts(): number {
+    return this.state[3]!
+  }
+
+  get lastBatchCompleted(): number {
+    return this.state[4]!
   }
 
   begin(input: NativeA01SearchInput): void {
@@ -285,9 +303,38 @@ export class NativeA01SearchKernel {
     const buffer = this.exports.memory.buffer
     if (buffer !== this.buffer) {
       this.buffer = buffer
-      this.state = new Uint32Array(buffer, this.statePointer, 3)
+      this.state = new Uint32Array(buffer, this.statePointer, 5)
     }
     this.currentHeapSize = this.state[0]!
+  }
+
+  advanceMany(
+    limit: number,
+    cellSizeMm: number,
+    costs: Omit<NativeA01Costs, "cellSizeMm" | "penaltyCap">,
+    penaltyCap: number,
+  ): number {
+    // A trap must expose the attempted call and the last completed heap view;
+    // the solver then reproduces BaseSolver.step's increment-before-throw state.
+    this.state[3] = 0
+    this.state[4] = 0
+    try {
+      const completed = this.exports.kernel_advance_many(
+        limit,
+        cellSizeMm,
+        costs.viaBaseCost,
+        costs.ripCost,
+        costs.ripTracePenalty,
+        costs.ripViaPenalty,
+        costs.greedyMultiplier,
+        penaltyCap,
+      )
+      this.refreshState()
+      return completed
+    } catch (error) {
+      this.refreshState()
+      throw error
+    }
   }
 
   readGoal(): { cellIds: Float64Array; rippedIds: Int32Array } {

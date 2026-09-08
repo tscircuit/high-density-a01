@@ -43,7 +43,22 @@ fields select JavaScript before the search. Installing such hooks/accessors or
 reflectively changing the snapshotted geometry during an active native search is
 outside this opt-in contract.
 
-## Rebuilding
+## Optional batching
+
+`stepNativeBatch(maxSteps)` consumes only eligible nonterminal native pops and
+returns their exact count. Zero means the caller must invoke the ordinary
+`step()` before trying again. The caller retains scheduling control after every
+such boundary. Setup, new connections, goal/empty handling, final acceptance,
+search-budget skips and terminal cleanup remain in `step()`.
+
+Batching requires the default stepping methods, no progress hook, plain data
+properties and `stepMultiplier === 1`; customizations retain individual calls.
+`nativeSearchBatchedSteps` counts work actually executed by the bulk kernel.
+Every original iteration and duplicate pop is retained. A trap exposes attempted
+and completed counts separately, including the prior completed heap view, and
+is rethrown with the original BaseSolver failure state.
+
+## Rebuilding the asset
 
 Install the pinned toolchain and target, then regenerate the checked-in asset:
 

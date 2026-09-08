@@ -232,7 +232,8 @@ impl Kernel {
             goal: -1,
             result_cells: Vec::new(),
             result_rips: Vec::new(),
-            state: vec![0; 3],
+            // Heap/result lengths, then attempted/completed batch pops.
+            state: vec![0; 5],
         }
     }
     fn set_costs(
@@ -504,6 +505,39 @@ impl Kernel {
         }
         0
     }
+
+    fn advance_many(&mut self, limit: u32) -> u32 {
+        self.state[3] = 0;
+        self.state[4] = 0;
+        let goal_cell = ((self.config[3] as usize * self.rows + self.config[4] as usize)
+            * self.cols
+            + self.config[5] as usize) as f64;
+        for _ in 0..limit {
+            if self.heap.entries.is_empty() {
+                break;
+            }
+            // Publish the attempt before any possibly trapping indexed read.
+            // state[0] remains the last COMPLETED pop's public heap length.
+            self.publish_batch_state(3, self.state[4] + 1);
+            let next = self.heap.entries[0].id as usize;
+            let cell = self.pool.nodes[next].cell;
+            if cell == goal_cell && self.visited[cell as usize] != self.stamp {
+                self.publish_batch_state(3, self.state[4]);
+                break;
+            }
+            let status = self.advance();
+            assert_eq!(status, 0, "batch must stop before terminal pops");
+            self.publish_batch_state(0, self.heap.entries.len() as u32);
+            self.publish_batch_state(4, self.state[4] + 1);
+        }
+        self.state[4]
+    }
+
+    fn publish_batch_state(&mut self, index: usize, value: u32) {
+        // The host observes memory after a WASM trap. Rust's panic=abort must
+        // not let LLVM discard intermediate stores as unobservable on abort.
+        unsafe { self.state.as_mut_ptr().add(index).write_volatile(value) }
+    }
     fn collect_goal(&mut self) {
         self.result_cells.clear();
         self.result_rips.clear();
@@ -594,10 +628,73 @@ pub extern "C" fn kernel_advance(
     result
 }
 #[no_mangle]
+pub extern "C" fn kernel_advance_many(
+    limit: u32,
+    cell: f64,
+    via: f64,
+    rip: f64,
+    trace: f64,
+    via_rip: f64,
+    greedy: f64,
+    cap: f64,
+) -> u32 {
+    let k = kernel();
+    k.set_costs(cell, via, rip, trace, via_rip, greedy, cap);
+    k.advance_many(limit)
+}
+#[no_mangle]
 pub extern "C" fn kernel_collect_goal() {
     kernel().collect_goal();
 }
 #[no_mangle]
 pub extern "C" fn kernel_clear() {
     kernel().clear();
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    fn stale_queue() -> Kernel {
+        let mut k = Kernel::new(3, 3, 2, 0, 1);
+        k.stamp = 1;
+        k.config[3] = 1.0;
+        k.config[4] = 2.0;
+        k.config[5] = 2.0;
+        for cell in 0..3 {
+            let id = k.pool.push(cell, 0.0, -1, -1);
+            k.heap.push(cell as f64, id);
+            k.visited[cell] = 1;
+        }
+        k.state[0] = 3;
+        k
+    }
+
+    #[test]
+    fn batch_preserves_duplicate_work_and_stops_before_empty_and_goal() {
+        let mut k = stale_queue();
+        assert_eq!(k.advance_many(2), 2);
+        assert_eq!(&k.state[3..5], &[2, 2]);
+        assert_eq!(k.state[0], 1);
+        assert_eq!(k.advance_many(100), 1);
+        assert_eq!(k.advance_many(100), 0);
+        assert_eq!(k.advance(), 2);
+        let goal = k.pool.push(17, 0.0, -1, -1);
+        k.heap.push(0.0, goal);
+        assert_eq!(k.advance_many(100), 0);
+        assert_eq!(&k.state[3..5], &[0, 0]);
+        assert_eq!(k.advance(), 1);
+    }
+
+    #[test]
+    fn batch_publishes_attempt_and_last_completed_heap_before_a_trap() {
+        let mut k = stale_queue();
+        k.heap.push(4.0, u32::MAX);
+        k.state[0] = 4;
+        let result = catch_unwind(AssertUnwindSafe(|| k.advance_many(100)));
+        assert!(result.is_err());
+        assert_eq!(&k.state[3..5], &[4, 3]);
+        assert_eq!(k.state[0], 1);
+    }
 }
