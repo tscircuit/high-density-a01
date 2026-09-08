@@ -1396,7 +1396,10 @@ export class HighDensitySolverA03 extends BaseSolver {
         }
         continue
       }
-      const occupants = this.getLayerOccupants(occCellId, activeConn)
+      const occupants =
+        this.layerOccupantStamp[occCellId] === this.stamp
+          ? this.layerOccupantsByCell[occCellId]!
+          : this.getLayerOccupants(occCellId, activeConn)
       for (let i = 0; i < occupants.length; i++) {
         pushUnique(occs, occupants[i]!)
       }
