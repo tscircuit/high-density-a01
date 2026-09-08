@@ -77,6 +77,27 @@ type KernelExports = {
 }
 
 const MAX_NATIVE_CELLS = 1_048_576
+const MAX_IDLE_INSTANCES = 4
+const MAX_IDLE_MEMORY_BYTES = 32 * 1024 * 1024
+// Only explicitly released owners enter this bounded idle pool. Live solvers
+// are never registered here, so abandoning one still lets GC reclaim it.
+const idleExports: KernelExports[] = []
+const releasedBuffer = new ArrayBuffer(0)
+const releasedState = new Uint32Array(releasedBuffer)
+const throwReleased = (): never => {
+  throw new Error("Native A01 search kernel has been released")
+}
+const releasedExports: KernelExports = Object.freeze({
+  get memory(): WebAssembly.Memory {
+    return throwReleased()
+  },
+  kernel_setup: throwReleased,
+  kernel_pointer: throwReleased,
+  kernel_begin: throwReleased,
+  kernel_advance: throwReleased,
+  kernel_collect_goal: throwReleased,
+  kernel_clear: throwReleased,
+})
 let compiledModule: WebAssembly.Module | null | undefined
 
 /** Select capability before starting a connection, never after a native pop. */
@@ -177,6 +198,8 @@ export class NativeA01SearchKernel {
       }
     }
     if (!compiledModule) return null
+    const pooled = idleExports.pop()
+    if (pooled) return new NativeA01SearchKernel(pooled, input)
     let instance: WebAssembly.Instance
     try {
       instance = new WebAssembly.Instance(compiledModule)
@@ -367,5 +390,24 @@ export class NativeA01SearchKernel {
   clear(): void {
     this.exports.kernel_clear()
     this.refreshState()
+  }
+
+  /** Relinquish this owner; no further kernel operations are permitted. */
+  release(): void {
+    const exports = this.exports
+    if (exports === releasedExports) return
+    // Invalidate first, including views that would otherwise retain old memory.
+    // A saved bridge cannot clear or advance a later borrower's search.
+    this.exports = releasedExports
+    this.buffer = releasedBuffer
+    this.state = releasedState
+    this.currentHeapSize = 0
+    exports.kernel_clear()
+    if (
+      idleExports.length < MAX_IDLE_INSTANCES &&
+      exports.memory.buffer.byteLength <= MAX_IDLE_MEMORY_BYTES
+    ) {
+      idleExports.push(exports)
+    }
   }
 }

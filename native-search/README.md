@@ -13,8 +13,12 @@ is compiled lazily and each solver lazily creates its own instance. If module
 compilation or instantiation is unavailable (including CSP restrictions), the
 connection uses JavaScript from its first step. `nativeSearchActive` reports the
 current backend; `nativeSearchSteps` counts actual kernel steps cumulatively.
-The instance reference is released when the solver terminates. Visualization
-copies visited stamps on demand and `openSet.length` preserves the JavaScript
+When the solver terminates or explicitly resets, its bridge is invalidated and
+the instance is cleared. Up to four idle instances, each with at most 32 MiB of
+linear memory, are retained for reuse; borrowing reruns full kernel setup.
+Oversized instances and abandoned solvers remain eligible for GC. Active solver
+instances are not stored in a global registry. Visualization copies visited
+stamps on demand and `openSet.length` preserves the JavaScript
 heap's observable size, including leftover entries after a successful search.
 
 ## Supported inputs and mutation

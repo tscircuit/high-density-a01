@@ -473,6 +473,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.nativeSearchKernel?.release()
     this.nativeSearchKernel = null
     this.nativeSearchForActiveConnection = false
     this.nativeOpenSetLength = null
@@ -783,9 +784,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       if (this.nativeSearchForActiveConnection) {
         this.nativeSearchKernel!.copyVisitedTo(this.visitedStamp)
       }
-      // Preserve public heap/debug state while allowing the Instance and its
-      // maximum linear-memory allocation to be collected with no host registry.
+      // Debug/heap state stays in TS. Relinquish this terminal owner before its
+      // instance is reused; oversized instances are released for GC instead.
       this.nativeSearchForActiveConnection = false
+      this.nativeSearchKernel?.release()
       this.nativeSearchKernel = null
     }
   }
