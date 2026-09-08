@@ -1,139 +1,23 @@
-// A single connection's duplicate-preserving A* search. TypeScript owns all
-// setup, connection selection, iteration budgets, rip finalization and output.
-// Each Instance owns its own state; nothing is retained in a host registry.
-#![allow(static_mut_refs)]
-
-const DR: [i32; 8] = [-1, -1, -1, 0, 0, 1, 1, 1];
-const DC: [i32; 8] = [-1, 0, 1, -1, 1, -1, 0, 1];
-
-fn js_min(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        return f64::NAN;
-    }
-    if a == 0.0 && b == 0.0 {
-        return if a.is_sign_negative() || b.is_sign_negative() {
-            -0.0
-        } else {
-            0.0
-        };
-    }
-    if a < b {
-        a
-    } else {
-        b
-    }
-}
-fn js_max(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        return f64::NAN;
-    }
-    if a == 0.0 && b == 0.0 {
-        return if a.is_sign_positive() || b.is_sign_positive() {
-            0.0
-        } else {
-            -0.0
-        };
-    }
-    if a > b {
-        a
-    } else {
-        b
-    }
-}
-
-#[derive(Clone, Copy)]
-struct HeapEntry {
-    f: f64,
-    id: u32,
-}
-
-#[derive(Default)]
-struct Heap {
-    entries: Vec<HeapEntry>,
-}
-impl Heap {
-    fn clear(&mut self) {
-        self.entries.clear();
-    }
-    fn push(&mut self, f: f64, id: u32) {
-        let entry = HeapEntry { f, id };
-        let mut i = self.entries.len();
-        self.entries.push(entry);
-        while i > 0 {
-            let p = (i - 1) >> 1;
-            let parent = self.entries[p];
-            if if parent.f != f {
-                parent.f < f
-            } else {
-                parent.id < id
-            } {
-                break;
-            }
-            self.entries[i] = parent;
-            i = p;
-        }
-        self.entries[i] = entry;
-    }
-    fn pop(&mut self) -> u32 {
-        let out = self.entries[0].id;
-        let entry = self.entries.pop().unwrap();
-        let n = self.entries.len();
-        if n > 0 {
-            let mut i = 0;
-            loop {
-                let left = i * 2 + 1;
-                if left >= n {
-                    break;
-                }
-                let right = left + 1;
-                let mut child = left;
-                if right < n {
-                    let left_entry = self.entries[left];
-                    let right_entry = self.entries[right];
-                    if !(if left_entry.f != right_entry.f {
-                        left_entry.f < right_entry.f
-                    } else {
-                        left_entry.id < right_entry.id
-                    }) {
-                        child = right;
-                    }
-                }
-                let child_entry = self.entries[child];
-                if if entry.f != child_entry.f {
-                    entry.f < child_entry.f
-                } else {
-                    entry.id < child_entry.id
-                } {
-                    break;
-                }
-                self.entries[i] = child_entry;
-                i = child;
-            }
-            self.entries[i] = entry;
-        }
-        out
-    }
-}
-
-struct SearchNode {
-    cell: u32,
+// Frozen C37 f64 pool and search oracle; no production exports.
+struct ReferenceSearchNode {
+    cell: f64,
     g: f64,
     parent: i32,
     ripped: i32,
 }
 
 #[derive(Default)]
-struct Pool {
-    nodes: Vec<SearchNode>,
+struct ReferencePool {
+    nodes: Vec<ReferenceSearchNode>,
 }
-impl Pool {
+impl ReferencePool {
     fn clear(&mut self) {
         self.nodes.clear();
     }
     fn push(&mut self, cell: usize, g: f64, parent: i32, ripped: i32) -> u32 {
         let id = self.nodes.len() as u32;
-        self.nodes.push(SearchNode {
-            cell: cell as u32,
+        self.nodes.push(ReferenceSearchNode {
+            cell: cell as f64,
             g,
             parent,
             ripped,
@@ -141,12 +25,7 @@ impl Pool {
         id
     }
 }
-struct Rip {
-    id: i32,
-    prev: i32,
-}
-
-struct Kernel {
+struct ReferenceKernel {
     rows: usize,
     cols: usize,
     layers: usize,
@@ -177,14 +56,14 @@ struct Kernel {
     via_cache: Vec<Vec<i32>>,
     via_scratch: Vec<i32>,
     heap: Heap,
-    pool: Pool,
+    pool: ReferencePool,
     rips: Vec<Rip>,
     goal: i32,
     result_cells: Vec<f64>,
     result_rips: Vec<i32>,
     state: Vec<u32>,
 }
-impl Kernel {
+impl ReferenceKernel {
     fn new(rows: usize, cols: usize, layers: usize, offsets: usize, owners: usize) -> Self {
         let plane = rows * cols;
         let cells = plane * layers;
@@ -227,7 +106,7 @@ impl Kernel {
             },
             via_scratch: Vec::new(),
             heap: Heap::default(),
-            pool: Pool::default(),
+            pool: ReferencePool::default(),
             rips: Vec::new(),
             goal: -1,
             result_cells: Vec::new(),
@@ -511,7 +390,7 @@ impl Kernel {
         self.state[4] = 0;
         let goal_cell = ((self.config[3] as usize * self.rows + self.config[4] as usize)
             * self.cols
-            + self.config[5] as usize) as u32;
+            + self.config[5] as usize) as f64;
         for _ in 0..limit {
             if self.heap.entries.is_empty() {
                 break;
@@ -543,8 +422,7 @@ impl Kernel {
         self.result_rips.clear();
         let mut id = self.goal;
         while id >= 0 {
-            self.result_cells
-                .push(self.pool.nodes[id as usize].cell as f64);
+            self.result_cells.push(self.pool.nodes[id as usize].cell);
             id = self.pool.nodes[id as usize].parent;
         }
         self.result_cells.reverse();
@@ -560,145 +438,3 @@ impl Kernel {
         self.state[2] = self.result_rips.len() as u32;
     }
 }
-
-static mut KERNEL: Option<Kernel> = None;
-fn kernel() -> &'static mut Kernel {
-    unsafe { KERNEL.as_mut().expect("kernel_setup must run first") }
-}
-
-#[no_mangle]
-pub extern "C" fn kernel_setup(rows: u32, cols: u32, layers: u32, offsets: u32, owners: u32) {
-    unsafe {
-        KERNEL = Some(Kernel::new(
-            rows as usize,
-            cols as usize,
-            layers as usize,
-            offsets as usize,
-            owners as usize,
-        ));
-    }
-}
-#[no_mangle]
-pub extern "C" fn kernel_pointer(kind: u32) -> *const u8 {
-    let k = kernel();
-    match kind {
-        0 => k.used.as_ptr() as *const u8,
-        1 => k.ports.as_ptr() as *const u8,
-        2 => k.diagonals.as_ptr() as *const u8,
-        3 => k.penalty.as_ptr() as *const u8,
-        4 => k.roots.as_ptr(),
-        5 => k.offset_dr.as_ptr() as *const u8,
-        6 => k.offset_dc.as_ptr() as *const u8,
-        7 => k.config.as_ptr() as *const u8,
-        8 => k.state.as_ptr() as *const u8,
-        9 => k.visited.as_ptr() as *const u8,
-        10 => k.result_cells.as_ptr() as *const u8,
-        11 => k.result_rips.as_ptr() as *const u8,
-        _ => std::ptr::null(),
-    }
-}
-#[no_mangle]
-pub extern "C" fn kernel_begin(
-    stamp: u32,
-    cell: f64,
-    via: f64,
-    rip: f64,
-    trace: f64,
-    via_rip: f64,
-    greedy: f64,
-    cap: f64,
-) {
-    let k = kernel();
-    k.set_costs(cell, via, rip, trace, via_rip, greedy, cap);
-    k.begin(stamp);
-}
-#[no_mangle]
-pub extern "C" fn kernel_advance(
-    cell: f64,
-    via: f64,
-    rip: f64,
-    trace: f64,
-    via_rip: f64,
-    greedy: f64,
-    cap: f64,
-) -> u32 {
-    let k = kernel();
-    k.set_costs(cell, via, rip, trace, via_rip, greedy, cap);
-    let result = k.advance();
-    k.state[0] = k.heap.entries.len() as u32;
-    result
-}
-#[no_mangle]
-pub extern "C" fn kernel_advance_many(
-    limit: u32,
-    cell: f64,
-    via: f64,
-    rip: f64,
-    trace: f64,
-    via_rip: f64,
-    greedy: f64,
-    cap: f64,
-) -> u32 {
-    let k = kernel();
-    k.set_costs(cell, via, rip, trace, via_rip, greedy, cap);
-    k.advance_many(limit)
-}
-#[no_mangle]
-pub extern "C" fn kernel_collect_goal() {
-    kernel().collect_goal();
-}
-#[no_mangle]
-pub extern "C" fn kernel_clear() {
-    kernel().clear();
-}
-
-#[cfg(test)]
-mod batch_tests {
-    use super::*;
-    use std::panic::{catch_unwind, AssertUnwindSafe};
-
-    fn stale_queue() -> Kernel {
-        let mut k = Kernel::new(3, 3, 2, 0, 1);
-        k.stamp = 1;
-        k.config[3] = 1.0;
-        k.config[4] = 2.0;
-        k.config[5] = 2.0;
-        for cell in 0..3 {
-            let id = k.pool.push(cell, 0.0, -1, -1);
-            k.heap.push(cell as f64, id);
-            k.visited[cell] = 1;
-        }
-        k.state[0] = 3;
-        k
-    }
-
-    #[test]
-    fn batch_preserves_duplicate_work_and_stops_before_empty_and_goal() {
-        let mut k = stale_queue();
-        assert_eq!(k.advance_many(2), 2);
-        assert_eq!(&k.state[3..5], &[2, 2]);
-        assert_eq!(k.state[0], 1);
-        assert_eq!(k.advance_many(100), 1);
-        assert_eq!(k.advance_many(100), 0);
-        assert_eq!(k.advance(), 2);
-        let goal = k.pool.push(17, 0.0, -1, -1);
-        k.heap.push(0.0, goal);
-        assert_eq!(k.advance_many(100), 0);
-        assert_eq!(&k.state[3..5], &[0, 0]);
-        assert_eq!(k.advance(), 1);
-    }
-
-    #[test]
-    fn batch_publishes_attempt_and_last_completed_heap_before_a_trap() {
-        let mut k = stale_queue();
-        k.heap.push(4.0, u32::MAX);
-        k.state[0] = 4;
-        let result = catch_unwind(AssertUnwindSafe(|| k.advance_many(100)));
-        assert!(result.is_err());
-        assert_eq!(&k.state[3..5], &[4, 3]);
-        assert_eq!(k.state[0], 1);
-    }
-}
-
-#[cfg(test)]
-mod cell_u32_tests;
