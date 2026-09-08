@@ -13,6 +13,9 @@ import type {
 
 type ConnId = number
 
+const EMPTY_OCCUPANTS: readonly ConnId[] = Object.freeze([])
+const MAX_LAYER_OCCUPANT_CACHE_CELLS = 65_536
+
 type RegionName = "left" | "top" | "right" | "bottom" | "middle"
 
 const REGION_LEFT = 0
@@ -418,6 +421,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   private _viaOccs: ConnId[] = []
   private viaOccupantsByCell = new Map<number, ConnId[]>()
   private viaFootprintByCell = new Map<number, Int32Array>()
+  private layerOccupantsByCell: Array<readonly ConnId[] | undefined> = []
+  private layerOccupantStamp = new Uint32Array(0)
+  private _layerOccs: ConnId[] = []
   private rootOverlapAllowed = new Uint8Array(0)
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
@@ -555,6 +561,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   override _setup(): void {
     this.viaFootprintByCell.clear()
+    this.clearLayerOccupantCache()
     const { nodeWithPortPoints } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -645,6 +652,11 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.visitedFlatStamp = new Uint32Array(totalCells)
     this.stamp = 0
 
+    if (this.layers > 1 && this.planeSize <= MAX_LAYER_OCCUPANT_CACHE_CELLS) {
+      this.layerOccupantsByCell = new Array(this.planeSize).fill(undefined)
+      this.layerOccupantStamp = new Uint32Array(this.planeSize)
+    }
+
     const rootByPortFlat = new Map<number, string>()
     for (const pp of this.nodeWithPortPoints.portPoints) {
       const connId = this.connNameToId.get(pp.connectionName)
@@ -697,6 +709,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
       this.viaOccupantsByCell.clear()
       this.viaFootprintByCell.clear()
+      this.clearLayerOccupantCache()
     }
   }
 
@@ -1367,13 +1380,64 @@ export class HighDensitySolverA03 extends BaseSolver {
     // independent of the scratch array used by later moves.
     const occs: ConnId[] = shouldCache ? [] : this._viaOccs
     occs.length = 0
+    const canReuseLayers =
+      this.layerOccupantStamp.length > 0 &&
+      this.stamp !== 0 &&
+      activeConn >= 0 &&
+      activeConn === this.activeConnId
     for (const occCellId of this.getViaFootprint(cellId)) {
-      for (let z = 0; z < this.layers; z++) {
-        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
+      if (!canReuseLayers) {
+        for (let z = 0; z < this.layers; z++) {
+          this.pushFlatOccupants(
+            z * this.planeSize + occCellId,
+            activeConn,
+            occs,
+          )
+        }
+        continue
+      }
+      const occupants = this.getLayerOccupants(occCellId, activeConn)
+      for (let i = 0; i < occupants.length; i++) {
+        pushUnique(occs, occupants[i]!)
       }
     }
     if (shouldCache) this.viaOccupantsByCell.set(cellId, occs)
     return occs
+  }
+
+  private getLayerOccupants(
+    cellId: number,
+    activeConn: ConnId,
+  ): readonly ConnId[] {
+    const cacheable =
+      cellId >= 0 &&
+      cellId < this.layerOccupantStamp.length &&
+      this.stamp !== 0 &&
+      activeConn >= 0 &&
+      activeConn === this.activeConnId
+    if (cacheable && this.layerOccupantStamp[cellId] === this.stamp) {
+      return this.layerOccupantsByCell[cellId]!
+    }
+
+    // Overlapping via footprints repeatedly inspect the same occupancy cell.
+    // Layers, primary/shared ordering, and root filtering match the original
+    // scan; the outer footprint traversal still performs its ordered union.
+    const occupants = this._layerOccs
+    occupants.length = 0
+    for (let z = 0; z < this.layers; z++) {
+      this.pushFlatOccupants(z * this.planeSize + cellId, activeConn, occupants)
+    }
+    if (!cacheable) return occupants
+    const cached = occupants.length ? occupants.slice() : EMPTY_OCCUPANTS
+    this.layerOccupantsByCell[cellId] = cached
+    this.layerOccupantStamp[cellId] = this.stamp
+    return cached
+  }
+
+  private clearLayerOccupantCache(): void {
+    this.layerOccupantsByCell = []
+    this.layerOccupantStamp = new Uint32Array(0)
+    this._layerOccs.length = 0
   }
 
   private fillTraceOccupants(
@@ -1480,6 +1544,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.visitedStamp.fill(0)
       this.bestGStamp.fill(0)
       this.visitedFlatStamp.fill(0)
+      this.layerOccupantStamp.fill(0)
       this.stamp = 1
     }
   }
