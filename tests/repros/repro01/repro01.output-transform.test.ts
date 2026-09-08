@@ -3,7 +3,7 @@ import { defaultA03Params } from "../../../lib/default-params"
 import { HighDensitySolverA03 } from "../../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import repro01 from "./repro01.json"
 
-test("A03 getOutput applies grid-to-bounds transform to solved routes", () => {
+test("A03 getOutput preserves physical grid coordinates and exact endpoints", () => {
   const solver = new HighDensitySolverA03({
     ...defaultA03Params,
     nodeWithPortPoints: repro01.nodeWithPortPoints,
@@ -48,10 +48,11 @@ test("A03 getOutput applies grid-to-bounds transform to solved routes", () => {
   expect(startCellId).toBeGreaterThanOrEqual(0)
   expect(endCellId).toBeGreaterThanOrEqual(0)
 
+  const middleCellId = Math.floor(cellCenterX.length / 2)
   internal.solvedRoutes = [
     {
       connId: 0,
-      states: Int32Array.from([startCellId, endCellId]),
+      states: Int32Array.from([startCellId, middleCellId, endCellId]),
       viaCellIds: Int32Array.from([startCellId, endCellId]),
       startPoint: { x: internal.boundsMinX, y: internal.boundsMinY, z: 0 },
       endPoint: { x: internal.boundsMaxX, y: internal.boundsMaxY, z: 0 },
@@ -61,14 +62,19 @@ test("A03 getOutput applies grid-to-bounds transform to solved routes", () => {
   const [route] = solver.getOutput()
 
   expect(route).toBeDefined()
-  expect(route!.route[0]!.x).toBeCloseTo(internal.boundsMinX, 6)
-  expect(route!.route[0]!.y).toBeCloseTo(internal.boundsMinY, 6)
-  expect(route!.route[1]!.x).toBeCloseTo(internal.boundsMaxX, 6)
-  expect(route!.route[1]!.y).toBeCloseTo(internal.boundsMaxY, 6)
-  expect(route!.vias[0]!.x).toBeCloseTo(internal.boundsMinX, 6)
-  expect(route!.vias[0]!.y).toBeCloseTo(internal.boundsMinY, 6)
-  expect(route!.vias[1]!.x).toBeCloseTo(internal.boundsMaxX, 6)
-  expect(route!.vias[1]!.y).toBeCloseTo(internal.boundsMaxY, 6)
+  expect(route!.route).toEqual([
+    { x: internal.boundsMinX, y: internal.boundsMinY, z: 0 },
+    {
+      x: cellCenterX[middleCellId],
+      y: cellCenterY[middleCellId],
+      z: 0,
+    },
+    { x: internal.boundsMaxX, y: internal.boundsMaxY, z: 0 },
+  ])
+  expect(route!.vias).toEqual([
+    { x: minCenterX, y: minCenterY },
+    { x: maxCenterX, y: maxCenterY },
+  ])
 })
 
 test("A03 getOutput preserves exact user-provided route endpoints", () => {

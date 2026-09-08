@@ -40,7 +40,7 @@ test("A03 skips visited move costs while preserving its baseline route and searc
 
   expect(moveCosts).toBeGreaterThan(0)
   expect(visitedMoveCosts).toBe(0)
-  // Captured from the unoptimized 9a3a3d solver, including every route point.
+  // Captured with board-coordinate output, including every route point.
   // Expansion counts can differ across Bun versions/platforms even when the
   // route matches. The cache differential tests compare iterations
   // against the uncached solver on the same runtime.
@@ -62,6 +62,6 @@ test("A03 skips visited move costs while preserving its baseline route and searc
     error: null,
     rips: 10,
     routeHash:
-      "5d6fc696956c4e3bf450251daf4e59e20c3240a4cf4b0fefa51fe4d8749b71d3",
+      "594a069c311c8c734aa2b88e9b398cbe4b4b59b2aa3361992b80517aef71714e",
   })
 })

@@ -591,7 +591,10 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.viaKeepoutRadius = this.viaDiameter / 2 + this.traceKeepoutRadius
 
     this.buildFiveRegionGrid(width, height)
-    this.gridToBoundsTransform = this.computeGridToBoundsTransform()
+    // Grid cell centers already use board coordinates. Stretching them to the
+    // boundary changes the copper clearances used during search. Endpoints are
+    // restored to their exact terminal coordinates separately in getOutput.
+    this.gridToBoundsTransform = { a: 1, b: 0, c: 0, d: 0, e: 1, f: 0 }
 
     const totalCells = this.layers * this.planeSize
     if (this.maxCellCount !== undefined && totalCells > this.maxCellCount) {
@@ -2167,40 +2170,6 @@ export class HighDensitySolverA03 extends BaseSolver {
       count += this.getSolvedRoutesForConn(i).length
     }
     return count
-  }
-
-  private computeGridToBoundsTransform(): AffineTransform {
-    let minCenterX = Infinity
-    let maxCenterX = -Infinity
-    let minCenterY = Infinity
-    let maxCenterY = -Infinity
-
-    for (let cellId = 0; cellId < this.planeSize; cellId++) {
-      const centerX = this.cellCenterX[cellId]!
-      const centerY = this.cellCenterY[cellId]!
-      if (centerX < minCenterX) minCenterX = centerX
-      if (centerX > maxCenterX) maxCenterX = centerX
-      if (centerY < minCenterY) minCenterY = centerY
-      if (centerY > maxCenterY) maxCenterY = centerY
-    }
-
-    const xSpan = maxCenterX - minCenterX
-    const ySpan = maxCenterY - minCenterY
-    const width = this.boundsMaxX - this.boundsMinX
-    const height = this.boundsMaxY - this.boundsMinY
-
-    const a = xSpan > 0 ? width / xSpan : 1
-    const e = ySpan > 0 ? height / ySpan : 1
-    const c =
-      xSpan > 0
-        ? this.boundsMinX - a * minCenterX
-        : (this.boundsMinX + this.boundsMaxX) / 2 - minCenterX
-    const f =
-      ySpan > 0
-        ? this.boundsMinY - e * minCenterY
-        : (this.boundsMinY + this.boundsMaxY) / 2 - minCenterY
-
-    return { a, b: 0, c, d: 0, e, f }
   }
 }
 
