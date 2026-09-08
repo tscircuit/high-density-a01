@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { defaultParams } from "../../lib/default-params"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
+import { LegacyDuplicateHeap } from "./legacy-duplicate-heap"
 import sample003 from "../dataset01/sample003/sample003.json"
 
 type SearchState = {
@@ -21,6 +22,8 @@ test("A01 reuses numeric search storage while preserving its baseline route and 
   solver.setup()
   const state = solver as unknown as SearchState
   const pool = state.nodePool
+  // This golden isolates storage reuse from indexed-queue work elimination.
+  ;(solver as any).heap = new LegacyDuplicateHeap(pool as any)
   solver.solve()
 
   expect(state.nodePool).toBe(pool)

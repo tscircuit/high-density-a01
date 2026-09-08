@@ -3,6 +3,7 @@ import { defaultA03Params, defaultParams } from "../../lib/default-params"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import { HighDensitySolverA03 } from "../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import type { NodeWithPortPoints } from "../../lib/types"
+import { LegacyDuplicateHeap } from "./legacy-duplicate-heap"
 import sample003 from "../dataset01/sample003/sample003.json"
 import sample007 from "../dataset01/sample007/sample007.json"
 
@@ -37,6 +38,10 @@ for (const { name, create } of solvers) {
       const solver = create(nodeWithPortPoints)
       solver.setup()
       const state = solver as unknown as SearchState
+      // A01 now has an independent arrival sequence when pruning candidates.
+      // Retain the original invariant here for its legacy duplicate mode.
+      if (name === "A01")
+        state.heap = new LegacyDuplicateHeap(state.nodePool as any)
       const { heap, nodePool } = state
       const allocate = nodePool.push.bind(nodePool)
       const enqueue = heap.push.bind(heap)

@@ -105,32 +105,85 @@ class MinHeap {
   private f = new Float64Array(1024)
   private id = new Int32Array(1024)
   private n = 0
+  private sequence = new Float64Array(1024)
+  private nextSequence = 0
+  private indexed = false
+  private positionByCell: Int32Array
 
-  // Nodes are enqueued once, immediately after allocation. Their pool index is
-  // the insertion order, so equal priorities need no separate sequence array.
+  constructor(
+    private pool: SearchNodePool,
+    cellCount: number,
+  ) {
+    this.positionByCell = new Int32Array(cellCount).fill(-1)
+  }
+
+  beginSearch(indexed: boolean): void {
+    this.clear()
+    this.indexed = indexed
+  }
+
+  enqueue(
+    f: number,
+    cellIdx: number,
+    g: number,
+    parentIdx: number,
+    ripped: RippedNode | null,
+  ): void {
+    // Arrival order includes rejected candidates. Pool IDs only identify the
+    // immutable states retained for expansion and route reconstruction.
+    const sequence = this.nextSequence++
+    let position = -1
+    if (this.indexed) {
+      position = this.positionByCell[cellIdx]!
+      // Keep the earlier candidate when rounded f values tie, even if g is
+      // lower. A replacement carries its own parent and complete rip chain.
+      if (position !== -1 && !(f < this.f[position]!)) return
+    }
+    const id = this.pool.push(cellIdx, g, parentIdx, ripped)
+    this.insert(f, id, sequence, position)
+  }
+
+  // Direct insertion is also used by storage diagnostics. Production searches
+  // use enqueue so discarded candidates never allocate a node.
   push(f: number, id: number): void {
-    this.ensureCapacity(this.n + 1)
+    this.insert(f, id, id, -1)
+  }
+
+  private insert(
+    f: number,
+    id: number,
+    sequence: number,
+    position: number,
+  ): void {
+    this.ensureCapacity(this.n + (position === -1 ? 1 : 0))
     // Move parents into the hole, then write the new tuple once.
-    let i = this.n++
+    let i = position === -1 ? this.n++ : position
     while (i > 0) {
       const p = (i - 1) >> 1
       const parentF = this.f[p]!
       const parentId = this.id[p]!
-      if (parentF !== f ? parentF < f : parentId < id) break
+      const parentSequence = this.sequence[p]!
+      if (parentF !== f ? parentF < f : parentSequence < sequence) break
       this.f[i] = parentF
       this.id[i] = parentId
+      this.sequence[i] = parentSequence
+      if (this.indexed) this.positionByCell[this.pool.cellIdx[parentId]!] = i
       i = p
     }
     this.f[i] = f
     this.id[i] = id
+    this.sequence[i] = sequence
+    if (this.indexed) this.positionByCell[this.pool.cellIdx[id]!] = i
   }
 
   pop(): number {
     const out = this.id[0]!
+    if (this.indexed) this.positionByCell[this.pool.cellIdx[out]!] = -1
     this.n--
     if (this.n > 0) {
       const f = this.f[this.n]!
       const id = this.id[this.n]!
+      const sequence = this.sequence[this.n]!
       let i = 0
       while (true) {
         const left = i * 2 + 1
@@ -143,20 +196,25 @@ class MinHeap {
           if (
             !(leftF !== rightF
               ? leftF < rightF
-              : this.id[left]! < this.id[right]!)
+              : this.sequence[left]! < this.sequence[right]!)
           ) {
             child = right
           }
         }
         const childF = this.f[child]!
         const childId = this.id[child]!
-        if (f !== childF ? f < childF : id < childId) break
+        const childSequence = this.sequence[child]!
+        if (f !== childF ? f < childF : sequence < childSequence) break
         this.f[i] = childF
         this.id[i] = childId
+        this.sequence[i] = childSequence
+        if (this.indexed) this.positionByCell[this.pool.cellIdx[childId]!] = i
         i = child
       }
       this.f[i] = f
       this.id[i] = id
+      this.sequence[i] = sequence
+      if (this.indexed) this.positionByCell[this.pool.cellIdx[id]!] = i
     }
     return out
   }
@@ -166,6 +224,12 @@ class MinHeap {
   }
 
   clear(): void {
+    if (this.indexed) {
+      for (let i = 0; i < this.n; i++) {
+        this.positionByCell[this.pool.cellIdx[this.id[i]!]!] = -1
+      }
+    }
+    this.nextSequence = 0
     this.n = 0
   }
 
@@ -179,6 +243,9 @@ class MinHeap {
     const id = new Int32Array(next)
     id.set(this.id)
     this.id = id
+    const sequence = new Float64Array(next)
+    sequence.set(this.sequence)
+    this.sequence = sequence
   }
 }
 
@@ -558,7 +625,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.activeConnSeg = null
     this.activeConnId = -1
     this.nodePool = new SearchNodePool()
-    this.heap = new MinHeap()
+    this.heap = new MinHeap(this.nodePool, totalCells)
   }
 
   override _step(): void {
@@ -584,8 +651,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.crossLayerSearch = next.startZ !== next.endZ
 
       // Reset A* state for this connection
+      this.heap.beginSearch(this.hasOrderedSearchCosts(next))
       this.nodePool.clear()
-      this.heap.clear()
       this.searchIterations = 0
       this.nextStamp()
 
@@ -601,8 +668,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endRow,
         next.endCol,
       )
-      this.nodePool.push(startFlatIdx, 0, -1, null)
-      this.heap.push(f, 0)
+      this.heap.enqueue(f, startFlatIdx, 0, -1, null)
       return
     }
 
@@ -695,8 +761,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       const f2 =
         g2 + this.getCachedWeightedH(nIdx, z, nr, nc, endZ, endRow, endCol)
 
-      const newNodeIdx = this.nodePool.push(nIdx, g2, nodeIdx, this._moveRipped)
-      this.heap.push(f2, newNodeIdx)
+      this.heap.enqueue(f2, nIdx, g2, nodeIdx, this._moveRipped)
     }
 
     // 6b. Via moves (to other layers at same position)
@@ -728,13 +793,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         const f2 =
           g2 + this.getCachedWeightedH(nIdx, nz, row, col, endZ, endRow, endCol)
 
-        const newNodeIdx = this.nodePool.push(
-          nIdx,
-          g2,
-          nodeIdx,
-          this._moveRipped,
-        )
-        this.heap.push(f2, newNodeIdx)
+        this.heap.enqueue(f2, nIdx, g2, nodeIdx, this._moveRipped)
       }
     }
   }
@@ -920,6 +979,51 @@ export class HighDensitySolverA01 extends BaseSolver {
       sameRoot &&
       this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
     )
+  }
+
+  private hasOrderedSearchCosts(seg: ConnectionSeg): boolean {
+    // NaN does not define a total heap ordering. Select the original duplicate
+    // queue before the first enqueue for inputs that could produce NaN, rather
+    // than discarding states and trying to recover them later. Like the cached
+    // heuristic, this assumes parameters stay fixed during an active search.
+    const hp = this.hyperParameters
+    if (
+      this.planeSize === 0 ||
+      !(this.cellSizeMm > 0 && Number.isFinite(this.cellSizeMm)) ||
+      !(hp.greedyMultiplier > 0 && Number.isFinite(hp.greedyMultiplier)) ||
+      !(hp.viaBaseCost >= 0) ||
+      !(hp.ripCost >= 0) ||
+      !(hp.ripTracePenalty >= 0) ||
+      !(hp.ripViaPenalty >= 0) ||
+      !(this.penaltyCap >= 0) ||
+      !Number.isInteger(seg.startZ) ||
+      !Number.isInteger(seg.startRow) ||
+      !Number.isInteger(seg.startCol) ||
+      !Number.isInteger(seg.endZ) ||
+      !Number.isInteger(seg.endRow) ||
+      !Number.isInteger(seg.endCol) ||
+      seg.startZ < 0 ||
+      seg.startZ >= this.layers ||
+      seg.endZ < 0 ||
+      seg.endZ >= this.layers ||
+      seg.startRow < 0 ||
+      seg.startRow >= this.rows ||
+      seg.endRow < 0 ||
+      seg.endRow >= this.rows ||
+      seg.startCol < 0 ||
+      seg.startCol >= this.cols ||
+      seg.endCol < 0 ||
+      seg.endCol >= this.cols ||
+      Number.isNaN(this.minViaRow) ||
+      Number.isNaN(this.maxViaRow) ||
+      Number.isNaN(this.minViaCol) ||
+      Number.isNaN(this.maxViaCol)
+    )
+      return false
+    for (let i = 0; i < this.penalty2d.length; i++) {
+      if (!(this.penalty2d[i]! >= 0)) return false
+    }
+    return true
   }
 
   // --- Visited stamp management ---
