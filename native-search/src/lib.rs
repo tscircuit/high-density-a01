@@ -42,6 +42,7 @@ fn js_max(a: f64, b: f64) -> f64 {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C, packed(4))]
 struct HeapEntry {
     f: f64,
     id: u32,
@@ -698,3 +699,6 @@ mod batch_tests {
         assert_eq!(k.state[0], 1);
     }
 }
+
+#[cfg(test)]
+mod packed_heap_tests;
