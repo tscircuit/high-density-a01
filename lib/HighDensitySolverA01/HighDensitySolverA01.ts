@@ -17,6 +17,73 @@ import type {
   PortPoint,
 } from "../types"
 
+// Static descriptor groups preserve validation order without rebuilding arrays
+// or allocating closures for every supervised native batch.
+const BATCH_WRITABLE_FIELDS = [
+  "iterations",
+  "searchIterations",
+  "nativeStepCount",
+  "nativeBatchedStepCount",
+  "nativeOpenSetLength",
+  "failed",
+  "error",
+] as const
+const BATCH_DATA_FIELDS = [
+  "_setupDone",
+  "solved",
+  "MAX_ITERATIONS",
+  "stepMultiplier",
+  "searchBudgetIters",
+  "nativeSearchForActiveConnection",
+  "nativeSearchKernel",
+  "hyperParameters",
+  "cellSizeMm",
+  "penaltyCap",
+] as const
+const BATCH_METHOD_FIELDS = [
+  "step",
+  "_step",
+  "stepOnce",
+  "advanceNativeSearch",
+  "tryFinalAcceptance",
+] as const
+const BATCH_COST_FIELDS = [
+  "viaBaseCost",
+  "ripCost",
+  "ripTracePenalty",
+  "ripViaPenalty",
+  "greedyMultiplier",
+] as const
+
+function hasOwnBatchData(
+  object: object,
+  name: string,
+  writable = false,
+): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(object, name)
+  return (
+    !!descriptor &&
+    "value" in descriptor &&
+    (!writable || descriptor.writable === true)
+  )
+}
+
+function hasBatchDataProperty(object: object, name: string): boolean {
+  for (
+    let current: object | null = object;
+    current;
+    current = Object.getPrototypeOf(current)
+  ) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, name)
+    if (descriptor) return "value" in descriptor
+  }
+  return false
+}
+
+function isBatchCounter(value: number): boolean {
+  return Number.isSafeInteger(value) && !(value < 0)
+}
+
 // --- Interned connection ID ---
 type ConnId = number
 
@@ -647,58 +714,14 @@ export class HighDensitySolverA01 extends BaseSolver {
     if (!Number.isSafeInteger(maxSteps) || maxSteps < 1) return 0
     // Inspect descriptors first: checking a getter's value would already change
     // the conditional read counts of the ordinary step path.
-    const ownData = (name: string, writable = false): boolean => {
-      const descriptor = Object.getOwnPropertyDescriptor(this, name)
-      return (
-        !!descriptor &&
-        "value" in descriptor &&
-        (!writable || descriptor.writable === true)
-      )
+    for (const name of BATCH_WRITABLE_FIELDS) {
+      if (!hasOwnBatchData(this, name, true)) return 0
     }
-    for (const name of [
-      "iterations",
-      "searchIterations",
-      "nativeStepCount",
-      "nativeBatchedStepCount",
-      "nativeOpenSetLength",
-      "failed",
-      "error",
-    ]) {
-      if (!ownData(name, true)) return 0
+    for (const name of BATCH_DATA_FIELDS) {
+      if (!hasOwnBatchData(this, name)) return 0
     }
-    for (const name of [
-      "_setupDone",
-      "solved",
-      "MAX_ITERATIONS",
-      "stepMultiplier",
-      "searchBudgetIters",
-      "nativeSearchForActiveConnection",
-      "nativeSearchKernel",
-      "hyperParameters",
-      "cellSizeMm",
-      "penaltyCap",
-    ]) {
-      if (!ownData(name)) return 0
-    }
-    const dataProperty = (object: object, name: string): boolean => {
-      for (
-        let current: object | null = object;
-        current;
-        current = Object.getPrototypeOf(current)
-      ) {
-        const descriptor = Object.getOwnPropertyDescriptor(current, name)
-        if (descriptor) return "value" in descriptor
-      }
-      return false
-    }
-    for (const name of [
-      "step",
-      "_step",
-      "stepOnce",
-      "advanceNativeSearch",
-      "tryFinalAcceptance",
-    ]) {
-      if (!dataProperty(this, name)) return 0
+    for (const name of BATCH_METHOD_FIELDS) {
+      if (!hasBatchDataProperty(this, name)) return 0
     }
     const original = HighDensitySolverA01.prototype
     if (
@@ -717,14 +740,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     )
       return 0
     const hp = this.hyperParameters
-    for (const name of [
-      "viaBaseCost",
-      "ripCost",
-      "ripTracePenalty",
-      "ripViaPenalty",
-      "greedyMultiplier",
-    ]) {
-      if (!dataProperty(hp, name)) return 0
+    for (const name of BATCH_COST_FIELDS) {
+      if (!hasBatchDataProperty(hp, name)) return 0
     }
     // Non-number values can invoke user coercion callbacks or throw at the
     // WASM boundary. Preserve their per-step conversion on the ordinary path.
@@ -738,16 +755,23 @@ export class HighDensitySolverA01 extends BaseSolver {
       typeof hp.greedyMultiplier !== "number"
     )
       return 0
-    for (const value of [
-      this.iterations,
-      this.MAX_ITERATIONS,
-      this.searchIterations,
-      this.searchBudgetIters,
-      this.nativeStepCount,
-      this.nativeBatchedStepCount,
-    ]) {
-      if (!Number.isSafeInteger(value) || value < 0) return 0
-    }
+    // Read every counter before validating any, as the original array literal
+    // did. Keep the later scheduling reads separate and in their original order.
+    const iterations = this.iterations
+    const maxIterations = this.MAX_ITERATIONS
+    const searchIterations = this.searchIterations
+    const searchBudget = this.searchBudgetIters
+    const nativeSteps = this.nativeStepCount
+    const batchedSteps = this.nativeBatchedStepCount
+    if (
+      !isBatchCounter(iterations) ||
+      !isBatchCounter(maxIterations) ||
+      !isBatchCounter(searchIterations) ||
+      !isBatchCounter(searchBudget) ||
+      !isBatchCounter(nativeSteps) ||
+      !isBatchCounter(batchedSteps)
+    )
+      return 0
     const limit = Math.min(
       maxSteps,
       0xffff_ffff,
