@@ -7,6 +7,13 @@ const DR: [i32; 8] = [-1, -1, -1, 0, 0, 1, 1, 1];
 const DC: [i32; 8] = [-1, 0, 1, -1, 1, -1, 0, 1];
 
 fn js_min(a: f64, b: f64) -> f64 {
+    // Ordinary unequal costs need no NaN or signed-zero handling.
+    if a < b {
+        return a;
+    }
+    if a > b {
+        return b;
+    }
     if a.is_nan() || b.is_nan() {
         return f64::NAN;
     }
@@ -17,13 +24,15 @@ fn js_min(a: f64, b: f64) -> f64 {
             0.0
         };
     }
-    if a < b {
-        a
-    } else {
-        b
-    }
+    b
 }
 fn js_max(a: f64, b: f64) -> f64 {
+    if a > b {
+        return a;
+    }
+    if a < b {
+        return b;
+    }
     if a.is_nan() || b.is_nan() {
         return f64::NAN;
     }
@@ -34,11 +43,7 @@ fn js_max(a: f64, b: f64) -> f64 {
             -0.0
         };
     }
-    if a > b {
-        a
-    } else {
-        b
-    }
+    b
 }
 
 #[derive(Clone, Copy)]
@@ -655,6 +660,62 @@ pub extern "C" fn kernel_clear() {
 mod batch_tests {
     use super::*;
     use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[test]
+    fn ordered_minmax_preserves_nan_signed_zero_and_extreme_bits() {
+        let check = |a: f64, b: f64| {
+            let (min, max) = if a.is_nan() || b.is_nan() {
+                (f64::NAN, f64::NAN)
+            } else if a == 0.0 && b == 0.0 {
+                (
+                    if a.is_sign_negative() || b.is_sign_negative() {
+                        -0.0
+                    } else {
+                        0.0
+                    },
+                    if a.is_sign_positive() || b.is_sign_positive() {
+                        0.0
+                    } else {
+                        -0.0
+                    },
+                )
+            } else {
+                (a.min(b), a.max(b))
+            };
+            assert_eq!(js_min(a, b).to_bits(), min.to_bits());
+            assert_eq!(js_max(a, b).to_bits(), max.to_bits());
+        };
+        let values = [
+            0.0,
+            -0.0,
+            f64::NAN,
+            f64::from_bits(0xfff0000000000001),
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::MAX,
+            -f64::MAX,
+            f64::MIN_POSITIVE,
+            -f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            -f64::from_bits(1),
+            1.0,
+            -1.0,
+            0.3,
+            f64::from_bits(0.3f64.to_bits() + 1),
+        ];
+        for a in values {
+            for b in values {
+                check(a, b);
+            }
+        }
+        let mut state = 894731u64;
+        for _ in 0..65_536 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let a = f64::from_bits(state);
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            check(a, f64::from_bits(state));
+        }
+    }
 
     fn stale_queue() -> Kernel {
         let mut k = Kernel::new(3, 3, 2, 0, 1);
