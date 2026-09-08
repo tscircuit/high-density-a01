@@ -12,6 +12,8 @@ type SearchState = {
   overlapFriendlyRootNets: Set<string>
   portOwnerFlat: Int32Array
   usedCellsFlat: Int32Array
+  cellOwners: Array<number[] | undefined>
+  diagonalOwners: Array<number[] | undefined>
   usedDiagFlat: Int32Array
   rootOverlapAllowed: Uint8Array
   planeSize: number
@@ -154,7 +156,11 @@ test("move guards preserve ownership, endpoint exemptions and blocker scratch wi
         for (const traceOwner of [-1, a, b, c]) {
           for (const crossingOwner of [-1, a, b, c]) {
             state.usedCellsFlat[target] = traceOwner
+            state.cellOwners[target] =
+              traceOwner === -1 ? undefined : [traceOwner]
             state.usedDiagFlat[crossingIndex] = crossingOwner
+            state.diagonalOwners[crossingIndex] =
+              crossingOwner === -1 ? undefined : [crossingOwner]
             tableReads = 0
             endReads = 0
             state.computeMoveCostAndRips(
@@ -192,6 +198,8 @@ test("move guards preserve ownership, endpoint exemptions and blocker scratch wi
         }
         state.usedCellsFlat.fill(-1)
         state.usedDiagFlat.fill(-1)
+        state.cellOwners.fill(undefined)
+        state.diagonalOwners.fill(undefined)
       }
     }
   }

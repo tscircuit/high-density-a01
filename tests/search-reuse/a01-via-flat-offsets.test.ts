@@ -10,6 +10,7 @@ type SearchState = {
   planeSize: number
   activeConnId: number
   usedCellsFlat: Int32Array
+  cellOwners: Array<number[] | undefined>
   rootOverlapAllowed: Uint8Array
   viaScanFlatOffsets: Int32Array | null
   getViaOccupants(row: number, col: number, activeConn: number): number[]
@@ -55,7 +56,9 @@ test("A01 flat via offsets preserve interior, edge, and corner occupant order", 
       state.activeConnId = activeConn
       state.nextStamp()
       for (let flatIdx = 0; flatIdx < state.usedCellsFlat.length; flatIdx++) {
-        state.usedCellsFlat[flatIdx] = ((flatIdx * 5 + activeConn) % 7) - 1
+        const owner = ((flatIdx * 5 + activeConn) % 7) - 1
+        state.usedCellsFlat[flatIdx] = owner
+        state.cellOwners[flatIdx] = owner === -1 ? undefined : [owner]
       }
       for (let row = 0; row < state.rows; row++) {
         for (let col = 0; col < state.cols; col++) {
