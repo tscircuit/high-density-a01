@@ -220,10 +220,12 @@ class MinHeap {
   private f = new Float64Array(1024)
   private id = new Int32Array(1024)
   private n = 0
+  private hasUnorderedPriority = false
 
   // Nodes are enqueued once, immediately after allocation. Their pool index is
   // the insertion order, so equal priorities need no separate sequence array.
   push(f: number, id: number): void {
+    if (f !== f) this.hasUnorderedPriority = true
     this.ensureCapacity(this.n + 1)
     // Move parents into the hole, then write the new tuple once.
     let i = this.n++
@@ -241,6 +243,52 @@ class MinHeap {
   }
 
   pop(): number {
+    // Once a NaN arrives, retain the original non-total comparison behavior
+    // until clear. Before then, this produces the identical heap layout.
+    if (this.hasUnorderedPriority) return this.popUnordered()
+    const out = this.id[0]!
+    this.n--
+    if (this.n > 0) {
+      const f = this.f[this.n]!
+      const id = this.id[this.n]!
+      let i = 0
+      while (true) {
+        const left = i * 2 + 1
+        if (left >= this.n) break
+        const right = left + 1
+        let child = left
+        if (right < this.n) {
+          const leftF = this.f[left]!
+          const rightF = this.f[right]!
+          if (
+            !(leftF !== rightF
+              ? leftF < rightF
+              : this.id[left]! < this.id[right]!)
+          ) {
+            child = right
+          }
+        }
+        this.f[i] = this.f[child]!
+        this.id[i] = this.id[child]!
+        i = child
+      }
+      // Reverse the extra downward moves below the original stopping point.
+      while (i > 0) {
+        const parent = (i - 1) >> 1
+        const parentF = this.f[parent]!
+        const parentId = this.id[parent]!
+        if (!(f !== parentF ? f < parentF : id < parentId)) break
+        this.f[i] = parentF
+        this.id[i] = parentId
+        i = parent
+      }
+      this.f[i] = f
+      this.id[i] = id
+    }
+    return out
+  }
+
+  private popUnordered(): number {
     const out = this.id[0]!
     this.n--
     if (this.n > 0) {
@@ -282,6 +330,7 @@ class MinHeap {
 
   clear(): void {
     this.n = 0
+    this.hasUnorderedPriority = false
   }
 
   private ensureCapacity(size: number): void {
