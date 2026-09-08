@@ -1119,10 +1119,6 @@ export class HighDensitySolverA03 extends BaseSolver {
       return false
     }
     this.nativeKernel!.copyGraph(this)
-    if (!this.nativeKernel!.validateGraph()) {
-      this.declineNativeSearch()
-      return false
-    }
     return true
   }
 
@@ -1245,7 +1241,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     const kernel = this.nativeKernel!
     let completed: number
     try {
-      completed = kernel.advanceMany(limit, this.nativeCosts())
+      completed = kernel.advanceManyGuarded(limit, this.nativeCosts())
     } catch (error) {
       this.iterations += kernel.lastAttempts
       this.searchIterations += kernel.lastAttempts
@@ -1259,6 +1255,9 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.searchIterations += completed
     this.nativeStepCount += completed
     this.nativeBatchedStepCount += completed
+    // Unsupported graph data belongs to the next, still unconsumed public step.
+    // Preserve all completed work before the supervisor resumes ordinary JS.
+    if (kernel.lastStatus === 3) this.declineNativeSearch()
     return completed
   }
 
@@ -1692,19 +1691,25 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     if (this.nativeActive && this.prepareNativePop()) {
       const kernel = this.nativeKernel!
-      const status = kernel.advance(this.nativeCosts())
+      const status = kernel.advanceGuarded(this.nativeCosts())
       this.nativeStepCount += kernel.lastCompleted
-      if (status === 1) {
-        const goal = kernel.goalNodeId
-        this.materializeNativeSearch()
-        this.finalizeRoute(goal)
-        this.activeConnSeg = null
-        this.activeConnId = -1
-      } else if (status === 2) {
-        this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
-        this.failed = true
+      if (status === 3) {
+        // The guard made no pop. Continue the original suffix below without
+        // repeating this step's search-iteration and budget prefix.
+        this.declineNativeSearch()
+      } else {
+        if (status === 1) {
+          const goal = kernel.goalNodeId
+          this.materializeNativeSearch()
+          this.finalizeRoute(goal)
+          this.activeConnSeg = null
+          this.activeConnId = -1
+        } else if (status === 2) {
+          this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
+          this.failed = true
+        }
+        return
       }
-      return
     }
 
     if (this.heap.size === 0) {

@@ -300,6 +300,57 @@ pub extern "C" fn a03_publish_state() {
 }
 
 #[no_mangle]
+pub extern "C" fn a03_advance_guarded(
+    via: f64,
+    rip: f64,
+    trace_rip: f64,
+    via_rip: f64,
+    greedy: f64,
+    cap: f64,
+) -> u32 {
+    let supported = unsafe {
+        let k = kernel().expect("active A03 search required");
+        k.costs = costs(via, rip, trace_rip, via_rip, greedy, cap);
+        k.next_graph_row_supported()
+    };
+    if supported {
+        return a03_advance(via, rip, trace_rip, via_rip, greedy, cap);
+    }
+    unsafe {
+        kernel().unwrap().publish_batch(0, 0);
+        publish(0, 3);
+        publish(2, u32::MAX);
+    }
+    a03_publish_state();
+    3
+}
+
+#[no_mangle]
+pub extern "C" fn a03_advance_many_guarded(
+    limit: u32,
+    via: f64,
+    rip: f64,
+    trace_rip: f64,
+    via_rip: f64,
+    greedy: f64,
+    cap: f64,
+) -> u32 {
+    let (completed, unsupported) = unsafe {
+        let k = kernel().expect("active A03 search required");
+        k.costs = costs(via, rip, trace_rip, via_rip, greedy, cap);
+        publish(0, 0);
+        publish(2, u32::MAX);
+        k.advance_many_guarded(&mut *core::ptr::addr_of_mut!(HOST), limit)
+            .unwrap()
+    };
+    unsafe {
+        publish(0, if unsupported { 3 } else { 0 });
+    }
+    a03_publish_state();
+    completed
+}
+
+#[no_mangle]
 pub extern "C" fn a03_collect_goal() {
     unsafe {
         let k = kernel().expect("active A03 search required");

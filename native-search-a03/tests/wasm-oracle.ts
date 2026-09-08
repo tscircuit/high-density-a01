@@ -46,6 +46,7 @@ const scalarBits = (v: number) => {
   return new BigUint64Array(a.buffer)[0]!
 }
 const cached = process.argv[2] !== "--uncached"
+const guarded = process.argv.includes("--guarded")
 const data = cached
   ? Buffer.from(a03SearchWasmBase64, "base64")
   : readFileSync(process.argv[3]!)
@@ -192,8 +193,11 @@ for (const name of readdirSync(resolve(import.meta.dir, "fixtures")).filter(
       let result: any, error: any
       try {
         result = ordinary
-          ? e.a03_advance(...last.costs)
-          : e.a03_advance_many(count, ...last.costs)
+          ? (guarded ? e.a03_advance_guarded : e.a03_advance)(...last.costs)
+          : (guarded ? e.a03_advance_many_guarded : e.a03_advance_many)(
+              count,
+              ...last.costs,
+            )
       } catch (caught) {
         error = caught
       }
@@ -311,6 +315,7 @@ assert.ok(batchedSteps > 1000)
 const summary = {
   untimedCorrectnessOnly: true,
   cached,
+  guarded,
   cacheHits,
   cacheMisses,
   wasmSha256: createHash("sha256").update(data).digest("hex"),
@@ -320,11 +325,12 @@ const summary = {
   nativeSteps,
   batchedSteps,
 }
-writeFileSync(
-  resolve(
-    import.meta.dir,
-    `wasm-${cached ? "cached" : "uncached"}-oracle-summary.json`,
-  ),
-  JSON.stringify(summary, null, 2) + "\n",
-)
+if (!guarded)
+  writeFileSync(
+    resolve(
+      import.meta.dir,
+      `wasm-${cached ? "cached" : "uncached"}-oracle-summary.json`,
+    ),
+    JSON.stringify(summary, null, 2) + "\n",
+  )
 console.log(JSON.stringify(summary))

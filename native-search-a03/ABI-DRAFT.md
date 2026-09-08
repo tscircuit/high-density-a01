@@ -58,6 +58,8 @@ P=plane cells, S=P*layers, E=CSR edge count, N=shared IDs, C=root mask length. S
 - `a03_export_distance_cache()`: prepare kind41 without changing kind40 or consuming search work. Refresh views after this allocating export.
 - `a03_advance(via:f64, rip:f64, traceRip:f64, viaRip:f64, greedy:f64, cap:f64) -> u32`: consume one ordinary pop, return 0=advanced, 1=goal, 2=empty. No TS finalization, requeue, budget or public iteration changes here.
 - `a03_advance_many(limit:u32, same six costs) -> u32`: consume only complete nonterminal pops, stop before empty/unvisited goal, return completed count. Duplicate pops count. Caller clamps search/global budgets and uses original step on zero.
+- `a03_advance_guarded(same six costs) -> u32`: preserve ordinary advance, with additive status 3 for an unsupported affected graph row. Status 3 consumes no attempted pop and makes no search-state or distance-cache write. The bridge materializes and runs the original JavaScript suffix.
+- `a03_advance_many_guarded(limit:u32, same six costs) -> u32`: preserve the original bulk loop and completed-count result, stopping with kind30 status 3 before the first unsupported affected row. Already completed pops remain counted exactly; the unsupported row does not add an attempt. A zero limit consumes no work.
 - `a03_publish_state()`: update status/heap/pool/rip diagnostics from current partial state without advancing or allocating. Use after a thrown import once the WASM call has unwound.
 - `a03_collect_goal()`: prepare kind31/32 arrays for unchanged TS finalizer. Does not clear residual heap/state.
 - `a03_export_snapshot()`: prepare kind40 complete materialization words; no algorithm step. Refresh views afterward.
@@ -66,6 +68,12 @@ P=plane cells, S=P*layers, E=CSR edge count, N=shared IDs, C=root mask length. S
 - `a03_clear()`: clear the entire solver state, input arrays, footprint copies, occupancy lists, snapshots, and scratch for release/setup; no ownership registry. `begin` instead keeps footprint geometry across searches and resets only active whole-query occupancy lists, with the original stamp lifecycle for per-cell lists. The TS bridge preserves public heap/visited diagnostics before release.
 
 Kind30 (u32[8]): 0=last returned status, 1=current heap size, 2=goal node ID (i32 bits; -1 before goal), 3=attempts in last advance/bulk call, 4=completed pops in that call, 5=node-pool length, 6=rip-pool length, 7=stamp. Attempts/completed must be volatile-published at original boundaries in a WASM adapter. An import throw leaves attempts including the current failed pop and completed excluding it. Unlike a completed-count convention, original A03 openSet reads the current partially mutated heap: the bridge must call a03_publish_state after unwind for that value. The core snapshot retains the actual partial arrays.
+
+## Affected-row eligibility
+
+Full input validation at create/begin and the original direct validators remain unchanged. The production bridge still checks canonical dimensions, storage and hooks and copies the live graph before each quantum. Guarded advance then validates only the next unvisited non-goal expansion: its current/end centers, CSR row range, and every neighbor ID, Float32 edge value and neighbor center. An invalid row selects the JavaScript suffix before any heap pop, visited/best-G write or host call. Unused invalid rows do not introduce a new error.
+
+Empty heaps, visited duplicate pops and unvisited goals require no graph values; their original behavior is retained. Safe private heap/pool peeks select the original trap path for malformed private state, preserving the position of its pop or attempted-counter update. Existing `a03_advance`, `a03_advance_many`, full snapshots and direct validators stay available as independent controls. Imported exceptions remain errors, never status 3.
 
 ## Materialization payload
 

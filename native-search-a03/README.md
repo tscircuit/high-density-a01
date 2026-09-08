@@ -4,6 +4,8 @@
 
 The backend is selected on the first search. Unsupported initial inputs use JavaScript; unsupported live changes first materialize the current native state and continue the original JavaScript suffix. After declining, that solver stays in JavaScript until setup is reset. Supported graph data has bounded, nonempty dimensions, canonical CSR indices, finite cell centers and non-NaN Float32 edge costs. Positive and negative infinity edges have exact state controls. Numeric cost changes remain live. Customized callbacks, accessors and unsupported storage use the guarded JavaScript path.
 
+After full create/begin validation, each native quantum copies the live public graph and checks only the row used by the next expansion. The guarded entry points stop before unsupported rows without consuming a pop; already completed prefixes retain their exact counters and partial state. Duplicate, goal and empty-heap paths skip unused graph values. The unchanged direct validators and advance entry points remain correctness controls.
+
 The module imports the same engine's `Math.hypot` and the original lazy TypeScript footprint function. It preserves heap ties, persistent rip state, Float32 edge widening and arithmetic order. Its distance memo stores only the exact imported result. FIFO goal tables have at most 65,536 total slots: three Float64 vectors and one validity-byte vector per table, at most 1,638,400 numeric bytes plus map/vector metadata. Both coordinate differences are recomputed before lookup. Signed zeros remain distinct; the memo uses same-value NaN comparison. Via and greedy costs remain live.
 
 The original TypeScript start heuristic runs before each native search. Its completed cache slot seeds the native memo before the first pop. The additive cache snapshot exports every table in insertion order, including unused raw float slots and validity bytes. Materialization restores the TypeScript Map, surviving table identities and FIFO accounting before customized callbacks can observe them. Search and distance caches survive subsequent native searches and clear at setup/release.
@@ -21,14 +23,18 @@ cargo +1.93.1 test --locked --manifest-path native-search-a03/Cargo.toml
 bun scripts/build-native-a03-search.ts
 git diff --exit-code -- lib/native-search/a03SearchWasmBytes.ts
 bun native-search-a03/tests/wasm-oracle.ts
+bun native-search-a03/tests/wasm-oracle.ts --guarded
+bun native-search-a03/tests/guarded-oracle.ts
 bun native-search-a03/tests/wasm-lifecycle.ts
 bun native-search-a03/tests/distance-seed-oracle.ts
 bun native-search-a03/tests/distance-view-oracle.ts
 RUSTFLAGS="-C link-arg=-zstack-size=65536" cargo +1.93.1 build --locked --manifest-path native-search-a03/Cargo.toml --target wasm32-unknown-unknown --release --features uncached-distance-oracle --target-dir native-search-a03/target-oracle
 bun native-search-a03/tests/wasm-oracle.ts --uncached native-search-a03/target-oracle/wasm32-unknown-unknown/release/a03_exact_search_preparation.wasm
+bun native-search-a03/tests/wasm-oracle.ts --uncached native-search-a03/target-oracle/wasm32-unknown-unknown/release/a03_exact_search_preparation.wasm --guarded
+bun native-search-a03/tests/guarded-oracle.ts native-search-a03/target-oracle/wasm32-unknown-unknown/release/a03_exact_search_preparation.wasm
 ```
 
-The test-only `uncached-distance-oracle` feature preserves the original complete host-call sequence. Production builds enable the memo. Both module search oracles also compare every bulk-view backing value against the unchanged full snapshot, including partial host failures. The direct distance-view oracle compares all 55 frozen C49 seed/FIFO boundaries against kind41. Graph-only validation controls retain every graph check and require full ownership validation at begin. Generated test summary JSON is ignored; the reference manifests and compressed inputs are committed.
+The test-only `uncached-distance-oracle` feature preserves the original complete host-call sequence. Production builds enable the memo. Both module search oracles also compare every bulk-view backing value against the unchanged full snapshot, including partial host failures. The direct distance-view oracle compares all 55 frozen C49 seed/FIFO boundaries against kind41. Graph-only validation controls retain every graph check and require full ownership validation at begin. Guarded controls compare unsupported first rows, exact valid prefixes, IEEE costs, host failures and complete materialized backing against the original entry points; Rust controls also compare private-corruption trap state. Generated test summary JSON is ignored; the reference manifests and compressed inputs are committed.
 
 ## Reference provenance
 

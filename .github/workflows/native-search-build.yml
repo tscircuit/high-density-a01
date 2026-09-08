@@ -29,6 +29,8 @@ jobs:
       - name: Verify cached A03 module states and lifecycle
         run: |
           bun native-search-a03/tests/wasm-oracle.ts
+          bun native-search-a03/tests/wasm-oracle.ts --guarded
+          bun native-search-a03/tests/guarded-oracle.ts
           bun native-search-a03/tests/wasm-lifecycle.ts
           bun native-search-a03/tests/distance-seed-oracle.ts
           bun native-search-a03/tests/distance-view-oracle.ts
@@ -37,4 +39,7 @@ jobs:
           RUSTFLAGS: -C link-arg=-zstack-size=65536
         run: cargo +1.93.1 build --locked --manifest-path native-search-a03/Cargo.toml --target wasm32-unknown-unknown --release --features uncached-distance-oracle --target-dir native-search-a03/target-oracle
       - name: Verify original A03 host order and partial exceptions
-        run: bun native-search-a03/tests/wasm-oracle.ts --uncached native-search-a03/target-oracle/wasm32-unknown-unknown/release/a03_exact_search_preparation.wasm
+        run: |
+          bun native-search-a03/tests/wasm-oracle.ts --uncached native-search-a03/target-oracle/wasm32-unknown-unknown/release/a03_exact_search_preparation.wasm
+          bun native-search-a03/tests/wasm-oracle.ts --uncached native-search-a03/target-oracle/wasm32-unknown-unknown/release/a03_exact_search_preparation.wasm --guarded
+          bun native-search-a03/tests/guarded-oracle.ts native-search-a03/target-oracle/wasm32-unknown-unknown/release/a03_exact_search_preparation.wasm

@@ -1068,8 +1068,11 @@ impl SearchState {
 }
 
 #[cfg(test)]
+mod guarded_tests;
+#[cfg(test)]
 mod tests;
 
+mod guarded;
 mod materialization;
 
 #[cfg(target_arch = "wasm32")]

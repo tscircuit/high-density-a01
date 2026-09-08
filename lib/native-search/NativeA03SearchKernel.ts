@@ -103,6 +103,23 @@ type KernelExports = {
     greedy: number,
     cap: number,
   ): number
+  a03_advance_guarded(
+    via: number,
+    rip: number,
+    traceRip: number,
+    viaRip: number,
+    greedy: number,
+    cap: number,
+  ): number
+  a03_advance_many_guarded(
+    limit: number,
+    via: number,
+    rip: number,
+    traceRip: number,
+    viaRip: number,
+    greedy: number,
+    cap: number,
+  ): number
   a03_publish_state(): void
   a03_collect_goal(): void
   a03_export_snapshot(): void
@@ -485,18 +502,33 @@ export class NativeA03SearchKernel {
     return this.runAdvance(limit, costs, true)
   }
 
+  advanceGuarded(costs: NativeA03Costs): number {
+    return this.runAdvance(0, costs, false, true)
+  }
+
+  advanceManyGuarded(limit: number, costs: NativeA03Costs): number {
+    return this.runAdvance(limit, costs, true, true)
+  }
+
   private runAdvance(
     limit: number,
     costs: NativeA03Costs,
     batch: boolean,
+    guarded = false,
   ): number {
     if (this.executing)
       throw new Error("Native A03 search cannot reenter itself")
     const exports = this.exports
     this.executing = true
     try {
+      const ordinary = guarded
+        ? exports.a03_advance_guarded
+        : exports.a03_advance
+      const many = guarded
+        ? exports.a03_advance_many_guarded
+        : exports.a03_advance_many
       const result = batch
-        ? exports.a03_advance_many(
+        ? many(
             limit,
             costs.viaBaseCost,
             costs.ripCost,
@@ -505,7 +537,7 @@ export class NativeA03SearchKernel {
             costs.greedyMultiplier,
             costs.penaltyCap,
           )
-        : exports.a03_advance(
+        : ordinary(
             costs.viaBaseCost,
             costs.ripCost,
             costs.ripTracePenalty,
@@ -527,6 +559,9 @@ export class NativeA03SearchKernel {
 
   get heapSize(): number {
     return this.state[1]!
+  }
+  get lastStatus(): number {
+    return this.state[0]!
   }
   get goalNodeId(): number {
     return this.state[2]! | 0
