@@ -1,0 +1,6 @@
+/target/
+/target-oracle/
+
+# Generated correctness-run summaries; frozen inputs/manifests stay tracked.
+/tests/wasm-cached-oracle-summary.json
+/tests/wasm-uncached-oracle-summary.json

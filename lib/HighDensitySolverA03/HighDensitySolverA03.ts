@@ -1,4 +1,12 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import {
+  NativeA03SearchKernel,
+  canRunNativeA03Graph,
+  type NativeA03Costs,
+  type NativeA03Owners,
+} from "../native-search/NativeA03SearchKernel"
+import { canRunNativeA03FootprintGeometry } from "../native-search/canRunNativeA03FootprintGeometry"
+import type { NativeA03Snapshot } from "../native-search/decodeNativeA03Snapshot"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
@@ -20,6 +28,142 @@ const defaultMath = Math
 const defaultHypot = Math.hypot
 const applyFunction = Reflect.apply
 const sameValue = Object.is
+
+const NATIVE_MISSING = Symbol("native A03 unsupported descriptor")
+const nativeDescriptor = Object.getOwnPropertyDescriptor
+const nativePrototype = Object.getPrototypeOf
+const nativeString = String
+const nativeIsInteger = Number.isInteger
+const nativeIsSafeInteger = Number.isSafeInteger
+const nativeMapGet = Map.prototype.get
+const nativeTypedSet = Uint8Array.prototype.set
+const nativeMapClear = Map.prototype.clear
+const nativeMapSet = Map.prototype.set
+const nativeMapForEach = Map.prototype.forEach
+const nativeTypedPrototype = Object.getPrototypeOf(Uint8Array.prototype)
+const nativeTypedLength = nativeDescriptor(nativeTypedPrototype, "length")!.get!
+const nativeGetters: Array<[object, PropertyKey, unknown]> = [
+  [Map.prototype, "size", nativeDescriptor(Map.prototype, "size")!.get],
+  [
+    nativeTypedPrototype,
+    "length",
+    nativeDescriptor(nativeTypedPrototype, "length")!.get,
+  ],
+  [
+    nativeTypedPrototype,
+    "buffer",
+    nativeDescriptor(nativeTypedPrototype, "buffer")!.get,
+  ],
+  [
+    nativeTypedPrototype,
+    "byteLength",
+    nativeDescriptor(nativeTypedPrototype, "byteLength")!.get,
+  ],
+  [
+    nativeTypedPrototype,
+    "byteOffset",
+    nativeDescriptor(nativeTypedPrototype, "byteOffset")!.get,
+  ],
+]
+const nativeGlobals: Array<[object, PropertyKey, unknown]> = [
+  [globalThis, "Math", Math],
+  [globalThis, "Array", Array],
+  [globalThis, "Map", Map],
+  [globalThis, "Number", Number],
+  [globalThis, "Int32Array", Int32Array],
+  [globalThis, "Uint32Array", Uint32Array],
+  [globalThis, "Float64Array", Float64Array],
+  [globalThis, "Float32Array", Float32Array],
+  [globalThis, "Uint8Array", Uint8Array],
+  [Object, "is", Object.is],
+]
+for (const name of ["hypot", "min", "max", "round", "floor", "ceil"] as const)
+  nativeGlobals.push([Math, name, Math[name]])
+for (const name of ["isInteger", "isSafeInteger", "isFinite"] as const)
+  nativeGlobals.push([Number, name, Number[name]])
+for (const name of [
+  "push",
+  "slice",
+  "includes",
+  "fill",
+  "values",
+  Symbol.iterator,
+] as const)
+  nativeGlobals.push([Array.prototype, name, Array.prototype[name]])
+nativeGlobals.push([Array, "from", Array.from])
+for (const name of [
+  "get",
+  "set",
+  "clear",
+  "delete",
+  "keys",
+  Symbol.iterator,
+] as const)
+  nativeGlobals.push([Map.prototype, name, Map.prototype[name]])
+for (const name of [
+  "set",
+  "fill",
+  "slice",
+  "subarray",
+  Symbol.iterator,
+] as const)
+  nativeGlobals.push([nativeTypedPrototype, name, nativeTypedPrototype[name]])
+nativeGlobals.push([
+  nativePrototype([][Symbol.iterator]()),
+  "next",
+  nativePrototype([][Symbol.iterator]()).next,
+])
+nativeGlobals.push([
+  nativePrototype(new Map().keys()),
+  "next",
+  nativePrototype(new Map().keys()).next,
+])
+
+function nativeData(object: object, key: PropertyKey): unknown {
+  for (
+    let current: object | null = object;
+    current;
+    current = nativePrototype(current)
+  ) {
+    const descriptor = nativeDescriptor(current, key)
+    if (descriptor)
+      return "value" in descriptor ? descriptor.value : NATIVE_MISSING
+  }
+  return NATIVE_MISSING
+}
+function nativeOwnData(
+  object: object,
+  key: PropertyKey,
+  writable = false,
+): boolean {
+  const descriptor = nativeDescriptor(object, key)
+  return (
+    !!descriptor &&
+    "value" in descriptor &&
+    (!writable || descriptor.writable === true)
+  )
+}
+function nativeMethodsMatch(
+  object: object,
+  methods: Array<[PropertyKey, unknown]>,
+): boolean {
+  for (let i = 0; i < methods.length; i++) {
+    const entry = methods[i]!
+    if (nativeData(object, entry[0]) !== entry[1]) return false
+  }
+  return true
+}
+function nativeGlobalMethodsMatch(): boolean {
+  for (let i = 0; i < nativeGetters.length; i++) {
+    const entry = nativeGetters[i]!
+    if (nativeDescriptor(entry[0], entry[1])?.get !== entry[2]) return false
+  }
+  for (let i = 0; i < nativeGlobals.length; i++) {
+    const entry = nativeGlobals[i]!
+    if (nativeData(entry[0], entry[1]) !== entry[2]) return false
+  }
+  return true
+}
 
 interface DistanceCacheTable {
   dx: Float64Array
@@ -79,8 +223,8 @@ interface HyperParameters {
 }
 
 class TypedMinHeap {
-  private f = new Float64Array(1024)
-  private id = new Int32Array(1024)
+  private f: Float64Array = new Float64Array(1024)
+  private id: Int32Array = new Int32Array(1024)
   private n = 0
 
   // Nodes are enqueued once, immediately after allocation. Their pool index is
@@ -146,6 +290,12 @@ class TypedMinHeap {
     this.n = 0
   }
 
+  importStorage(storage: NativeA03Snapshot["heap"]): void {
+    this.f = storage.f
+    this.id = storage.id
+    this.n = storage.length
+  }
+
   private ensureCapacity(size: number): void {
     if (size <= this.f.length) return
     let next = this.f.length
@@ -160,12 +310,12 @@ class TypedMinHeap {
 }
 
 class TypedNodePool {
-  z = new Int32Array(1024)
-  cellId = new Int32Array(1024)
-  g = new Float64Array(1024)
-  parent = new Int32Array(1024)
-  ripHead = new Int32Array(1024).fill(-1)
-  ripCount = new Int32Array(1024)
+  z: Int32Array = new Int32Array(1024)
+  cellId: Int32Array = new Int32Array(1024)
+  g: Float64Array = new Float64Array(1024)
+  parent: Int32Array = new Int32Array(1024)
+  ripHead: Int32Array = new Int32Array(1024).fill(-1)
+  ripCount: Int32Array = new Int32Array(1024)
   length = 0
 
   clear() {
@@ -224,8 +374,8 @@ class TypedNodePool {
 }
 
 class TypedRipChain {
-  connId = new Int32Array(1024)
-  prev = new Int32Array(1024).fill(-1)
+  connId: Int32Array = new Int32Array(1024)
+  prev: Int32Array = new Int32Array(1024).fill(-1)
   length = 0
 
   clear() {
@@ -330,6 +480,12 @@ export interface HighDensitySolverA03Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  /**
+   * Opt in to exact synchronous native search (default false). Live public graph
+   * arrays and numeric costs synchronize at each pop or batch. Unsupported
+   * shapes, accessors or hooks resume JavaScript until the next setup.
+   */
+  useNativeSearch?: boolean
   /** Enable diagonal edges within each of the five grid regions. */
   enableDiagonalMoves?: boolean
   hyperParameters?: Partial<HyperParameters>
@@ -403,6 +559,26 @@ export class HighDensitySolverA03 extends BaseSolver {
   neighborIds!: Int32Array
   neighborCosts!: Float32Array
 
+  useNativeSearch: boolean
+  private nativeKernel: NativeA03SearchKernel | null = null
+  private nativeActive = false
+  private nativeDeclined = false
+  private nativeAttempted = false
+  private nativeStepCount = 0
+  private nativeBatchedStepCount = 0
+  private nativeLastStamp = 0
+  private nativeOwnerCount = 0
+
+  get nativeSearchActive(): boolean {
+    return this.nativeActive
+  }
+  get nativeSearchSteps(): number {
+    return this.nativeStepCount
+  }
+  get nativeSearchBatchedSteps(): number {
+    return this.nativeBatchedStepCount
+  }
+
   private usedCellsFlat!: Int32Array
   private sharedCellsFlat!: Array<number[] | undefined>
   private portOwnerFlat!: Int32Array
@@ -440,7 +616,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private viaOccupantsByCell = new Map<number, ConnId[]>()
   private viaFootprintByCell = new Map<number, Int32Array>()
   private layerOccupantsByCell: Array<readonly ConnId[] | undefined> = []
-  private layerOccupantStamp = new Uint32Array(0)
+  private layerOccupantStamp: Uint32Array = new Uint32Array(0)
   private _layerOccs: ConnId[] = []
   private rootOverlapAllowed = new Uint8Array(0)
   private _cellOccs: ConnId[] = []
@@ -500,7 +676,11 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   get openSet() {
-    return { length: this.heap?.size ?? 0 }
+    return {
+      length: this.nativeActive
+        ? this.nativeKernel!.heapSize
+        : (this.heap?.size ?? 0),
+    }
   }
 
   get gridStats() {
@@ -523,6 +703,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   constructor(props: HighDensitySolverA03Props) {
     super()
+    this.useNativeSearch = props.useNativeSearch ?? false
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.highResolutionCellSize = props.highResolutionCellSize ?? 0.1
     this.highResolutionCellThickness = Math.max(
@@ -557,6 +738,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   override getConstructorParams(): [HighDensitySolverA03Props] {
     return [
       {
+        useNativeSearch: this.useNativeSearch,
         nodeWithPortPoints: this.nodeWithPortPoints,
         highResolutionCellSize: this.highResolutionCellSize,
         highResolutionCellThickness: this.highResolutionCellThickness,
@@ -578,6 +760,18 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override _setup(): void {
+    // Original setup can reject parameters before replacing the existing heap.
+    // Preserve that state even when an active native search is reset.
+    if (this.nativeActive) this.materializeNativeSearch()
+    this.nativeKernel?.release()
+    this.nativeKernel = null
+    this.nativeActive = false
+    this.nativeDeclined = false
+    this.nativeAttempted = false
+    this.nativeStepCount = 0
+    this.nativeBatchedStepCount = 0
+    this.nativeLastStamp = 0
+    this.nativeOwnerCount = 0
     this.clearDistanceCache()
     this.viaFootprintByCell.clear()
     this.clearLayerOccupantCache()
@@ -736,11 +930,362 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.stepOnce()
     }
     if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
+      if (this.nativeActive) this.materializeNativeSearch()
+      this.nativeKernel?.release()
+      this.nativeKernel = null
       this.viaOccupantsByCell.clear()
       this.viaFootprintByCell.clear()
       this.clearLayerOccupantCache()
       this.clearDistanceCache()
     }
+  }
+
+  private nativeCosts(): NativeA03Costs {
+    const hp = this.hyperParameters
+    return {
+      viaBaseCost: hp.viaBaseCost,
+      ripCost: hp.ripCost,
+      ripTracePenalty: hp.ripTracePenalty,
+      ripViaPenalty: hp.ripViaPenalty,
+      greedyMultiplier: hp.greedyMultiplier,
+      penaltyCap: this.penaltyCap,
+    }
+  }
+
+  private nativeCapability(): boolean {
+    if (
+      nativeData(this, "useNativeSearch") !== true ||
+      !nativeGlobalMethodsMatch() ||
+      !nativeMethodsMatch(this, nativeA03Methods) ||
+      !nativeMethodsMatch(this.heap, nativeHeapMethods) ||
+      !nativeMethodsMatch(this.nodePool, nativePoolMethods) ||
+      !nativeMethodsMatch(this.ripChain, nativeRipMethods)
+    )
+      return false
+    let heapDescriptor: PropertyDescriptor | undefined
+    for (
+      let current: object | null = this.heap;
+      current;
+      current = nativePrototype(current)
+    ) {
+      heapDescriptor = nativeDescriptor(current, "size")
+      if (heapDescriptor) break
+    }
+    if (heapDescriptor?.get !== nativeHeapSize) return false
+    for (let i = 0; i < nativeGraphFields.length; i++)
+      if (!nativeOwnData(this, nativeGraphFields[i]!)) return false
+    if (
+      !nativeOwnData(this, "hyperParameters") ||
+      !nativeOwnData(this, "penaltyCap")
+    )
+      return false
+    const hp = this.hyperParameters
+    for (let i = 0; i < nativeCostFields.length; i++)
+      if (typeof nativeData(hp, nativeCostFields[i]!) !== "number") return false
+    if (
+      typeof this.penaltyCap !== "number" ||
+      !canRunNativeA03Graph(this) ||
+      !canRunNativeA03FootprintGeometry(this)
+    )
+      return false
+    const seg = this.activeConnSeg
+    if (!seg) return false
+    for (let i = 0; i < nativeSegFields.length; i++)
+      if (!nativeOwnData(seg, nativeSegFields[i]!)) return false
+    if (
+      !nativeIsInteger(seg.startZ) ||
+      !nativeIsInteger(seg.endZ) ||
+      seg.startZ < 0 ||
+      seg.startZ >= this.layers ||
+      seg.endZ < 0 ||
+      seg.endZ >= this.layers ||
+      !nativeIsInteger(seg.startCellId) ||
+      !nativeIsInteger(seg.endCellId) ||
+      seg.startCellId < 0 ||
+      seg.startCellId >= this.planeSize ||
+      seg.endCellId < 0 ||
+      seg.endCellId >= this.planeSize
+    )
+      return false
+    if (
+      !nativeMethodsMatch(this.viaFootprintByCell, nativeMapMethods) ||
+      !nativeMethodsMatch(this.viaOccupantsByCell, nativeMapMethods)
+    )
+      return false
+    return true
+  }
+
+  private nativeOwners(): NativeA03Owners {
+    const offsets = new Int32Array(this.sharedCellsFlat.length + 1)
+    let count = 0
+    for (let i = 0; i < this.sharedCellsFlat.length; i++) {
+      count += this.sharedCellsFlat[i]?.length ?? 0
+      offsets[i + 1] = count
+    }
+    const shared = new Int32Array(count)
+    let at = 0
+    for (let i = 0; i < this.sharedCellsFlat.length; i++) {
+      const list = this.sharedCellsFlat[i]
+      if (list) for (let j = 0; j < list.length; j++) shared[at++] = list[j]!
+    }
+    return {
+      usedCells: this.usedCellsFlat,
+      portOwners: this.portOwnerFlat,
+      sharedOffsets: offsets,
+      sharedIds: shared,
+      penalties: this.penalty2d,
+      rootOverlap: this.rootOverlapAllowed,
+    }
+  }
+
+  private beginNativeSearch(startF: number): void {
+    if (this.nativeDeclined) return
+    if (!this.nativeKernel && this.nativeAttempted) return
+    this.nativeAttempted = true
+    if (!this.nativeCapability()) {
+      this.declineNativeSearch()
+      return
+    }
+    const owners = this.nativeOwners()
+    if (!this.nativeKernel) {
+      this.nativeKernel = NativeA03SearchKernel.create(this, owners, {
+        getFootprint: (cellId: number): Int32Array =>
+          this.getViaFootprint(cellId),
+      })
+      if (!this.nativeKernel) {
+        this.nativeDeclined = true
+        return
+      }
+      this.nativeOwnerCount = this.rootOverlapAllowed.length
+    } else {
+      if (
+        !this.nativeKernel.canCopyGraph(this) ||
+        this.nativeOwnerCount !== this.rootOverlapAllowed.length
+      ) {
+        this.declineNativeSearch()
+        return
+      }
+      this.nativeKernel.copyGraph(this)
+      this.nativeKernel.copyOwners(owners)
+      if (!this.nativeKernel.validateInputs()) {
+        this.declineNativeSearch()
+        return
+      }
+    }
+    const seg = this.activeConnSeg!
+    const result = this.nativeKernel.begin({
+      ...this.nativeCosts(),
+      stamp: this.stamp,
+      activeConnId: this.activeConnId,
+      startZ: seg.startZ,
+      startCellId: seg.startCellId,
+      endZ: seg.endZ,
+      endCellId: seg.endCellId,
+      startF,
+      clearStamps: this.stamp <= this.nativeLastStamp,
+    })
+    if (!result) {
+      this.declineNativeSearch()
+      return
+    }
+    // The original start computeH above remains the owner of callee/argument
+    // evaluation and FIFO allocation. Seed its exact completed slot only after
+    // begin, before the first native pop, without another observable Map call.
+    if (this.distanceCacheCapacity > 0) {
+      const table = applyFunction(nativeMapGet, this.distanceByGoal, [
+        seg.endCellId,
+      ]) as DistanceCacheTable | undefined
+      const cell = seg.startCellId
+      if (
+        !table ||
+        table.valid[cell] !== 1 ||
+        !this.nativeKernel.seedDistance(
+          seg.endCellId,
+          cell,
+          table.dx[cell]!,
+          table.dy[cell]!,
+          table.distance[cell]!,
+        )
+      ) {
+        this.declineNativeSearch()
+        return
+      }
+    }
+    this.nativeLastStamp = this.stamp
+    this.nativeActive = true
+  }
+
+  private prepareNativePop(): boolean {
+    if (!this.nativeCapability() || !this.nativeKernel!.canCopyGraph(this)) {
+      this.declineNativeSearch()
+      return false
+    }
+    this.nativeKernel!.copyGraph(this)
+    if (!this.nativeKernel!.validateInputs()) {
+      this.declineNativeSearch()
+      return false
+    }
+    return true
+  }
+
+  private materializeNativeSearch(): void {
+    if (!this.nativeActive) return
+    const snapshot = this.nativeKernel!.snapshot()
+    applyFunction(nativeHeapImport, this.heap, [snapshot.heap])
+    const nodes = snapshot.nodes
+    this.nodePool.length = nodes.length
+    this.nodePool.z = nodes.z
+    this.nodePool.cellId = nodes.cellId
+    this.nodePool.g = nodes.g
+    this.nodePool.parent = nodes.parent
+    this.nodePool.ripHead = nodes.ripHead
+    this.nodePool.ripCount = nodes.ripCount
+    this.ripChain.length = snapshot.rips.length
+    this.ripChain.connId = snapshot.rips.connId
+    this.ripChain.prev = snapshot.rips.prev
+    this.visitedStamp = snapshot.visited
+    this.visitedFlatStamp = snapshot.visitedFlat
+    this.bestGStamp = snapshot.bestStamp
+    this.bestGValue = snapshot.bestG
+    this._moveCost = snapshot.moveCost
+    this._moveRippedHead = snapshot.moveHead
+    this._moveRipCount = snapshot.moveRipCount
+    this._viaOccs = snapshot.viaScratch
+    this._cellOccs = snapshot.cellScratch
+    this._layerOccs = snapshot.layerScratch
+    this.layerOccupantStamp = snapshot.layerStamp
+    this.layerOccupantsByCell = snapshot.layerOccupants
+    for (let i = 0; i < this.layerOccupantsByCell.length; i++) {
+      const occupants = this.layerOccupantsByCell[i]
+      if (occupants && occupants.length === 0)
+        this.layerOccupantsByCell[i] = EMPTY_OCCUPANTS
+    }
+    applyFunction(nativeMapClear, this.viaOccupantsByCell, [])
+    applyFunction(nativeMapForEach, snapshot.viaOccupants, [
+      (value: number[], key: number): void => {
+        applyFunction(nativeMapSet, this.viaOccupantsByCell, [key, value])
+      },
+    ])
+    // Host calls already populated the complete original footprint Map. A
+    // bounded native copy cache must never replace that solver-lifetime memo.
+    const distances = this.nativeKernel!.distanceSnapshot()
+    const restored: Array<[number, DistanceCacheTable]> = []
+    applyFunction(nativeMapForEach, distances.tables, [
+      (value: DistanceCacheTable, key: number): void => {
+        const previous = applyFunction(nativeMapGet, this.distanceByGoal, [
+          key,
+        ]) as DistanceCacheTable | undefined
+        const table =
+          previous &&
+          applyFunction(nativeTypedLength, previous.valid, []) ===
+            applyFunction(nativeTypedLength, value.valid, [])
+            ? previous
+            : value
+        if (table !== value) {
+          applyFunction(nativeTypedSet, table.dx, [value.dx])
+          applyFunction(nativeTypedSet, table.dy, [value.dy])
+          applyFunction(nativeTypedSet, table.distance, [value.distance])
+          applyFunction(nativeTypedSet, table.valid, [value.valid])
+        }
+        restored[restored.length] = [key, table]
+      },
+    ])
+    // Preserve Map and surviving table identities while importing native FIFO
+    // evictions. Captured intrinsics also make fallback safe after global hooks
+    // change; the first subsequent JS computeH sees the original warmed slots.
+    applyFunction(nativeMapClear, this.distanceByGoal, [])
+    for (let i = 0; i < restored.length; i++) {
+      const entry = restored[i]!
+      applyFunction(nativeMapSet, this.distanceByGoal, [entry[0], entry[1]])
+    }
+    this.distanceCacheCapacity = distances.capacity
+    this.distanceCacheSlots = distances.slots
+    this.nativeActive = false
+  }
+
+  private declineNativeSearch(): void {
+    this.materializeNativeSearch()
+    this.nativeKernel?.release()
+    this.nativeKernel = null
+    this.nativeDeclined = true
+  }
+
+  /**
+   * Consume complete nonterminal public steps within the live search/MAX budget.
+   * A zero result requires the caller to use ordinary step() for the boundary.
+   */
+  stepNativeBatch(maxSteps: number): number {
+    if (!nativeIsSafeInteger(maxSteps) || maxSteps < 1) return 0
+    for (let i = 0; i < nativeBatchWritable.length; i++)
+      if (!nativeOwnData(this, nativeBatchWritable[i]!, true)) return 0
+    for (let i = 0; i < nativeBatchData.length; i++)
+      if (!nativeOwnData(this, nativeBatchData[i]!)) return 0
+    if (
+      !nativeMethodsMatch(this, nativeBatchMethods) ||
+      "computeProgress" in this ||
+      !this._setupDone ||
+      this.solved ||
+      this.failed ||
+      this.stepMultiplier !== 1 ||
+      !this.nativeActive ||
+      !this.nativeKernel ||
+      !this.nativeCapability()
+    )
+      return 0
+    if (typeof this.baseSearchBudgetIters !== "number") return 0
+    const index = nativeString(this.activeConnId)
+    let descriptor: PropertyDescriptor | undefined
+    for (
+      let current: object | null = this.ripCount;
+      current;
+      current = nativePrototype(current)
+    ) {
+      descriptor = nativeDescriptor(current, index)
+      if (descriptor) break
+    }
+    if (descriptor && !("value" in descriptor)) return 0
+    const connRips = descriptor?.value ?? 0
+    if (typeof connRips !== "number") return 0
+    const budget = Math.round(
+      this.baseSearchBudgetIters * (1 + Math.min(connRips, 10) * 0.25),
+    )
+    const counters = [
+      this.iterations,
+      this.MAX_ITERATIONS,
+      this.searchIterations,
+      this.nativeStepCount,
+      this.nativeBatchedStepCount,
+    ]
+    for (let i = 0; i < counters.length; i++)
+      if (!nativeIsSafeInteger(counters[i]) || counters[i]! < 0) return 0
+    const limit = Math.min(
+      maxSteps,
+      0xffff_ffff,
+      this.MAX_ITERATIONS - this.iterations - 1,
+      budget - this.searchIterations,
+      Number.MAX_SAFE_INTEGER - this.nativeStepCount,
+      Number.MAX_SAFE_INTEGER - this.nativeBatchedStepCount,
+    )
+    if (!(limit >= 1) || !nativeIsInteger(limit)) return 0
+    if (!this.prepareNativePop()) return 0
+    const kernel = this.nativeKernel!
+    let completed: number
+    try {
+      completed = kernel.advanceMany(limit, this.nativeCosts())
+    } catch (error) {
+      this.iterations += kernel.lastAttempts
+      this.searchIterations += kernel.lastAttempts
+      this.nativeStepCount += kernel.lastCompleted
+      this.nativeBatchedStepCount += kernel.lastCompleted
+      this.error = `${this.getSolverName()} error: ${error}`
+      this.failed = true
+      throw error
+    }
+    this.iterations += completed
+    this.searchIterations += completed
+    this.nativeStepCount += completed
+    this.nativeBatchedStepCount += completed
+    return completed
   }
 
   private buildFiveRegionGrid(width: number, height: number) {
@@ -1143,6 +1688,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.bestGStamp[startStateIdx] = this.stamp
       this.bestGValue[startStateIdx] = 0
       this.heap.push(f, startIdx)
+      this.beginNativeSearch(f)
       return
     }
 
@@ -1152,6 +1698,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.baseSearchBudgetIters * (1 + Math.min(connRips, 10) * 0.25),
     )
     if (this.searchIterations > budget) {
+      if (this.nativeActive) this.materializeNativeSearch()
       const pen = this.penalty2d
       for (let i = 0; i < pen.length; i++) {
         pen[i] = pen[i]! * 0.9
@@ -1164,6 +1711,23 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.consecutiveSkips++
       if (this.consecutiveSkips >= Math.max(3, this.unsolvedSegs.length * 3)) {
         this.error = `Convergence failure: ${this.unsolvedSegs.length} connections stuck`
+        this.failed = true
+      }
+      return
+    }
+
+    if (this.nativeActive && this.prepareNativePop()) {
+      const kernel = this.nativeKernel!
+      const status = kernel.advance(this.nativeCosts())
+      this.nativeStepCount += kernel.lastCompleted
+      if (status === 1) {
+        const goal = kernel.goalNodeId
+        this.materializeNativeSearch()
+        this.finalizeRoute(goal)
+        this.activeConnSeg = null
+        this.activeConnId = -1
+      } else if (status === 2) {
+        this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
         this.failed = true
       }
       return
@@ -2109,6 +2673,8 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override visualize() {
+    if (this.nativeActive)
+      this.nativeKernel!.copyVisitedFlatTo(this.visitedFlatStamp)
     const LAYER_COLORS = ["red", "blue", "orange", "green"]
     const vt = this.gridToBoundsTransform
 
@@ -2379,3 +2945,92 @@ export class HighDensitySolverA03 extends BaseSolver {
 }
 
 export { HighDensitySolverA03 as HighDensityA03Solver }
+
+// Capture canonical hooks once, so prototype patches before construction also
+// select the original TypeScript path rather than becoming native defaults.
+const nativeA03HookNames = [
+  "_step",
+  "stepOnce",
+  "computeH",
+  "computeMoveCostAndRips",
+  "getSearchStateIdx",
+  "getViaOccupants",
+  "getLayerOccupants",
+  "fillTraceOccupants",
+  "pushFlatOccupants",
+  "getViaFootprint",
+  "forEachCellNearCircle",
+  "cellIdFor",
+]
+const nativeA03Methods: Array<[PropertyKey, unknown]> = nativeA03HookNames.map(
+  (name) => [name, nativeData(HighDensitySolverA03.prototype, name)],
+)
+const nativeHeapMethods: Array<[PropertyKey, unknown]> = [
+  "push",
+  "pop",
+  "clear",
+  "ensureCapacity",
+  "importStorage",
+].map((name) => [name, nativeData(TypedMinHeap.prototype, name)])
+const nativePoolMethods: Array<[PropertyKey, unknown]> = [
+  "push",
+  "clear",
+  "ensureCapacity",
+].map((name) => [name, nativeData(TypedNodePool.prototype, name)])
+const nativeRipMethods: Array<[PropertyKey, unknown]> = [
+  "append",
+  "contains",
+  "clear",
+  "ensureCapacity",
+].map((name) => [name, nativeData(TypedRipChain.prototype, name)])
+const nativeHeapImport = TypedMinHeap.prototype.importStorage
+const nativeHeapSize = nativeDescriptor(TypedMinHeap.prototype, "size")!.get
+const nativeMapMethods: Array<[PropertyKey, unknown]> = [
+  "get",
+  "set",
+  "clear",
+].map((name) => [name, nativeData(Map.prototype, name)])
+const nativeGraphFields = [
+  "planeSize",
+  "layers",
+  "cellCenterX",
+  "cellCenterY",
+  "neighborOffset",
+  "neighborIds",
+  "neighborCosts",
+  "viaAllowed",
+]
+const nativeCostFields = [
+  "viaBaseCost",
+  "ripCost",
+  "ripTracePenalty",
+  "ripViaPenalty",
+  "greedyMultiplier",
+]
+const nativeSegFields = ["startZ", "startCellId", "endZ", "endCellId"]
+const nativeBatchWritable = [
+  "iterations",
+  "searchIterations",
+  "nativeStepCount",
+  "nativeBatchedStepCount",
+  "failed",
+  "error",
+]
+const nativeBatchData = [
+  "_setupDone",
+  "solved",
+  "MAX_ITERATIONS",
+  "stepMultiplier",
+  "nativeActive",
+  "nativeKernel",
+  "activeConnId",
+  "ripCount",
+  "baseSearchBudgetIters",
+]
+const nativeBatchMethods: Array<[PropertyKey, unknown]> = [
+  ["step", BaseSolver.prototype.step],
+  ["tryFinalAcceptance", BaseSolver.prototype.tryFinalAcceptance],
+  ["_step", HighDensitySolverA03.prototype._step],
+  ["stepOnce", nativeData(HighDensitySolverA03.prototype, "stepOnce")],
+  ["stepNativeBatch", HighDensitySolverA03.prototype.stepNativeBatch],
+]

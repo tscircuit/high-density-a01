@@ -11,7 +11,11 @@
       "!**/cosmos-export",
       "!**/dist",
       "!**/package.json",
-      "!**/native-search/target"
+      "!**/native-search/target",
+      "!**/native-search-a03/target",
+      "!**/native-search-a03/target-oracle",
+      "!**/native-search-a03/tests/wasm-cached-oracle-summary.json",
+      "!**/native-search-a03/tests/wasm-uncached-oracle-summary.json"
     ]
   },
   "javascript": {

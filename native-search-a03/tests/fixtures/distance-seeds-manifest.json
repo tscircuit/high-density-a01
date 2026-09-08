@@ -1,0 +1,10 @@
+{
+  "referenceRevision": "e2e837d1379f4e2cb7cef9abddaf5408919a0012",
+  "referenceSourceSha256": "ca02beadd63e92213c2b8ec237ef018566ce688cf6a80db3a5c9666a880a7348",
+  "generatorSha256": "99b7f59580deebd310e85ecfffd1c802c72a986f5c86d343104058d290a7501b",
+  "steps": 55,
+  "plane": 1977,
+  "evicts": true,
+  "sha256": "819a5ebb1cd29eff183513e05515e014335f9ad7cf13ee8c919fcd04987bae9b",
+  "compressedSha256": "4295ba885bf599ef841f085d422702452b6004f2ba87a1d3b62a306edff4b148"
+}
