@@ -13,7 +13,7 @@ type SearchState = {
   totalRipEvents: number
 }
 
-test("A01 reuses numeric search storage while preserving its baseline route and rip-ups", () => {
+test("A01 reuses numeric search storage while retaining deterministic shared-copper routes", () => {
   const solver = new HighDensitySolverA01({
     ...defaultParams,
     nodeWithPortPoints: sample003,
@@ -27,7 +27,7 @@ test("A01 reuses numeric search storage while preserving its baseline route and 
   expect(pool.cellIdx).toBeInstanceOf(Float64Array)
   expect(pool.g).toBeInstanceOf(Float64Array)
   expect(pool.ripped.length).toBe(pool.length)
-  // Captured from the unoptimized 9a3a3d solver, including every route point.
+  // Captured after allowing all same-net routes to share copper.
   expect({
     solved: solver.solved,
     failed: solver.failed,
@@ -41,9 +41,9 @@ test("A01 reuses numeric search storage while preserving its baseline route and 
     solved: true,
     failed: false,
     error: null,
-    iterations: 3625,
-    rips: 7,
+    iterations: 2907,
+    rips: 2,
     routeHash:
-      "037cb669ef0f106257d7dfb02b43410a81f60e988777552e1e82189d9e6a5f6f",
+      "80ce24403d2d827ffd5f173c7c6bf3f4a458321acd8efd6465fc3b859e9f663d",
   })
 })

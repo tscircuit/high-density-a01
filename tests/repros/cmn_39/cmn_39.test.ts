@@ -169,7 +169,7 @@ test("cmn_39 A08 starts with the breakout pipeline stage", () => {
   expect(solver.innerSolver).toBeNull()
 })
 
-test("cmn_39 comparison logs A01 failing vs A08 solving", () => {
+test("cmn_39 A01 and A08 both solve after same-net copper sharing", () => {
   const a01Solver = getA01Solver()
   const a08Solver = getA08Solver()
 
@@ -193,8 +193,10 @@ test("cmn_39 comparison logs A01 failing vs A08 solving", () => {
     breakoutStats: a08Solver.breakoutSolver?.stats,
   })
 
-  expect(a01Solver.solved).toBeFalse()
-  expect(a01Solver.failed).toBeTrue()
+  expect(a01Solver.solved).toBeTrue()
+  expect(a01Solver.failed).toBeFalse()
+  validateNoIntersections(a01Solver.getOutput())
+  validateRouteGeometry(a01Solver.getOutput())
   expect(a08Solver.solved).toBeTrue()
   expect(a08Solver.failed).toBeFalse()
   expect(a08Solver.iterations).toBeGreaterThan(0)

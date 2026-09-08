@@ -7,7 +7,6 @@ import type { NodeWithPortPoints } from "../../lib/types"
 type SearchState = {
   activeConnId: number
   connNameToId: Map<string, number>
-  overlapFriendlyRootNets: Set<string>
   portOwnerFlat: Int32Array
   usedCellsFlat: Int32Array
   rootOverlapAllowed: Uint8Array
@@ -88,30 +87,24 @@ test("cached root overlap preserves sentinel and owner exemptions and refreshes 
     const c = state.connNameToId.get("c")!
     state.portOwnerFlat.fill(-1)
     state.usedCellsFlat.fill(-1)
-    for (const allowSharedRoot of [false, true]) {
-      if (allowSharedRoot) state.overlapFriendlyRootNets.add("shared")
-      else state.overlapFriendlyRootNets.delete("shared")
-      state.activeConnId = a
-      state.nextStamp()
-      const sharesRoot =
-        allowSharedRoot || solver instanceof HighDensitySolverA03
-      expect(state.rootOverlapAllowed[b] === 1).toBe(sharesRoot)
-      expect(state.rootOverlapAllowed[c]).toBe(0)
-      for (const owner of [-2, -1, a, b, c]) {
-        if (solver instanceof HighDensitySolverA01) {
-          const row = Math.floor(state.rows / 2)
-          const col = Math.floor(state.cols / 2)
-          const target = row * state.cols + col
-          state.portOwnerFlat[target] = owner
-          state.computeMoveCostAndRips(a, 0, row, col - 1, 0, row, col, null)
-        } else {
-          const target = 1
-          state.portOwnerFlat[target] = owner
-          state.computeMoveCostAndRips(a, 0, target, false, -1, 0, 0.1)
-        }
-        const blocked = owner === c || (owner === b && !sharesRoot)
-        expect(state._moveCost < 0).toBe(blocked)
+    state.activeConnId = a
+    state.nextStamp()
+    expect(state.rootOverlapAllowed[b] === 1).toBe(true)
+    expect(state.rootOverlapAllowed[c]).toBe(0)
+    for (const owner of [-2, -1, a, b, c]) {
+      if (solver instanceof HighDensitySolverA01) {
+        const row = Math.floor(state.rows / 2)
+        const col = Math.floor(state.cols / 2)
+        const target = row * state.cols + col
+        state.portOwnerFlat[target] = owner
+        state.computeMoveCostAndRips(a, 0, row, col - 1, 0, row, col, null)
+      } else {
+        const target = 1
+        state.portOwnerFlat[target] = owner
+        state.computeMoveCostAndRips(a, 0, target, false, -1, 0, 0.1)
       }
+      const blocked = owner === c
+      expect(state._moveCost < 0).toBe(blocked)
     }
     state.activeConnId = c
     state.nextStamp()
