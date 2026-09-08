@@ -7,7 +7,10 @@ type ViaOccupancyHarness = {
   usedCellsFlat: Int32Array
   rows: number
   cols: number
-  solvedRoutes: Map<number, Array<{ viaCells: Array<{ row: number; col: number }> }>>
+  solvedRoutes: Map<
+    number,
+    Array<{ viaCells: Array<{ row: number; col: number }> }>
+  >
   activeConnId: number
   nextStamp(): void
   ripTrace(id: number): void
@@ -23,16 +26,37 @@ test("ripping a route through a shared via retains the other route's full footpr
     ["foreign", [-0.8, 0.8], [0.8, 0.8], "foreign"],
   ] as const) {
     portPoints.push(
-      { connectionName: name, rootConnectionName: root, x: start[0], y: start[1], z: 0 },
-      { connectionName: name, rootConnectionName: root, x: end[0], y: end[1],
-        z: root === "shared" ? 1 : 0 },
+      {
+        connectionName: name,
+        rootConnectionName: root,
+        x: start[0],
+        y: start[1],
+        z: 0,
+      },
+      {
+        connectionName: name,
+        rootConnectionName: root,
+        x: end[0],
+        y: end[1],
+        z: root === "shared" ? 1 : 0,
+      },
     )
   }
   const solver = new HighDensitySolverA01({
-    nodeWithPortPoints: { capacityMeshNodeId: "shared-via", center: { x: 0, y: 0 },
-      width: 2, height: 2, availableZ: [0, 1], portPoints },
-    cellSizeMm: 0.2, viaDiameter: 0.3, traceThickness: 0.1, traceMargin: 0.1,
-    viaMinDistFromBorder: 0.8, hyperParameters: { shuffleSeed: 0 },
+    nodeWithPortPoints: {
+      capacityMeshNodeId: "shared-via",
+      center: { x: 0, y: 0 },
+      width: 2,
+      height: 2,
+      availableZ: [0, 1],
+      portPoints,
+    },
+    cellSizeMm: 0.2,
+    viaDiameter: 0.3,
+    traceThickness: 0.1,
+    traceMargin: 0.1,
+    viaMinDistFromBorder: 0.8,
+    hyperParameters: { shuffleSeed: 0 },
   })
   solver.solve()
   expect(solver.solved).toBe(true)
@@ -47,7 +71,9 @@ test("ripping a route through a shared via retains the other route's full footpr
   for (let round = 0; round < 2; round++) {
     state.activeConnId = foreign
     state.nextStamp()
-    expect(new Set(state.getViaOccupants(via.row, via.col, foreign))).toEqual(new Set([long, short]))
+    expect(new Set(state.getViaOccupants(via.row, via.col, foreign))).toEqual(
+      new Set([long, short]),
+    )
     const removed = state.usedCellsFlat[center]!
     const survivor = removed === long ? short : long
     state.ripTrace(removed)

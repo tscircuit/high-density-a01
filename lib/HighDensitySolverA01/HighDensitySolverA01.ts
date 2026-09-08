@@ -828,7 +828,10 @@ export class HighDensitySolverA01 extends BaseSolver {
         const crossingOwners = this.diagonalOwners[diagBase + crossingSlot]
         if (crossingOwners) {
           for (const crossingOcc of crossingOwners) {
-            if (crossingOcc !== activeConn && this.rootOverlapAllowed[crossingOcc] !== 1) {
+            if (
+              crossingOcc !== activeConn &&
+              this.rootOverlapAllowed[crossingOcc] !== 1
+            ) {
               this._moveCost = -1
               this._moveRipped = r
               return
@@ -1241,7 +1244,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           const existing = used[flatIdx]!
           const sameRoot =
             this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
-          const allowSameRootOverlap = sameRoot &&
+          const allowSameRootOverlap =
+            sameRoot &&
             this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
           if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
             continue
@@ -1278,10 +1282,14 @@ export class HighDensitySolverA01 extends BaseSolver {
             for (const existing of owners) {
               const sameRoot =
                 this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
-              const allowSameRootOverlap = sameRoot &&
+              const allowSameRootOverlap =
+                sameRoot &&
                 this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
-              if (existing !== connId && !allowSameRootOverlap &&
-                !displacedByVias.includes(existing)) {
+              if (
+                existing !== connId &&
+                !allowSameRootOverlap &&
+                !displacedByVias.includes(existing)
+              ) {
                 displacedByVias.push(existing)
               }
             }

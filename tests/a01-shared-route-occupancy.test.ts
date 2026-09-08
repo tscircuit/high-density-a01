@@ -15,9 +15,16 @@ type OccupancyHarness = {
   nextStamp(): void
   ripTrace(id: number): void
   getViaOccupants(row: number, col: number, active: number): number[]
-  computeMoveCostAndRips(active: number, fromZ: number, fromRow: number,
-    fromCol: number, toZ: number, toRow: number, toCol: number,
-    ripped: Ripped | null): void
+  computeMoveCostAndRips(
+    active: number,
+    fromZ: number,
+    fromRow: number,
+    fromCol: number,
+    toZ: number,
+    toRow: number,
+    toCol: number,
+    ripped: Ripped | null,
+  ): void
 }
 
 test("ripping a shared route preserves surviving cell, halo, and diagonal owners", (): void => {
@@ -29,14 +36,35 @@ test("ripping a shared route preserves surviving cell, halo, and diagonal owners
     ["foreign", [-1.8, 1.8], [1.8, 1.8], "foreign"],
   ] as const) {
     portPoints.push(
-      { connectionName: name, rootConnectionName: root, x: start[0], y: start[1], z: 0 },
-      { connectionName: name, rootConnectionName: root, x: end[0], y: end[1], z: 0 },
+      {
+        connectionName: name,
+        rootConnectionName: root,
+        x: start[0],
+        y: start[1],
+        z: 0,
+      },
+      {
+        connectionName: name,
+        rootConnectionName: root,
+        x: end[0],
+        y: end[1],
+        z: 0,
+      },
     )
   }
   const solver = new HighDensitySolverA01({
-    nodeWithPortPoints: { capacityMeshNodeId: "shared", center: { x: 0, y: 0 },
-      width: 4, height: 4, availableZ: [0], portPoints },
-    cellSizeMm: 0.2, viaDiameter: 0.3, traceThickness: 0.1, traceMargin: 0.1,
+    nodeWithPortPoints: {
+      capacityMeshNodeId: "shared",
+      center: { x: 0, y: 0 },
+      width: 4,
+      height: 4,
+      availableZ: [0],
+      portPoints,
+    },
+    cellSizeMm: 0.2,
+    viaDiameter: 0.3,
+    traceThickness: 0.1,
+    traceMargin: 0.1,
     hyperParameters: { shuffleSeed: 0 },
   })
   solver.solve()
@@ -59,7 +87,9 @@ test("ripping a shared route preserves surviving cell, halo, and diagonal owners
   expect(displaced).toEqual(new Set([long, short]))
   state.activeConnId = foreign
   state.nextStamp()
-  expect(new Set(state.getViaOccupants(9, 9, foreign))).toEqual(new Set([long, short]))
+  expect(new Set(state.getViaOccupants(9, 9, foreign))).toEqual(
+    new Set([long, short]),
+  )
 
   for (let round = 0; round < 2; round++) {
     const removed = state.usedCellsFlat[cell]!

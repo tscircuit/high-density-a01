@@ -156,9 +156,11 @@ test("move guards preserve ownership, endpoint exemptions and blocker scratch wi
         for (const traceOwner of [-1, a, b, c]) {
           for (const crossingOwner of [-1, a, b, c]) {
             state.usedCellsFlat[target] = traceOwner
-            state.cellOwners[target] = traceOwner === -1 ? undefined : [traceOwner]
+            state.cellOwners[target] =
+              traceOwner === -1 ? undefined : [traceOwner]
             state.usedDiagFlat[crossingIndex] = crossingOwner
-            state.diagonalOwners[crossingIndex] = crossingOwner === -1 ? undefined : [crossingOwner]
+            state.diagonalOwners[crossingIndex] =
+              crossingOwner === -1 ? undefined : [crossingOwner]
             tableReads = 0
             endReads = 0
             state.computeMoveCostAndRips(
