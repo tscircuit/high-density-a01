@@ -23,6 +23,8 @@ type IndexedWeightedHeuristic = (
 ) => number
 
 type SearchState = {
+  heuristicStamp: Uint32Array
+  weightedHeuristicValue: Float64Array
   getCachedWeightedH: IndexedWeightedHeuristic
   computeH: Heuristic
   totalRipEvents: number
@@ -44,7 +46,7 @@ function getResult(solver: HighDensitySolverA01): object {
 }
 
 test("A01 reuses exact heuristic values across duplicate nodes and invalidates on each search and stamp rollover", () => {
-  let requests = 0
+  let cacheReads = 0
   let computations = 0
   for (const nodeWithPortPoints of [
     sample002,
@@ -62,7 +64,17 @@ test("A01 reuses exact heuristic values across duplicate nodes and invalidates o
       ...defaultParams,
       nodeWithPortPoints,
     })
+    cached.setup()
     const cachedState = cached as unknown as SearchState
+    cachedState.weightedHeuristicValue = new Proxy(
+      cachedState.weightedHeuristicValue,
+      {
+        get(target, key) {
+          if (typeof key === "string" && /^\d+$/.test(key)) cacheReads++
+          return Reflect.get(target, key, target)
+        },
+      },
+    )
     const referenceState = reference as unknown as SearchState
     const getCachedWeightedH = cachedState.getCachedWeightedH.bind(cached)
     const computeH = cachedState.computeH.bind(cached)
@@ -71,7 +83,9 @@ test("A01 reuses exact heuristic values across duplicate nodes and invalidates o
       return computeH(...args)
     }
     cachedState.getCachedWeightedH = (flatIdx, ...coordinates): number => {
-      requests++
+      if (cachedState.heuristicStamp[flatIdx] === cachedState.stamp) {
+        throw new Error("A neighbor cache hit called the heuristic miss helper")
+      }
       const [z, row, col] = coordinates
       if (flatIdx !== (z * cached.rows + row) * cached.cols + col) {
         throw new Error(
@@ -95,7 +109,7 @@ test("A01 reuses exact heuristic values across duplicate nodes and invalidates o
     reference.solve()
     expect(getResult(cached)).toEqual(getResult(reference))
   }
-  expect(requests).toBeGreaterThan(computations)
+  expect(cacheReads).toBeGreaterThan(computations)
   expect(computations).toBeGreaterThan(0)
 
   const solver = new HighDensitySolverA01({

@@ -1348,9 +1348,15 @@ export class HighDensitySolverA03 extends BaseSolver {
     // independent of the scratch array used by later moves.
     const occs: ConnId[] = shouldCache ? [] : this._viaOccs
     occs.length = 0
+    const used = this.usedCellsFlat
+    const planeSize = this.planeSize
     for (const occCellId of this.getViaFootprint(cellId)) {
       for (let z = 0; z < this.layers; z++) {
-        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
+        const flatIdx = z * planeSize + occCellId
+        // Shared occupants always have a primary owner: removing the primary
+        // promotes a shared owner, and replacement clears the shared list.
+        if (used[flatIdx] === -1) continue
+        this.pushFlatOccupants(flatIdx, activeConn, occs)
       }
     }
     if (shouldCache) this.viaOccupantsByCell.set(cellId, occs)
@@ -1363,6 +1369,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     out: ConnId[],
   ): void {
     out.length = 0
+    if (this.usedCellsFlat[flatIdx] === -1) return
     this.pushFlatOccupants(flatIdx, activeConn, out)
   }
 

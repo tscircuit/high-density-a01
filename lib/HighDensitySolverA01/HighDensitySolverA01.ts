@@ -679,6 +679,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     const cellSizeMm = this.cellSizeMm
     const visited = this.visitedStamp
     const stamp = this.stamp
+    const heuristicStamp = this.heuristicStamp
+    const weightedHeuristic = this.weightedHeuristicValue
 
     // 6a. 8-directional lateral moves
     for (let d = 0; d < 8; d++) {
@@ -693,7 +695,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
       const f2 =
-        g2 + this.getCachedWeightedH(nIdx, z, nr, nc, endZ, endRow, endCol)
+        g2 +
+        (heuristicStamp[nIdx] === stamp
+          ? weightedHeuristic[nIdx]!
+          : this.getCachedWeightedH(nIdx, z, nr, nc, endZ, endRow, endCol))
 
       const newNodeIdx = this.nodePool.push(nIdx, g2, nodeIdx, this._moveRipped)
       this.heap.push(f2, newNodeIdx)
@@ -726,7 +731,10 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
         const f2 =
-          g2 + this.getCachedWeightedH(nIdx, nz, row, col, endZ, endRow, endCol)
+          g2 +
+          (heuristicStamp[nIdx] === stamp
+            ? weightedHeuristic[nIdx]!
+            : this.getCachedWeightedH(nIdx, nz, row, col, endZ, endRow, endCol))
 
         const newNodeIdx = this.nodePool.push(
           nIdx,
