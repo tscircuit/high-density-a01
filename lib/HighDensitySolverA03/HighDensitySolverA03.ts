@@ -15,6 +15,18 @@ type ConnId = number
 
 const EMPTY_OCCUPANTS: readonly ConnId[] = Object.freeze([])
 const MAX_LAYER_OCCUPANT_CACHE_CELLS = 65_536
+const MAX_DISTANCE_CACHE_SLOTS = 65_536
+const defaultMath = Math
+const defaultHypot = Math.hypot
+const applyFunction = Reflect.apply
+const sameValue = Object.is
+
+interface DistanceCacheTable {
+  dx: Float64Array
+  dy: Float64Array
+  distance: Float64Array
+  valid: Uint8Array
+}
 
 type RegionName = "left" | "top" | "right" | "bottom" | "middle"
 
@@ -418,6 +430,12 @@ export class HighDensitySolverA03 extends BaseSolver {
   private heap!: TypedMinHeap
   private ripChain!: TypedRipChain
 
+  // FIFO goal tables retain exact same-engine distances across searches. The
+  // numeric payload is bounded to 65,536 * 25 = 1,638,400 bytes, plus table headers.
+  private distanceByGoal = new Map<number, DistanceCacheTable>()
+  private distanceCacheSlots = 0
+  private distanceCacheCapacity = 0
+
   private _viaOccs: ConnId[] = []
   private viaOccupantsByCell = new Map<number, ConnId[]>()
   private viaFootprintByCell = new Map<number, Int32Array>()
@@ -560,6 +578,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.clearDistanceCache()
     this.viaFootprintByCell.clear()
     this.clearLayerOccupantCache()
     const { nodeWithPortPoints } = this
@@ -699,6 +718,16 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.nodePool = new TypedNodePool()
     this.heap = new TypedMinHeap()
     this.ripChain = new TypedRipChain()
+    // Capacity is only an allocation bound, independent of live point geometry.
+    // Do not introduce a new read of a customized public planeSize getter.
+    const size = Object.getOwnPropertyDescriptor(this, "planeSize")?.value
+    if (
+      Number.isInteger(size) &&
+      size > 0 &&
+      size <= MAX_DISTANCE_CACHE_SLOTS
+    ) {
+      this.distanceCacheCapacity = size
+    }
   }
 
   override _step(): void {
@@ -710,6 +739,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.viaOccupantsByCell.clear()
       this.viaFootprintByCell.clear()
       this.clearLayerOccupantCache()
+      this.clearDistanceCache()
     }
   }
 
@@ -1560,13 +1590,71 @@ export class HighDensitySolverA03 extends BaseSolver {
     toZ: number,
     toCellId: number,
   ): number {
-    const dist = Math.hypot(
-      this.cellCenterX[cellId]! - this.cellCenterX[toCellId]!,
-      this.cellCenterY[cellId]! - this.cellCenterY[toCellId]!,
-    )
+    // Resolve the callee before its arguments, including custom getters. Reading
+    // both displacements on every call also preserves mutable point geometry.
+    const math = Math
+    const hypot = math.hypot
+    const dx = this.cellCenterX[cellId]! - this.cellCenterX[toCellId]!
+    const dy = this.cellCenterY[cellId]! - this.cellCenterY[toCellId]!
+    let dist: number
+    const usesDefaultHypot = math === defaultMath && hypot === defaultHypot
+    const size = this.distanceCacheCapacity
+    if (
+      usesDefaultHypot &&
+      typeof dx === "number" &&
+      typeof dy === "number" &&
+      size > 0 &&
+      Number.isInteger(cellId) &&
+      cellId >= 0 &&
+      cellId < size &&
+      Number.isInteger(toCellId) &&
+      toCellId >= 0 &&
+      toCellId < size
+    ) {
+      let table = this.distanceByGoal.get(toCellId)
+      if (!table) {
+        while (this.distanceCacheSlots + size > MAX_DISTANCE_CACHE_SLOTS) {
+          const oldestGoal = this.distanceByGoal.keys().next().value!
+          this.distanceCacheSlots -=
+            this.distanceByGoal.get(oldestGoal)!.valid.length
+          this.distanceByGoal.delete(oldestGoal)
+        }
+        table = {
+          dx: new Float64Array(size),
+          dy: new Float64Array(size),
+          distance: new Float64Array(size),
+          valid: new Uint8Array(size),
+        }
+        this.distanceByGoal.set(toCellId, table)
+        this.distanceCacheSlots += size
+      }
+      if (
+        table.valid[cellId] === 1 &&
+        sameValue(table.dx[cellId], dx) &&
+        sameValue(table.dy[cellId], dy)
+      ) {
+        dist = table.distance[cellId]!
+      } else {
+        dist = hypot(dx, dy)
+        table.dx[cellId] = dx
+        table.dy[cellId] = dy
+        table.distance[cellId] = dist
+        table.valid[cellId] = 1
+      }
+    } else {
+      dist = usesDefaultHypot
+        ? hypot(dx, dy)
+        : applyFunction(hypot, math, [dx, dy])
+    }
 
     if (z === toZ) return dist
     return dist + this.hyperParameters.viaBaseCost
+  }
+
+  private clearDistanceCache(): void {
+    this.distanceByGoal.clear()
+    this.distanceCacheSlots = 0
+    this.distanceCacheCapacity = 0
   }
 
   private internConn(name: string, rootNetName?: string): ConnId {
