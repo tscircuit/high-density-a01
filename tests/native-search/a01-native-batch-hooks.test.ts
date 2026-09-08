@@ -50,6 +50,17 @@ test("batch guards preserve custom methods, progress hooks, accessors and unusua
     })
   mutations.push(
     (s) => {
+      s.hyperParameters.ripCost = 1n
+    },
+    (s) => {
+      s.cellSizeMm = {
+        valueOf() {
+          s.reads++
+          return 0.1
+        },
+      }
+    },
+    (s) => {
       s.stepMultiplier = 2
     },
     (s) => {

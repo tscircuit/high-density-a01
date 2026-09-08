@@ -95,6 +95,7 @@ const releasedExports: KernelExports = Object.freeze({
   kernel_pointer: throwReleased,
   kernel_begin: throwReleased,
   kernel_advance: throwReleased,
+  kernel_advance_many: throwReleased,
   kernel_collect_goal: throwReleased,
   kernel_clear: throwReleased,
 })

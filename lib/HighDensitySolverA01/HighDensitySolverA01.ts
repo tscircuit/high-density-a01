@@ -726,6 +726,18 @@ export class HighDensitySolverA01 extends BaseSolver {
     ]) {
       if (!dataProperty(hp, name)) return 0
     }
+    // Non-number values can invoke user coercion callbacks or throw at the
+    // WASM boundary. Preserve their per-step conversion on the ordinary path.
+    if (
+      typeof this.cellSizeMm !== "number" ||
+      typeof this.penaltyCap !== "number" ||
+      typeof hp.viaBaseCost !== "number" ||
+      typeof hp.ripCost !== "number" ||
+      typeof hp.ripTracePenalty !== "number" ||
+      typeof hp.ripViaPenalty !== "number" ||
+      typeof hp.greedyMultiplier !== "number"
+    )
+      return 0
     for (const value of [
       this.iterations,
       this.MAX_ITERATIONS,
