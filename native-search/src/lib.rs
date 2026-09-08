@@ -41,39 +41,43 @@ fn js_max(a: f64, b: f64) -> f64 {
     }
 }
 
+#[derive(Clone, Copy)]
+struct HeapEntry {
+    f: f64,
+    id: u32,
+}
+
 #[derive(Default)]
 struct Heap {
-    f: Vec<f64>,
-    id: Vec<u32>,
+    entries: Vec<HeapEntry>,
 }
 impl Heap {
     fn clear(&mut self) {
-        self.f.clear();
-        self.id.clear();
+        self.entries.clear();
     }
     fn push(&mut self, f: f64, id: u32) {
-        let mut i = self.f.len();
-        self.f.push(f);
-        self.id.push(id);
+        let entry = HeapEntry { f, id };
+        let mut i = self.entries.len();
+        self.entries.push(entry);
         while i > 0 {
             let p = (i - 1) >> 1;
-            let pf = self.f[p];
-            let pi = self.id[p];
-            if if pf != f { pf < f } else { pi < id } {
+            let parent = self.entries[p];
+            if if parent.f != f {
+                parent.f < f
+            } else {
+                parent.id < id
+            } {
                 break;
             }
-            self.f[i] = pf;
-            self.id[i] = pi;
+            self.entries[i] = parent;
             i = p;
         }
-        self.f[i] = f;
-        self.id[i] = id;
+        self.entries[i] = entry;
     }
     fn pop(&mut self) -> u32 {
-        let out = self.id[0];
-        let f = self.f.pop().unwrap();
-        let id = self.id.pop().unwrap();
-        let n = self.f.len();
+        let out = self.entries[0].id;
+        let entry = self.entries.pop().unwrap();
+        let n = self.entries.len();
         if n > 0 {
             let mut i = 0;
             loop {
@@ -84,52 +88,56 @@ impl Heap {
                 let right = left + 1;
                 let mut child = left;
                 if right < n {
-                    let lf = self.f[left];
-                    let rf = self.f[right];
-                    if !(if lf != rf {
-                        lf < rf
+                    let left_entry = self.entries[left];
+                    let right_entry = self.entries[right];
+                    if !(if left_entry.f != right_entry.f {
+                        left_entry.f < right_entry.f
                     } else {
-                        self.id[left] < self.id[right]
+                        left_entry.id < right_entry.id
                     }) {
                         child = right;
                     }
                 }
-                let cf = self.f[child];
-                let ci = self.id[child];
-                if if f != cf { f < cf } else { id < ci } {
+                let child_entry = self.entries[child];
+                if if entry.f != child_entry.f {
+                    entry.f < child_entry.f
+                } else {
+                    entry.id < child_entry.id
+                } {
                     break;
                 }
-                self.f[i] = cf;
-                self.id[i] = ci;
+                self.entries[i] = child_entry;
                 i = child;
             }
-            self.f[i] = f;
-            self.id[i] = id;
+            self.entries[i] = entry;
         }
         out
     }
 }
 
+struct SearchNode {
+    cell: f64,
+    g: f64,
+    parent: i32,
+    ripped: i32,
+}
+
 #[derive(Default)]
 struct Pool {
-    cell: Vec<f64>,
-    g: Vec<f64>,
-    parent: Vec<i32>,
-    ripped: Vec<i32>,
+    nodes: Vec<SearchNode>,
 }
 impl Pool {
     fn clear(&mut self) {
-        self.cell.clear();
-        self.g.clear();
-        self.parent.clear();
-        self.ripped.clear();
+        self.nodes.clear();
     }
     fn push(&mut self, cell: usize, g: f64, parent: i32, ripped: i32) -> u32 {
-        let id = self.cell.len() as u32;
-        self.cell.push(cell as f64);
-        self.g.push(g);
-        self.parent.push(parent);
-        self.ripped.push(ripped);
+        let id = self.nodes.len() as u32;
+        self.nodes.push(SearchNode {
+            cell: cell as f64,
+            g,
+            parent,
+            ripped,
+        });
         id
     }
 }
@@ -278,7 +286,7 @@ impl Kernel {
         let f = self.weighted_h(cell, z, row, col);
         let id = self.pool.push(cell, 0.0, -1, -1);
         self.heap.push(f, id);
-        self.state[0] = self.heap.id.len() as u32;
+        self.state[0] = self.heap.entries.len() as u32;
     }
     fn weighted_h(&mut self, cell: usize, z: usize, row: usize, col: usize) -> f64 {
         if self.h_stamp[cell] == self.stamp {
@@ -428,11 +436,11 @@ impl Kernel {
         (cost, list)
     }
     fn advance(&mut self) -> u32 {
-        if self.heap.id.is_empty() {
+        if self.heap.entries.is_empty() {
             return 2;
         }
         let id = self.heap.pop() as usize;
-        let cell = self.pool.cell[id] as usize;
+        let cell = self.pool.nodes[id].cell as usize;
         if self.visited[cell] == self.stamp {
             return 0;
         }
@@ -441,8 +449,8 @@ impl Kernel {
         let in_plane = cell - z * self.plane;
         let row = in_plane / self.cols;
         let col = in_plane - row * self.cols;
-        let g = self.pool.g[id];
-        let ripped = self.pool.ripped[id];
+        let g = self.pool.nodes[id].g;
+        let ripped = self.pool.nodes[id].ripped;
         if z == self.config[3] as usize
             && row == self.config[4] as usize
             && col == self.config[5] as usize
@@ -501,12 +509,12 @@ impl Kernel {
         self.result_rips.clear();
         let mut id = self.goal;
         while id >= 0 {
-            self.result_cells.push(self.pool.cell[id as usize]);
-            id = self.pool.parent[id as usize];
+            self.result_cells.push(self.pool.nodes[id as usize].cell);
+            id = self.pool.nodes[id as usize].parent;
         }
         self.result_cells.reverse();
         if self.goal >= 0 {
-            let mut list = self.pool.ripped[self.goal as usize];
+            let mut list = self.pool.nodes[self.goal as usize].ripped;
             while list >= 0 {
                 let rip = &self.rips[list as usize];
                 self.result_rips.push(rip.id);
@@ -582,7 +590,7 @@ pub extern "C" fn kernel_advance(
     let k = kernel();
     k.set_costs(cell, via, rip, trace, via_rip, greedy, cap);
     let result = k.advance();
-    k.state[0] = k.heap.id.len() as u32;
+    k.state[0] = k.heap.entries.len() as u32;
     result
 }
 #[no_mangle]
