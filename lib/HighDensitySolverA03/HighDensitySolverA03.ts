@@ -1171,6 +1171,9 @@ export class HighDensitySolverA03 extends BaseSolver {
     for (let i = neighborStart; i < neighborEnd; i++) {
       const neighborCellId = this.neighborIds[i]!
       const nextFlatIdx = z * this.planeSize + neighborCellId
+      // Search states are keyed only by layer and cell. A closed destination
+      // cannot be expanded again, regardless of its move cost or rip history.
+      if (visited[nextFlatIdx] === stamp) continue
 
       this.computeMoveCostAndRips(
         activeConn,
@@ -1218,6 +1221,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+        if (visited[nextFlatIdx] === stamp) continue
 
         this.computeMoveCostAndRips(
           activeConn,
