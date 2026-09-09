@@ -59,9 +59,10 @@ impl Heap {
         let entry = HeapEntry { f, id };
         let mut i = self.entries.len();
         self.entries.push(entry);
+        let entries = self.entries.as_mut_slice();
         while i > 0 {
             let p = (i - 1) >> 1;
-            let parent = self.entries[p];
+            let parent = entries[p];
             if if parent.f != f {
                 parent.f < f
             } else {
@@ -69,15 +70,16 @@ impl Heap {
             } {
                 break;
             }
-            self.entries[i] = parent;
+            entries[i] = parent;
             i = p;
         }
-        self.entries[i] = entry;
+        entries[i] = entry;
     }
     fn pop(&mut self) -> u32 {
         let out = self.entries[0].id;
         let entry = self.entries.pop().unwrap();
-        let n = self.entries.len();
+        let entries = self.entries.as_mut_slice();
+        let n = entries.len();
         if n > 0 {
             let mut i = 0;
             loop {
@@ -88,8 +90,8 @@ impl Heap {
                 let right = left + 1;
                 let mut child = left;
                 if right < n {
-                    let left_entry = self.entries[left];
-                    let right_entry = self.entries[right];
+                    let left_entry = entries[left];
+                    let right_entry = entries[right];
                     if !(if left_entry.f != right_entry.f {
                         left_entry.f < right_entry.f
                     } else {
@@ -98,7 +100,7 @@ impl Heap {
                         child = right;
                     }
                 }
-                let child_entry = self.entries[child];
+                let child_entry = entries[child];
                 if if entry.f != child_entry.f {
                     entry.f < child_entry.f
                 } else {
@@ -106,10 +108,10 @@ impl Heap {
                 } {
                     break;
                 }
-                self.entries[i] = child_entry;
+                entries[i] = child_entry;
                 i = child;
             }
-            self.entries[i] = entry;
+            entries[i] = entry;
         }
         out
     }
@@ -698,3 +700,6 @@ mod batch_tests {
         assert_eq!(k.state[0], 1);
     }
 }
+
+#[cfg(test)]
+mod heap_slice_tests;
