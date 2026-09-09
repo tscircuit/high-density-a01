@@ -89,18 +89,18 @@ impl Heap {
                 }
                 let right = left + 1;
                 let mut child = left;
+                let mut child_entry = entries[left];
                 if right < n {
-                    let left_entry = entries[left];
                     let right_entry = entries[right];
-                    if !(if left_entry.f != right_entry.f {
-                        left_entry.f < right_entry.f
+                    if !(if child_entry.f != right_entry.f {
+                        child_entry.f < right_entry.f
                     } else {
-                        left_entry.id < right_entry.id
+                        child_entry.id < right_entry.id
                     }) {
                         child = right;
+                        child_entry = right_entry;
                     }
                 }
-                let child_entry = entries[child];
                 if if entry.f != child_entry.f {
                     entry.f < child_entry.f
                 } else {
