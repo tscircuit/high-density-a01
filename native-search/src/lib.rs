@@ -50,12 +50,98 @@ struct HeapEntry {
 #[derive(Default)]
 struct Heap {
     entries: Vec<HeapEntry>,
+    // Remain on the original comparator for the rest of this search after
+    // an exceptional priority, even if its entry is subsequently popped.
+    legacy_priority_order: bool,
 }
 impl Heap {
     fn clear(&mut self) {
         self.entries.clear();
+        self.legacy_priority_order = false;
     }
     fn push(&mut self, f: f64, id: u32) {
+        // Unsigned IEEE bits preserve ordering from +0 through +Infinity.
+        // This one test rejects every negative bit pattern (including -0)
+        // and every positive NaN before the new entry reaches the heap.
+        self.legacy_priority_order |= f.to_bits() > f64::INFINITY.to_bits();
+        if self.legacy_priority_order {
+            self.push_legacy(f, id);
+        } else {
+            self.push_positive(f, id);
+        }
+    }
+    fn pop(&mut self) -> u32 {
+        if self.legacy_priority_order {
+            self.pop_legacy()
+        } else {
+            self.pop_positive()
+        }
+    }
+    fn push_positive(&mut self, f: f64, id: u32) {
+        let entry = HeapEntry { f, id };
+        let priority = f.to_bits();
+        let mut i = self.entries.len();
+        self.entries.push(entry);
+        while i > 0 {
+            let p = (i - 1) >> 1;
+            let parent = self.entries[p];
+            let parent_priority = parent.f.to_bits();
+            if if parent_priority != priority {
+                parent_priority < priority
+            } else {
+                parent.id < id
+            } {
+                break;
+            }
+            self.entries[i] = parent;
+            i = p;
+        }
+        self.entries[i] = entry;
+    }
+    fn pop_positive(&mut self) -> u32 {
+        let out = self.entries[0].id;
+        let entry = self.entries.pop().unwrap();
+        let priority = entry.f.to_bits();
+        let n = self.entries.len();
+        if n > 0 {
+            let mut i = 0;
+            loop {
+                let left = i * 2 + 1;
+                if left >= n {
+                    break;
+                }
+                let right = left + 1;
+                let mut child = left;
+                if right < n {
+                    let left_entry = self.entries[left];
+                    let right_entry = self.entries[right];
+                    let left_priority = left_entry.f.to_bits();
+                    let right_priority = right_entry.f.to_bits();
+                    if !(if left_priority != right_priority {
+                        left_priority < right_priority
+                    } else {
+                        left_entry.id < right_entry.id
+                    }) {
+                        child = right;
+                    }
+                }
+                let child_entry = self.entries[child];
+                let child_priority = child_entry.f.to_bits();
+                if if priority != child_priority {
+                    priority < child_priority
+                } else {
+                    entry.id < child_entry.id
+                } {
+                    break;
+                }
+                self.entries[i] = child_entry;
+                i = child;
+            }
+            self.entries[i] = entry;
+        }
+        out
+    }
+    fn push_legacy(&mut self, f: f64, id: u32) {
         let entry = HeapEntry { f, id };
         let mut i = self.entries.len();
         self.entries.push(entry);
@@ -74,7 +160,7 @@ impl Heap {
         }
         self.entries[i] = entry;
     }
-    fn pop(&mut self) -> u32 {
+    fn pop_legacy(&mut self) -> u32 {
         let out = self.entries[0].id;
         let entry = self.entries.pop().unwrap();
         let n = self.entries.len();
@@ -698,3 +784,6 @@ mod batch_tests {
         assert_eq!(k.state[0], 1);
     }
 }
+
+#[cfg(test)]
+mod positive_heap_tests;
