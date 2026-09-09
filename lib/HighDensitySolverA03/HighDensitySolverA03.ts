@@ -328,6 +328,13 @@ export interface HighDensitySolverA03Props {
    * fixed grid/footprint data during each search. Direct edits use dense mode.
    */
   viaOccupantQuery?: "dense" | "owner-runs"
+  /**
+   * Selected during setup. Physical expansion shares one through-via
+   * transition across destination layers. It requires canonical search hooks
+   * and geometry, occupancy and numeric costs fixed during each expansion.
+   * Immutable rip histories may share their backing entries across layers.
+   */
+  viaExpansion?: "per-layer" | "physical"
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
@@ -370,6 +377,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   enableDiagonalMoves: boolean
   stepMultiplier: number
   viaOccupantQuery: "dense" | "owner-runs"
+  viaExpansion: "per-layer" | "physical"
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
 
@@ -410,6 +418,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private orderedOwnerRows: OrderedOwnerRows | null = null
   private useOrderedOwnerRows = false
+  private usePhysicalViaExpansion = false
   private usedCellsFlat!: Int32Array
   private sharedCellsFlat!: Array<number[] | undefined>
   private portOwnerFlat!: Int32Array
@@ -537,6 +546,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.enableDiagonalMoves = props.enableDiagonalMoves ?? false
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.viaOccupantQuery = props.viaOccupantQuery ?? "dense"
+    this.viaExpansion = props.viaExpansion ?? "per-layer"
     this.hyperParameters = {
       shuffleSeed: 0,
       ripCost: 8,
@@ -562,6 +572,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         maxCellCount: this.maxCellCount,
         stepMultiplier: this.stepMultiplier,
         viaOccupantQuery: this.viaOccupantQuery,
+        viaExpansion: this.viaExpansion,
         traceThickness: this.traceThickness,
         traceMargin: this.traceMargin,
         viaMinDistFromBorder: this.viaMinDistFromBorder,
@@ -578,6 +589,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   override _setup(): void {
     this.orderedOwnerRows = null
     this.useOrderedOwnerRows = this.viaOccupantQuery === "owner-runs"
+    this.usePhysicalViaExpansion = this.viaExpansion === "physical"
     const { nodeWithPortPoints } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -1266,6 +1278,18 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
 
     if (this.viaAllowed[cellId]) {
+      if (this.usePhysicalViaExpansion && this.layers > 2) {
+        this.expandPhysicalVia(
+          nodeIdx,
+          z,
+          cellId,
+          g,
+          rippedHead,
+          ripCount,
+          canBoundMoveCost,
+        )
+        return
+      }
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
@@ -1324,6 +1348,115 @@ export class HighDensitySolverA03 extends BaseSolver {
         )
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
+    }
+  }
+
+  private expandPhysicalVia(
+    nodeIdx: number,
+    z: number,
+    cellId: number,
+    g: number,
+    rippedHead: number,
+    ripCount: number,
+    canBoundMoveCost: boolean,
+  ): void {
+    const visited = this.visitedStamp
+    const stamp = this.stamp
+    const activeConn = this.activeConnId
+    const seg = this.activeConnSeg!
+    const destinations: number[] = []
+    let sawRejectedPort = false
+    let lastPortRejected = false
+
+    for (let nz = 0; nz < this.layers; nz++) {
+      if (nz === z) continue
+      const nextFlatIdx = nz * this.planeSize + cellId
+      if (visited[nextFlatIdx] === stamp) continue
+      if (canBoundMoveCost && this.bestGStamp[nextFlatIdx] === stamp) {
+        const baseCost =
+          0 +
+          this.hyperParameters.viaBaseCost +
+          Math.min(this.penalty2d[cellId]!, this.penaltyCap)
+        if (
+          Number.isFinite(baseCost) &&
+          g + baseCost >= this.bestGValue[nextFlatIdx]!
+        ) {
+          continue
+        }
+      }
+
+      const fixedOwner = this.portOwnerFlat[nextFlatIdx]!
+      const allowFixedOverlap = this.allowSharedUse(activeConn, fixedOwner)
+      const isSegEnd = nz === seg.endZ && cellId === seg.endCellId
+      if (
+        fixedOwner >= 0 &&
+        fixedOwner !== activeConn &&
+        !allowFixedOverlap &&
+        !isSegEnd
+      ) {
+        sawRejectedPort = true
+        lastPortRejected = true
+        continue
+      }
+      lastPortRejected = false
+      destinations.push(nz)
+    }
+
+    if (destinations.length === 0) {
+      if (sawRejectedPort) {
+        this._moveCost = -1
+        this._moveRippedHead = rippedHead
+      }
+      return
+    }
+
+    // A through via encounters the same ordered occupants on every layer.
+    // Build its cost and immutable rip history once, then branch by layer.
+    this.computeMoveCostAndRips(
+      activeConn,
+      destinations[0]!,
+      cellId,
+      true,
+      rippedHead,
+      ripCount,
+      0,
+    )
+    const moveCost = this._moveCost
+    const moveRippedHead = this._moveRippedHead
+    const moveRipCount = this._moveRipCount
+    if (!(moveCost < 0)) {
+      for (let i = 0; i < destinations.length; i++) {
+        const nz = destinations[i]!
+        const nextFlatIdx = nz * this.planeSize + cellId
+        const nextStateIdx = this.getSearchStateIdx(nextFlatIdx, moveRipCount)
+        if (visited[nextStateIdx] === stamp) continue
+        const g2 = g + moveCost
+        if (
+          this.bestGStamp[nextStateIdx] === stamp &&
+          g2 >= this.bestGValue[nextStateIdx]!
+        ) {
+          continue
+        }
+        this.bestGStamp[nextStateIdx] = stamp
+        this.bestGValue[nextStateIdx] = g2
+        const f2 =
+          g2 +
+          this.computeH(nz, cellId, seg.endZ, seg.endCellId) *
+            this.hyperParameters.greedyMultiplier
+        const newNodeIdx = this.nodePool.push(
+          nz,
+          cellId,
+          g2,
+          nodeIdx,
+          moveRippedHead,
+          moveRipCount,
+        )
+        this.heap.push(f2, this.seqCounter++, newNodeIdx)
+      }
+    }
+    if (lastPortRejected) {
+      this._moveCost = -1
+      this._moveRippedHead = rippedHead
     }
   }
 

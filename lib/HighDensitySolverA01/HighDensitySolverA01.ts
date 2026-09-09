@@ -11,6 +11,7 @@ import type {
   NodeWithPortPoints,
   PortPoint,
 } from "../types"
+import { OccupiedRowRuns } from "./OccupiedRowRuns"
 
 // --- Interned connection ID ---
 type ConnId = number
@@ -204,6 +205,18 @@ export interface HighDensitySolverA01Props {
   viaDiameter: number
   maxCellCount?: number
   stepMultiplier?: number
+  /**
+   * Selected during setup. Row runs require the solver's canonical occupancy
+   * writes and fixed grid/footprint data; direct array edits use dense mode.
+   */
+  viaOccupantQuery?: "dense" | "row-runs"
+  /**
+   * A physical expansion emits every eligible destination from one through-via
+   * transition. It requires canonical transition and heuristic methods, pure rip
+   * costs, and fixed cost, occupancy and destination data throughout an expansion.
+   * Stateful custom hooks must use per-layer mode.
+   */
+  viaExpansion?: "per-layer" | "physical"
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
@@ -242,6 +255,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   showUsedCellMap: boolean
   effort: number
   stepMultiplier: number
+  viaOccupantQuery: "dense" | "row-runs"
+  viaExpansion: "per-layer" | "physical"
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
@@ -268,6 +283,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   // --- Flat arrays ---
   private planeSize!: number // rows * cols
   private usedCellsFlat!: Int32Array // layers * planeSize; -1 = empty
+  private occupiedRows: OccupiedRowRuns | null = null
   private portOwnerFlat!: Int32Array // layers * planeSize; -1 = none, -2 = shared
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
@@ -279,6 +295,11 @@ export class HighDensitySolverA01 extends BaseSolver {
   private viaOccupantScanOffsetsDr!: Int32Array
   private viaOccupantScanOffsetsDc!: Int32Array
   private viaOccupantScanOffsetsLen!: number
+  private viaOccupantScanRows: Array<{
+    row: number
+    firstColumn: number
+    lastColumn: number
+  }> = []
   private viaOwnersByCell!: Map<number, Set<ConnId>>
   private viaCenterIndicesByConn!: number[][]
   private viaTraceClearanceMm!: number
@@ -362,6 +383,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
+    this.viaOccupantQuery = props.viaOccupantQuery ?? "dense"
+    this.viaExpansion = props.viaExpansion ?? "per-layer"
     this.hyperParameters = {
       shuffleSeed: 0,
       ripCost: 10,
@@ -384,6 +407,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         viaDiameter: this.viaDiameter,
         maxCellCount: this.maxCellCount,
         stepMultiplier: this.stepMultiplier,
+        viaOccupantQuery: this.viaOccupantQuery,
+        viaExpansion: this.viaExpansion,
         traceThickness: this.traceThickness,
         traceMargin: this.traceMargin,
         viaMinDistFromBorder: this.viaMinDistFromBorder,
@@ -397,6 +422,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.occupiedRows = null
+    this.viaOccupantScanRows = []
     const { nodeWithPortPoints, cellSizeMm } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -474,6 +501,16 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Flat used cells (Int32Array, -1 = empty)
     this.usedCellsFlat = new Int32Array(totalCells).fill(-1)
+    if (
+      this.viaOccupantQuery === "row-runs" &&
+      this.rows > 0 &&
+      this.cols > 0
+    ) {
+      this.occupiedRows = new OccupiedRowRuns(
+        this.cols,
+        this.layers * this.rows,
+      )
+    }
     this.portOwnerFlat = new Int32Array(totalCells).fill(-1)
     this.usedDiagFlat = new Int32Array(totalDiags).fill(-1)
 
@@ -490,6 +527,27 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.viaOccupantScanOffsetsLen = viaOccupantScanOffsets.length
     this.viaOccupantScanOffsetsDr = viaOccupantScanOffsets.rowOffsets
     this.viaOccupantScanOffsetsDc = viaOccupantScanOffsets.columnOffsets
+    if (this.occupiedRows) {
+      for (let i = 0; i < this.viaOccupantScanOffsetsLen; i++) {
+        const row = this.viaOccupantScanOffsetsDr[i]!
+        const column = this.viaOccupantScanOffsetsDc[i]!
+        const previous =
+          this.viaOccupantScanRows[this.viaOccupantScanRows.length - 1]
+        if (
+          previous &&
+          previous.row === row &&
+          previous.lastColumn + 1 === column
+        ) {
+          previous.lastColumn = column
+        } else {
+          this.viaOccupantScanRows.push({
+            row,
+            firstColumn: column,
+            lastColumn: column,
+          })
+        }
+      }
+    }
     this.viaOwnersByCell = new Map()
     this.viaCenterIndicesByConn = []
     this.viaTraceClearanceMm = this.viaDiameter / 2 + this.traceThickness / 2
@@ -707,6 +765,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       col <= this.maxViaCol
 
     if (canVia) {
+      if (this.viaExpansion === "physical" && this.layers > 2) {
+        this.expandPhysicalVia(nodeIdx, node)
+        return
+      }
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
 
@@ -742,6 +804,73 @@ export class HighDensitySolverA01 extends BaseSolver {
         })
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
+    }
+  }
+
+  private expandPhysicalVia(nodeIdx: number, node: SearchNode): void {
+    const { z, row, col, g, ripped } = node
+    const seg = this.activeConnSeg!
+    const activeConn = this.activeConnId
+    const destinations: number[] = []
+
+    // A through-via occupies every layer. Only the destination's fixed-port
+    // exception and visited state depend on which layer it enters.
+    for (let nz = 0; nz < this.layers; nz++) {
+      if (nz === z) continue
+      const flatIdx = (nz * this.rows + row) * this.cols + col
+      if (this.visitedStamp[flatIdx] === this.stamp) continue
+      const fixedOwner = this.portOwnerFlat[flatIdx]!
+      const fixedSameRoot =
+        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
+      const allowFixedOverlap =
+        fixedSameRoot &&
+        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+      const isSegEnd =
+        nz === seg.endZ && row === seg.endRow && col === seg.endCol
+      if (
+        fixedOwner >= 0 &&
+        fixedOwner !== activeConn &&
+        !allowFixedOverlap &&
+        !isSegEnd
+      ) {
+        continue
+      }
+      destinations.push(nz)
+    }
+    if (destinations.length === 0) return
+
+    this.computeMoveCostAndRips(
+      activeConn,
+      z,
+      row,
+      col,
+      destinations[0]!,
+      row,
+      col,
+      ripped,
+    )
+    if (this._moveCost < 0) return
+    const g2 = g + this._moveCost
+    const transitionRipped = this._moveRipped
+
+    // The immutable rip history belongs to this physical transition; each
+    // destination retains its own heuristic and original queue position.
+    for (const nz of destinations) {
+      const f2 =
+        g2 +
+        this.computeH(nz, row, col, seg.endZ, seg.endRow, seg.endCol) *
+          this.hyperParameters.greedyMultiplier
+      const newNodeIdx = this.nodePool.length
+      this.nodePool.push({
+        z: nz,
+        row,
+        col,
+        g: g2,
+        f: f2,
+        parentIdx: nodeIdx,
+        ripped: transitionRipped,
+      })
+      this.heap.push(f2, this.seqCounter++, newNodeIdx)
     }
   }
 
@@ -911,6 +1040,67 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Via footprint unique occupants (fills _viaOccs scratch array) ---
   private fillViaOccupants(row: number, col: number, activeConn: ConnId): void {
+    const index = this.occupiedRows
+    if (!index) {
+      this.fillViaOccupantsDense(row, col, activeConn)
+      return
+    }
+
+    const occs = this._viaOccs
+    occs.length = 0
+    const spans = this.viaOccupantScanRows
+    for (let z = 0; z < this.layers; z++) {
+      const layerRow = z * this.rows
+      for (let i = 0; i < spans.length; i++) {
+        const span = spans[i]!
+        const r = row + span.row
+        if (r < 0 || r >= this.rows) continue
+        let first = col + span.firstColumn
+        let last = col + span.lastColumn
+        if (first < 0) first = 0
+        if (last >= this.cols) last = this.cols - 1
+        if (first > last) continue
+        const runs = index.rows[layerRow + r]
+        if (!runs) continue
+
+        let left = 0
+        let right = runs.length
+        while (left < right) {
+          const mid = (left + right) >>> 1
+          if (runs[mid]!.end < first) left = mid + 1
+          else right = mid
+        }
+        for (let j = left; j < runs.length; j++) {
+          const run = runs[j]!
+          if (run.start > last) break
+          const occ = run.owner
+          if (occ === activeConn) continue
+          const sameRoot =
+            this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
+          if (
+            sameRoot &&
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          ) {
+            continue
+          }
+          let seen = false
+          for (let k = 0; k < occs.length; k++) {
+            if (occs[k] === occ) {
+              seen = true
+              break
+            }
+          }
+          if (!seen) occs.push(occ)
+        }
+      }
+    }
+  }
+
+  private fillViaOccupantsDense(
+    row: number,
+    col: number,
+    activeConn: ConnId,
+  ): void {
     const occs = this._viaOccs
     occs.length = 0
     const rows = this.rows
@@ -1280,6 +1470,9 @@ export class HighDensitySolverA01 extends BaseSolver {
             continue
           }
           used[flatIdx] = connId
+          if (this.occupiedRows && existing !== connId) {
+            this.occupiedRows.set(flatIdx, connId)
+          }
           indices.push(flatIdx)
         }
       }
@@ -1324,6 +1517,9 @@ export class HighDensitySolverA01 extends BaseSolver {
             if (!seen) displacedByVias.push(existing)
           }
           used[flatIdx] = connId
+          if (this.occupiedRows && existing !== connId) {
+            this.occupiedRows.set(flatIdx, connId)
+          }
           indices.push(flatIdx)
         }
       }
@@ -1482,6 +1678,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         const flatIdx = indices[i]!
         if (used[flatIdx] === connId) {
           used[flatIdx] = -1
+          this.occupiedRows?.set(flatIdx, -1)
         }
       }
       this.usedIndicesByConn[connId] = []
