@@ -69,6 +69,35 @@ test("A03 getOutput applies grid-to-bounds transform to solved routes", () => {
   expect(route!.vias[0]!.y).toBeCloseTo(internal.boundsMinY, 6)
   expect(route!.vias[1]!.x).toBeCloseTo(internal.boundsMaxX, 6)
   expect(route!.vias[1]!.y).toBeCloseTo(internal.boundsMaxY, 6)
+  expect(route).not.toHaveProperty("rootConnectionName")
+})
+
+test("A03 preserves its legacy single-cell output shape", () => {
+  const solver = new HighDensitySolverA03({
+    ...defaultA03Params,
+    nodeWithPortPoints: repro01.nodeWithPortPoints,
+  })
+  solver.setup()
+
+  const startPoint = { x: -0.237, y: -0.191, z: 0 }
+  const endPoint = { x: -0.236, y: -0.19, z: 0 }
+  Object.defineProperty(solver, "solvedRoutes", {
+    value: [
+      {
+        connId: 0,
+        states: Int32Array.from([0]),
+        viaCellIds: Int32Array.from([]),
+        startPoint,
+        endPoint,
+      },
+    ],
+  })
+
+  expect(solver.getOutput()).toEqual([
+    expect.objectContaining({
+      route: [startPoint],
+    }),
+  ])
 })
 
 test("A03 getOutput preserves exact user-provided route endpoints", () => {

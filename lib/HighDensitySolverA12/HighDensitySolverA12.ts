@@ -24,6 +24,8 @@ const A12_COARSE_CELL_SCALE = 4
  * perimeter and a four-times coarser middle region.
  */
 export class HighDensitySolverA12 extends HighDensitySolverA03 {
+  protected override preserveExactOutputEndpoints = true
+  protected override includeRootConnectionNameInOutput = true
   fineGridCellThickness: number
 
   override getSolverName(): string {

@@ -1,5 +1,6 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
+import { getPhysicalPortPairKey } from "../getPhysicalPortPairKey"
 import {
   type AffineTransform,
   applyAffineTransformToPoint,
@@ -14,6 +15,9 @@ import type {
 
 // --- Interned connection ID ---
 type ConnId = number
+type RootConnectionName = NonNullable<PortPoint["rootConnectionName"]>
+
+const MIN_SHORTEST_FIRST_CONNECTION_COUNT = 8
 
 // --- Persistent ripped-trace linked list ---
 interface RippedNode {
@@ -43,11 +47,11 @@ interface ConnectionSeg {
   startZ: number
   startRow: number
   startCol: number
-  startPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
   endZ: number
   endRow: number
   endCol: number
-  endPoint: { x: number; y: number; z: number }
+  endPoint: PortPoint
 }
 
 // --- Internal solved route (cell-based) ---
@@ -56,11 +60,11 @@ interface SolvedRouteInternal {
   startZ: number
   startRow: number
   startCol: number
-  startPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
   endZ: number
   endRow: number
   endCol: number
-  endPoint: { x: number; y: number; z: number }
+  endPoint: PortPoint
   cells: Array<{ z: number; row: number; col: number }>
   viaCells: Array<{ row: number; col: number }>
 }
@@ -245,7 +249,11 @@ export class HighDensitySolverA01 extends BaseSolver {
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
+  protected allowAllSameRootOverlap = false
   protected ripHistoryCostMultiplier = 0
+  protected ripRouteCountCostMultiplier = 0
+  protected useBestGPruning = false
+  protected preserveExactOutputEndpoints = false
 
   // Grid dimensions
   rows!: number
@@ -272,6 +280,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
+  private bestGStamp?: Uint32Array
+  private bestGValue?: Float64Array
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -479,6 +489,12 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
+    this.bestGStamp = this.useBestGPruning
+      ? new Uint32Array(totalCells)
+      : undefined
+    this.bestGValue = this.useBestGPruning
+      ? new Float64Array(totalCells)
+      : undefined
     this.stamp = 0
 
     // Existing traces already occupy their traceMargin halo, so a prospective
@@ -538,7 +554,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.ripCount = []
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
-    this.shuffleConnections()
+    this.orderInitialConnections()
     const budget = computeMaxIterationsByNodeSizeAndConnectionCount({
       planeSize: this.planeSize,
       layers: this.layers,
@@ -602,6 +618,12 @@ export class HighDensitySolverA01 extends BaseSolver {
         parentIdx: -1,
         ripped: null,
       })
+      if (this.useBestGPruning) {
+        const startCellIdx =
+          (next.startZ * this.rows + next.startRow) * this.cols + next.startCol
+        this.bestGStamp![startCellIdx] = this.stamp
+        this.bestGValue![startCellIdx] = 0
+      }
       this.heap.push(f, this.seqCounter++, 0)
       return
     }
@@ -665,7 +687,6 @@ export class HighDensitySolverA01 extends BaseSolver {
     const activeConn = this.activeConnId
     const rows = this.rows
     const cols = this.cols
-    const cellSizeMm = this.cellSizeMm
     const visited = this.visitedStamp
     const stamp = this.stamp
 
@@ -681,6 +702,17 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
+      if (
+        this.useBestGPruning &&
+        this.bestGStamp![nIdx] === stamp &&
+        g2 >= this.bestGValue![nIdx]!
+      ) {
+        continue
+      }
+      if (this.useBestGPruning) {
+        this.bestGStamp![nIdx] = stamp
+        this.bestGValue![nIdx] = g2
+      }
       const f2 =
         g2 +
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
@@ -725,6 +757,17 @@ export class HighDensitySolverA01 extends BaseSolver {
         )
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
+        if (
+          this.useBestGPruning &&
+          this.bestGStamp![nIdx] === stamp &&
+          g2 >= this.bestGValue![nIdx]!
+        ) {
+          continue
+        }
+        if (this.useBestGPruning) {
+          this.bestGStamp![nIdx] = stamp
+          this.bestGValue![nIdx] = g2
+        }
         const f2 =
           g2 +
           this.computeH(nz, row, col, endZ, endRow, endCol) *
@@ -747,9 +790,14 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Merged cost + rip computation (writes to _moveCost/_moveRipped) ---
   protected getRipCost(connId: ConnId): number {
+    const displacedRouteCount = Math.max(
+      1,
+      this.solvedRoutes.get(connId)?.length ?? 0,
+    )
     return (
       this.hyperParameters.ripCost *
-      (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0))
+      (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0)) *
+      (1 + this.ripRouteCountCostMultiplier * (displacedRouteCount - 1))
     )
   }
 
@@ -778,7 +826,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
       const allowFixedOverlap =
         fixedSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        (this.allowAllSameRootOverlap ||
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
       const seg = this.activeConnSeg
       const isSegEnd =
         !!seg &&
@@ -820,7 +869,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
       const allowFixedOverlap =
         fixedSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        (this.allowAllSameRootOverlap ||
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
       const seg = this.activeConnSeg
       const isSegEnd =
         !!seg &&
@@ -843,7 +893,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
       const allowSameRootOverlap =
         sameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+        (this.allowAllSameRootOverlap ||
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
       if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
         if (!rippedContains(r, occ)) {
           cost += this.getRipCost(occ)
@@ -892,7 +943,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[activeConn]
         const allowCrossingOverlap =
           crossingSameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          (this.allowAllSameRootOverlap ||
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
         if (
           crossingOcc !== -1 &&
           crossingOcc !== activeConn &&
@@ -932,7 +984,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
         if (
           sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          (this.allowAllSameRootOverlap ||
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
         ) {
           continue
         }
@@ -1008,7 +1061,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.connIdToRootNet[owner] === this.connIdToRootNet[activeConn]
         if (
           sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          (this.allowAllSameRootOverlap ||
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!))
         ) {
           continue
         }
@@ -1026,7 +1080,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[connId]
     return !(
       sameRoot &&
-      this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+      (this.allowAllSameRootOverlap ||
+        this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!))
     )
   }
 
@@ -1035,6 +1090,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
+      this.bestGStamp?.fill(0)
       this.stamp = 1
     }
   }
@@ -1134,7 +1190,9 @@ export class HighDensitySolverA01 extends BaseSolver {
             ? `${endpointA}|${endpointB}`
             : `${endpointB}|${endpointA}`
         const netName = conn.rootConnectionName ?? name
-        const segKey = `${netName}|${orderedEndpoints}`
+        const segKey = this.preserveExactOutputEndpoints
+          ? getPhysicalPortPairKey([startPoint, endPoint], netName)
+          : `${netName}|${orderedEndpoints}`
         if (seenSegmentKeys.has(segKey)) {
           this.overlapFriendlyRootNets.add(netName)
           continue
@@ -1180,19 +1238,69 @@ export class HighDensitySolverA01 extends BaseSolver {
     return { z, row, col }
   }
 
-  private shuffleConnections(): void {
-    const arr = this.unsolvedSegs
+  private orderInitialConnections(): void {
+    const unsolvedSegs = this.unsolvedSegs
+    const ordering = this.getInitialConnectionOrdering()
+    if (ordering === "topology-aware") {
+      const rootOrder = new Map<RootConnectionName, number>()
+      for (const segment of unsolvedSegs) {
+        const rootName =
+          segment.startPoint.rootConnectionName ??
+          segment.startPoint.connectionName
+        if (!rootOrder.has(rootName)) rootOrder.set(rootName, rootOrder.size)
+      }
+
+      if (rootOrder.size < unsolvedSegs.length) {
+        // Preserve the seeded order between roots and within each root while
+        // making every multi-terminal root contiguous.
+        unsolvedSegs.sort((left, right) => {
+          const leftRoot =
+            left.startPoint.rootConnectionName ?? left.startPoint.connectionName
+          const rightRoot =
+            right.startPoint.rootConnectionName ??
+            right.startPoint.connectionName
+          return rootOrder.get(leftRoot)! - rootOrder.get(rightRoot)!
+        })
+        return
+      }
+    }
+    const shouldRouteShortestFirst =
+      ordering === "shortest-first" ||
+      (ordering === "topology-aware" &&
+        unsolvedSegs.length >= MIN_SHORTEST_FIRST_CONNECTION_COUNT)
+    if (shouldRouteShortestFirst) {
+      unsolvedSegs.sort((left, right) => {
+        const leftDeltaX = left.endPoint.x - left.startPoint.x
+        const leftDeltaY = left.endPoint.y - left.startPoint.y
+        const rightDeltaX = right.endPoint.x - right.startPoint.x
+        const rightDeltaY = right.endPoint.y - right.startPoint.y
+        const lengthDifference =
+          leftDeltaX * leftDeltaX +
+          leftDeltaY * leftDeltaY -
+          (rightDeltaX * rightDeltaX + rightDeltaY * rightDeltaY)
+        if (lengthDifference !== 0) return lengthDifference
+        return left.connId - right.connId
+      })
+      return
+    }
     let s = this.hyperParameters.shuffleSeed
     const rng = () => {
       s = (s * 1664525 + 1013904223) & 0xffffffff
       return (s >>> 0) / 0xffffffff
     }
-    for (let i = arr.length - 1; i > 0; i--) {
+    for (let i = unsolvedSegs.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1))
-      const tmp = arr[i]!
-      arr[i] = arr[j]!
-      arr[j] = tmp
+      const tmp = unsolvedSegs[i]!
+      unsolvedSegs[i] = unsolvedSegs[j]!
+      unsolvedSegs[j] = tmp
     }
+  }
+
+  protected getInitialConnectionOrdering():
+    | "shuffled"
+    | "shortest-first"
+    | "topology-aware" {
+    return "shuffled"
   }
 
   // --- Finalize a found route ---
@@ -1250,7 +1358,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
 
     // Mark cells as used (with margin)
-    const marginCells = Math.ceil(this.traceMargin / this.cellSizeMm)
+    const marginCells = this.getTraceMarginCells()
     const indices: number[] = []
     const rows = this.rows
     const cols = this.cols
@@ -1275,7 +1383,8 @@ export class HighDensitySolverA01 extends BaseSolver {
             this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
           const allowSameRootOverlap =
             sameRoot &&
-            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+            (this.allowAllSameRootOverlap ||
+              this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!))
           if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
             continue
           }
@@ -1311,7 +1420,8 @@ export class HighDensitySolverA01 extends BaseSolver {
             this.connIdToRootNet[existing] === this.connIdToRootNet[connId]
           const allowSameRootOverlap =
             sameRoot &&
-            this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+            (this.allowAllSameRootOverlap ||
+              this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!))
           if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
             // Track displaced (small unique check)
             let seen = false
@@ -1355,7 +1465,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[connId]
       const allowCrossingOverlap =
         crossingSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!)
+        (this.allowAllSameRootOverlap ||
+          this.overlapFriendlyRootNets.has(this.connIdToRootNet[connId]!))
       if (
         crossingOcc !== -1 &&
         crossingOcc !== connId &&
@@ -1440,6 +1551,18 @@ export class HighDensitySolverA01 extends BaseSolver {
         }
       }
     }
+  }
+
+  protected getTraceMarginCells(): number {
+    return Math.ceil(this.traceMargin / this.cellSizeMm)
+  }
+
+  protected rerouteConnection(connectionName: string): boolean {
+    const connId = this.connNameToId.get(connectionName)
+    if (connId === undefined || !this.solvedRoutes.has(connId)) return false
+    this.solved = false
+    this.ripTrace(connId)
+    return !this.failed
   }
 
   // --- Rip a trace ---
@@ -1730,7 +1853,9 @@ export class HighDensitySolverA01 extends BaseSolver {
         })
         if (points.length > 0) {
           points[0] = { ...route.startPoint }
-          if (points.length > 1) {
+          if (points.length === 1 && this.preserveExactOutputEndpoints) {
+            points.push({ ...route.endPoint })
+          } else if (points.length > 1) {
             points[points.length - 1] = { ...route.endPoint }
           }
         }
