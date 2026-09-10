@@ -51,3 +51,27 @@ bun run build
 Tests cover five-seed hard-node completion, physical clearances, unchanged input bounds, exact terminals and metadata, via continuity, non-contiguous layer IDs, another existing node, and rejection of an unresolved single-layer crossing while retaining provisional routes.
 
 These are isolated-node results. A13 is not yet integrated into the autorouter production pipeline, and a full-board DRC/benchmark comparison has not been run. Five successful seeds and one additional node provide regression coverage, not proof of reliability on every high-density node.
+
+## Performance optimization
+
+Compared with the original A13 implementation (`1a4a391`, merged unchanged as `0c95b5f`), A13 now reuses a typed-array search heap, caches exact heuristic values per search and via-border eligibility per grid, and retains route footprint sets rather than rebuilding them for every route pair. Search costs, heap tie ordering, negotiation policy, and geometry acceptance are unchanged.
+
+Sequential local Bun 1.4.1 comparison: warm both implementations, alternate before/after order, and take the median of three trials per seed. Every paired trial checks output SHA-256, search expansions, and round count for exact equality. All 15 comparisons matched.
+
+| Seed | Before median | After median | Speedup |
+| --- | ---: | ---: | ---: |
+| 0 | 2.414 s | 1.127 s | 2.14× |
+| 1 | 1.376 s | 0.648 s | 2.13× |
+| 2 | 2.115 s | 0.954 s | 2.22× |
+| 3 | 4.666 s | 2.068 s | 2.26× |
+| 4 | 7.467 s | 3.096 s | 2.41× |
+
+The ratio of summed per-seed medians is **2.29×**. These are local isolated-node measurements, not full-board or CI performance claims. Raw measurements are in [a13-performance.json](./a13-performance.json).
+
+Reproduce against the original implementation (the temporary source must sit beside the solver so its relative imports resolve):
+
+```sh
+git show 0c95b5f:lib/HighDensitySolverA13/HighDensitySolverA13.ts > lib/HighDensitySolverA13/.benchmark-baseline.ts
+bun scripts/benchmark-a13-performance.ts --baseline lib/HighDensitySolverA13/.benchmark-baseline.ts --repeats 3 --output /tmp/a13-performance.json
+rm lib/HighDensitySolverA13/.benchmark-baseline.ts
+```

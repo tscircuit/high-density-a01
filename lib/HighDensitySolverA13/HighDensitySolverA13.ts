@@ -16,44 +16,74 @@ type Connection = { start: PortPoint; end: PortPoint; root: string }
 type Routed = {
   output: HighDensityIntraNodeRoute
   traceFootprint: number[]
+  traceFootprintSet: Set<number>
   viaFootprint: number[]
+  viaFootprintSet: Set<number>
   cells: number[]
   viaCells: number[]
 }
-type Entry = { index: number; g: number; f: number }
-
+/** Reusable structure-of-arrays heap. Tie comparisons intentionally match the
+ * original heap so the optimization does not change route ordering. */
 class Heap {
-  entries: Entry[] = []
-  push(entry: Entry) {
-    let i = this.entries.length
-    this.entries.push(entry)
+  private indices = new Int32Array(1024)
+  private costs = new Float64Array(1024)
+  private priorities = new Float64Array(1024)
+  size = 0
+  index = 0
+  g = 0
+  clear() {
+    this.size = 0
+  }
+  push(index: number, g: number, f: number) {
+    if (this.size === this.indices.length) {
+      const indices = new Int32Array(this.size * 2)
+      const costs = new Float64Array(this.size * 2)
+      const priorities = new Float64Array(this.size * 2)
+      indices.set(this.indices)
+      costs.set(this.costs)
+      priorities.set(this.priorities)
+      this.indices = indices
+      this.costs = costs
+      this.priorities = priorities
+    }
+    let i = this.size++
     while (i > 0) {
       const parent = (i - 1) >> 1
-      if (this.entries[parent]!.f <= entry.f) break
-      this.entries[i] = this.entries[parent]!
+      if (this.priorities[parent]! <= f) break
+      this.indices[i] = this.indices[parent]!
+      this.costs[i] = this.costs[parent]!
+      this.priorities[i] = this.priorities[parent]!
       i = parent
     }
-    this.entries[i] = entry
+    this.indices[i] = index
+    this.costs[i] = g
+    this.priorities[i] = f
   }
   pop() {
-    const first = this.entries[0]!,
-      last = this.entries.pop()!
-    if (this.entries.length) {
-      let i = 0
-      while (i * 2 + 1 < this.entries.length) {
-        let child = i * 2 + 1
-        if (
-          child + 1 < this.entries.length &&
-          this.entries[child + 1]!.f < this.entries[child]!.f
-        )
-          child++
-        if (last.f <= this.entries[child]!.f) break
-        this.entries[i] = this.entries[child]!
-        i = child
-      }
-      this.entries[i] = last
+    this.index = this.indices[0]!
+    this.g = this.costs[0]!
+    const last = --this.size
+    if (!last) return
+    const index = this.indices[last]!,
+      g = this.costs[last]!,
+      f = this.priorities[last]!
+    let i = 0
+    while (i * 2 + 1 < last) {
+      let child = i * 2 + 1
+      if (
+        child + 1 < last &&
+        this.priorities[child + 1]! < this.priorities[child]!
+      )
+        child++
+      if (f <= this.priorities[child]!) break
+      this.indices[i] = this.indices[child]!
+      this.costs[i] = this.costs[child]!
+      this.priorities[i] = this.priorities[child]!
+      i = child
     }
-    return first
+    this.indices[i] = index
+    this.costs[i] = g
+    this.priorities[i] = f
   }
 }
 
@@ -111,6 +141,8 @@ export class HighDensitySolverA13 extends BaseSolver {
   private distance!: Float64Array
   private parent!: Int32Array
   private heap = new Heap()
+  private heuristicCost!: Float64Array
+  private viaAllowed!: Uint8Array
   private goal = 0
   private presentCost = 0.5
   private randomState = 1
@@ -174,6 +206,22 @@ export class HighDensitySolverA13 extends BaseSolver {
     this.fixedVia = new Uint8Array(this.plane)
     this.history = new Float64Array(states)
     this.viaHistory = new Float64Array(this.plane)
+    this.heuristicCost = new Float64Array(states)
+    this.viaAllowed = new Uint8Array(this.plane)
+    const inset = Math.max(
+      this.viaDiameter / 2,
+      this.props.viaMinDistFromBorder ?? this.viaDiameter / 2,
+    )
+    for (let xy = 0; xy < this.plane; xy++) {
+      const p = this.point(xy)
+      if (
+        p.x - this.left >= inset &&
+        this.left + n.width - p.x >= inset &&
+        p.y - this.bottom >= inset &&
+        this.bottom + n.height - p.y >= inset
+      )
+        this.viaAllowed[xy] = 1
+    }
     this.distance = new Float64Array(states)
     this.parent = new Int32Array(states)
     const grouped = new Map<string, PortPoint[]>()
@@ -296,20 +344,30 @@ export class HighDensitySolverA13 extends BaseSolver {
     }
     this.distance.fill(Infinity)
     this.parent.fill(-1)
-    this.heap = new Heap()
+    this.heap.clear()
     const start = this.index(conn.start)
     this.goal = this.index(conn.end)
+    const goal = this.point(this.goal)
+    // Cache the identical physical-coordinate heuristic once per search rather
+    // than allocating two points for every edge relaxation.
+    for (let z = 0; z < this.layers.length; z++)
+      for (let row = 0; row < this.rows; row++) {
+        const dy = Math.abs(this.bottom + row * this.pitchY - goal.y)
+        for (let col = 0; col < this.cols; col++) {
+          this.heuristicCost[z * this.plane + row * this.cols + col] =
+            (Math.abs(this.left + col * this.pitchX - goal.x) +
+              dy +
+              (this.layers[z] === goal.z ? 0 : 0.8)) *
+            this.hyperParameters.greedyMultiplier
+        }
+      }
     this.distance[start] = 0
-    this.heap.push({ index: start, g: 0, f: this.heuristic(start) })
+    this.heap.push(start, 0, this.heuristic(start))
   }
   private heuristic(index: number) {
-    const a = this.point(index),
-      b = this.point(this.goal)
-    return (
-      (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + (a.z === b.z ? 0 : 0.8)) *
-      this.hyperParameters.greedyMultiplier
-    )
+    return this.heuristicCost[index]!
   }
+
   override _step() {
     if (this.phase === "negotiating") {
       this.negotiate()
@@ -331,61 +389,45 @@ export class HighDensitySolverA13 extends BaseSolver {
         this.error = "A13 exhausted its search budget"
         return
       }
-      if (!this.heap.entries.length) {
+      if (!this.heap.size) {
         this.failed = true
         this.error = `No path between fixed terminals of ${this.connections[this.activeConnectionIndex]!.start.connectionName}`
         return
       }
-      const current = this.heap.pop()
-      if (current.g !== this.distance[current.index]) continue
+      this.heap.pop()
+      const currentIndex = this.heap.index,
+        currentG = this.heap.g
+      if (currentG !== this.distance[currentIndex]) continue
       this.routingIterations++
-      if (current.index === this.goal) {
-        this.commit(current.index)
+      if (currentIndex === this.goal) {
+        this.commit(currentIndex)
         return
       }
-      const xy = current.index % this.plane,
+      const xy = currentIndex % this.plane,
         col = xy % this.cols,
         row = Math.floor(xy / this.cols),
-        z = Math.floor(current.index / this.plane)
+        z = Math.floor(currentIndex / this.plane)
       const visit = (next: number, base: number, via: boolean) => {
         const nxy = next % this.plane
         if (this.fixed[next] && next !== this.goal) return
         if (via && this.fixedVia[nxy]) return
         const congestion = via ? this.viaCost[nxy]! : this.traceCost[next]!
         const history = via ? this.viaHistory[nxy]! : this.history[next]!
-        const g = current.g + base + this.presentCost * congestion + history
+        const g = currentG + base + this.presentCost * congestion + history
         if (g >= this.distance[next]!) return
         this.distance[next] = g
-        this.parent[next] = current.index
-        this.heap.push({ index: next, g, f: g + this.heuristic(next) })
+        this.parent[next] = currentIndex
+        this.heap.push(next, g, g + this.heuristic(next))
       }
       if (col > 0)
-        visit(current.index - 1, this.pitchX * (z % 2 ? 1.05 : 1), false)
+        visit(currentIndex - 1, this.pitchX * (z % 2 ? 1.05 : 1), false)
       if (col + 1 < this.cols)
-        visit(current.index + 1, this.pitchX * (z % 2 ? 1.05 : 1), false)
+        visit(currentIndex + 1, this.pitchX * (z % 2 ? 1.05 : 1), false)
       if (row > 0)
-        visit(
-          current.index - this.cols,
-          this.pitchY * (z % 2 ? 1 : 1.05),
-          false,
-        )
+        visit(currentIndex - this.cols, this.pitchY * (z % 2 ? 1 : 1.05), false)
       if (row + 1 < this.rows)
-        visit(
-          current.index + this.cols,
-          this.pitchY * (z % 2 ? 1 : 1.05),
-          false,
-        )
-      const p = this.point(current.index),
-        inset = Math.max(
-          this.viaDiameter / 2,
-          this.props.viaMinDistFromBorder ?? this.viaDiameter / 2,
-        )
-      if (
-        p.x - this.left >= inset &&
-        this.left + this.nodeWithPortPoints.width - p.x >= inset &&
-        p.y - this.bottom >= inset &&
-        this.bottom + this.nodeWithPortPoints.height - p.y >= inset
-      ) {
+        visit(currentIndex + this.cols, this.pitchY * (z % 2 ? 1 : 1.05), false)
+      if (this.viaAllowed[xy]) {
         for (let layer = 0; layer < this.layers.length; layer++)
           if (layer !== z) visit(layer * this.plane + xy, 0.8, true)
       }
@@ -478,7 +520,9 @@ export class HighDensitySolverA13 extends BaseSolver {
     this.routes.set(id, {
       output,
       traceFootprint: [...traces],
+      traceFootprintSet: traces,
       viaFootprint: [...viaSet],
+      viaFootprintSet: viaSet,
       cells: [...centerline],
       viaCells,
     })
@@ -497,8 +541,8 @@ export class HighDensitySolverA13 extends BaseSolver {
           this.connections[id]!.root === this.connections[other]!.root
         )
           continue
-        const blocked = new Set(obstacle.traceFootprint),
-          blockedVia = new Set(obstacle.viaFootprint)
+        const blocked = obstacle.traceFootprintSet,
+          blockedVia = obstacle.viaFootprintSet
         for (const cell of route.cells)
           if (blocked.has(cell)) {
             conflicted.add(id)
@@ -512,8 +556,8 @@ export class HighDensitySolverA13 extends BaseSolver {
             historyVias.add(cell)
           }
         // Symmetric testing catches the other route's larger via footprint.
-        const ownBlocked = new Set(route.traceFootprint),
-          ownVia = new Set(route.viaFootprint)
+        const ownBlocked = route.traceFootprintSet,
+          ownVia = route.viaFootprintSet
         for (const cell of obstacle.cells)
           if (ownBlocked.has(cell)) {
             conflicted.add(id)
