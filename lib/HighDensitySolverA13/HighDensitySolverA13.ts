@@ -1,3 +1,4 @@
+import { WasmSearchKernel } from "./search/WasmSearchKernel"
 import { BaseSolver } from "@tscircuit/solver-utils"
 import type { GraphicsObject } from "graphics-debug"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
@@ -15,6 +16,7 @@ type Point = { x: number; y: number; z: number }
 type Connection = { start: PortPoint; end: PortPoint; root: string }
 type Routed = {
   output: HighDensityIntraNodeRoute
+  clearanceOutput: HighDensityIntraNodeRoute
   traceFootprint: number[]
   traceFootprintSet: Set<number>
   viaFootprint: number[]
@@ -89,6 +91,8 @@ class Heap {
 
 export interface HighDensitySolverA13Props {
   nodeWithPortPoints: NodeWithPortPoints
+  /** Auto uses WebAssembly when permitted, otherwise the identical JS search. */
+  searchBackend?: "auto" | "javascript" | "wasm"
   cellSizeMm?: number
   traceThickness?: number
   traceMargin?: number
@@ -131,6 +135,19 @@ export class HighDensitySolverA13 extends BaseSolver {
   private left = 0
   private bottom = 0
   private routes = new Map<number, Routed>()
+  // Routed records are replaced, never edited, so weak keys invalidate pairs
+  // automatically and do not retain obsolete search rounds.
+  private pairCache = new WeakMap<
+    Routed,
+    WeakMap<
+      Routed,
+      {
+        cells: number[]
+        vias: number[]
+        violations: RouteGeometryViolation[]
+      }
+    >
+  >()
   private queue: number[] = []
   private traceCost!: Uint16Array
   private viaCost!: Uint16Array
@@ -141,7 +158,9 @@ export class HighDensitySolverA13 extends BaseSolver {
   private distance!: Float64Array
   private parent!: Int32Array
   private heap = new Heap()
+  private searchKernel?: WasmSearchKernel
   private heuristicCost!: Float64Array
+  private heuristicCache = new Map<number, Float64Array>()
   private viaAllowed!: Uint8Array
   private goal = 0
   private presentCost = 0.5
@@ -224,6 +243,20 @@ export class HighDensitySolverA13 extends BaseSolver {
     }
     this.distance = new Float64Array(states)
     this.parent = new Int32Array(states)
+    if (this.props.searchBackend !== "javascript") {
+      try {
+        this.searchKernel = new WasmSearchKernel(
+          this.cols,
+          this.rows,
+          this.layers.length,
+          this.pitchX,
+          this.pitchY,
+        )
+      } catch (error) {
+        // Environments whose CSP disables WASM can still use A13 synchronously.
+        if (this.props.searchBackend === "wasm") throw error
+      }
+    }
     const grouped = new Map<string, PortPoint[]>()
     for (const p of n.portPoints) {
       if (!this.layers.includes(p.z))
@@ -342,27 +375,60 @@ export class HighDensitySolverA13 extends BaseSolver {
         )
       }
     }
-    this.distance.fill(Infinity)
-    this.parent.fill(-1)
-    this.heap.clear()
+    if (!this.searchKernel) {
+      this.distance.fill(Infinity)
+      this.parent.fill(-1)
+      this.heap.clear()
+    }
     const start = this.index(conn.start)
     this.goal = this.index(conn.end)
     const goal = this.point(this.goal)
-    // Cache the identical physical-coordinate heuristic once per search rather
-    // than allocating two points for every edge relaxation.
-    for (let z = 0; z < this.layers.length; z++)
-      for (let row = 0; row < this.rows; row++) {
-        const dy = Math.abs(this.bottom + row * this.pitchY - goal.y)
-        for (let col = 0; col < this.cols; col++) {
-          this.heuristicCost[z * this.plane + row * this.cols + col] =
-            (Math.abs(this.left + col * this.pitchX - goal.x) +
-              dy +
-              (this.layers[z] === goal.z ? 0 : 0.8)) *
-            this.hyperParameters.greedyMultiplier
+    const cached = this.heuristicCache.get(this.goal)
+    if (cached) this.heuristicCost = cached
+    else {
+      this.heuristicCost = new Float64Array(this.distance.length)
+      // Cache the identical physical-coordinate heuristic once per search rather
+      // than allocating two points for every edge relaxation.
+      for (let z = 0; z < this.layers.length; z++)
+        for (let row = 0; row < this.rows; row++) {
+          const dy = Math.abs(this.bottom + row * this.pitchY - goal.y)
+          for (let col = 0; col < this.cols; col++) {
+            this.heuristicCost[z * this.plane + row * this.cols + col] =
+              (Math.abs(this.left + col * this.pitchX - goal.x) +
+                dy +
+                (this.layers[z] === goal.z ? 0 : 0.8)) *
+              this.hyperParameters.greedyMultiplier
+          }
         }
+      // Bound retained heuristics to 8 MiB, even for large/many-terminal nodes.
+      const capacity = Math.floor(
+        (8 * 1024 * 1024) / this.heuristicCost.byteLength,
+      )
+      if (capacity > 0) {
+        if (this.heuristicCache.size >= capacity)
+          this.heuristicCache.delete(this.heuristicCache.keys().next().value!)
+        this.heuristicCache.set(this.goal, this.heuristicCost)
       }
-    this.distance[start] = 0
-    this.heap.push(start, 0, this.heuristic(start))
+    }
+    if (!this.searchKernel) {
+      this.distance[start] = 0
+      this.heap.push(start, 0, this.heuristic(start))
+    }
+    this.searchKernel?.begin(
+      {
+        traceCost: this.traceCost,
+        viaCost: this.viaCost,
+        fixed: this.fixed,
+        fixedVia: this.fixedVia,
+        history: this.history,
+        viaHistory: this.viaHistory,
+        heuristicCost: this.heuristicCost,
+        viaAllowed: this.viaAllowed,
+      },
+      start,
+      this.goal,
+      this.presentCost,
+    )
   }
   private heuristic(index: number) {
     return this.heuristicCost[index]!
@@ -380,6 +446,24 @@ export class HighDensitySolverA13 extends BaseSolver {
         return
       }
       this.prepareSearch(id)
+    }
+    if (this.searchKernel) {
+      const { status, expansions } = this.searchKernel.run(
+        this.props.stepMultiplier ?? 1000,
+        (this.props.maxSearchIterations ?? 50_000_000) - this.routingIterations,
+      )
+      this.routingIterations += expansions
+      if (status === 1) {
+        this.searchKernel.copyParents(this.parent)
+        this.commit(this.goal)
+      } else if (status === 2) {
+        this.failed = true
+        this.error = `No path between fixed terminals of ${this.connections[this.activeConnectionIndex]!.start.connectionName}`
+      } else if (status === 3) {
+        this.failed = true
+        this.error = "A13 exhausted its search budget"
+      }
+      return
     }
     for (let step = 0; step < (this.props.stepMultiplier ?? 1000); step++) {
       if (
@@ -519,6 +603,11 @@ export class HighDensitySolverA13 extends BaseSolver {
     if (this.routes.has(id)) this.rerouteCount++
     this.routes.set(id, {
       output,
+      clearanceOutput: {
+        ...output,
+        traceThickness: output.traceThickness + this.traceMargin,
+        viaDiameter: output.viaDiameter + this.traceMargin,
+      },
       traceFootprint: [...traces],
       traceFootprintSet: traces,
       viaFootprint: [...viaSet],
@@ -529,11 +618,38 @@ export class HighDensitySolverA13 extends BaseSolver {
     this.routedCount = this.routes.size
     this.activeConnectionIndex = -1
   }
+  private getPair(a: Routed, b: Routed) {
+    let row = this.pairCache.get(a)
+    if (!row) {
+      row = new WeakMap()
+      this.pairCache.set(a, row)
+    }
+    let pair = row.get(b)
+    if (!pair) {
+      pair = {
+        cells: [
+          ...a.cells.filter((cell) => b.traceFootprintSet.has(cell)),
+          ...b.cells.filter((cell) => a.traceFootprintSet.has(cell)),
+        ],
+        vias: [
+          ...a.viaCells.filter((cell) => b.viaFootprintSet.has(cell)),
+          ...b.viaCells.filter((cell) => a.viaFootprintSet.has(cell)),
+        ],
+        violations: findRouteGeometryViolations([
+          a.clearanceOutput,
+          b.clearanceOutput,
+        ]),
+      }
+      row.set(b, pair)
+    }
+    return pair
+  }
   private negotiate() {
     this.round++
     const conflicted = new Set<number>(),
       historyCells = new Set<number>(),
       historyVias = new Set<number>()
+    // Replay grid conflicts in the original insertion order: it affects shuffle.
     for (const [id, route] of this.routes)
       for (const [other, obstacle] of this.routes) {
         if (
@@ -541,44 +657,36 @@ export class HighDensitySolverA13 extends BaseSolver {
           this.connections[id]!.root === this.connections[other]!.root
         )
           continue
-        const blocked = obstacle.traceFootprintSet,
-          blockedVia = obstacle.viaFootprintSet
-        for (const cell of route.cells)
-          if (blocked.has(cell)) {
-            conflicted.add(id)
-            conflicted.add(other)
-            historyCells.add(cell)
-          }
-        for (const cell of route.viaCells)
-          if (blockedVia.has(cell)) {
-            conflicted.add(id)
-            conflicted.add(other)
-            historyVias.add(cell)
-          }
-        // Symmetric testing catches the other route's larger via footprint.
-        const ownBlocked = route.traceFootprintSet,
-          ownVia = route.viaFootprintSet
-        for (const cell of obstacle.cells)
-          if (ownBlocked.has(cell)) {
-            conflicted.add(id)
-            conflicted.add(other)
-            historyCells.add(cell)
-          }
-        for (const cell of obstacle.viaCells)
-          if (ownVia.has(cell)) {
-            conflicted.add(id)
-            conflicted.add(other)
-            historyVias.add(cell)
-          }
+        const pair = this.getPair(route, obstacle)
+        if (pair.cells.length || pair.vias.length) {
+          conflicted.add(id)
+          conflicted.add(other)
+          for (const cell of pair.cells) historyCells.add(cell)
+          for (const cell of pair.vias) historyVias.add(cell)
+        }
       }
-    // Inflate copper by the requested margin for an independent exact geometry check.
-    this.violations = findRouteGeometryViolations(
-      this.getOutput().map((r) => ({
-        ...r,
-        traceThickness: r.traceThickness + this.traceMargin,
-        viaDiameter: r.viaDiameter + this.traceMargin,
-      })),
-    )
+    const ordered = [...this.routes.entries()].sort(([a], [b]) => a - b)
+    const intersections = new Map<number, RouteGeometryViolation[]>()
+    for (const [, route] of ordered)
+      for (const point of route.output.route)
+        if (!intersections.has(point.z)) intersections.set(point.z, [])
+    const clearances: RouteGeometryViolation[] = []
+    for (let i = 0; i < ordered.length; i++)
+      for (let j = i + 1; j < ordered.length; j++) {
+        const [id, route] = ordered[i]!,
+          [other, obstacle] = ordered[j]!
+        if (this.connections[id]!.root === this.connections[other]!.root)
+          continue
+        for (const violation of this.getPair(route, obstacle).violations) {
+          // The exact validator emits intersections by global layer, then pair;
+          // clearance findings follow in pair order. A13 copper sizes are > 0,
+          // so only the intersection prepass uses requiredDistance === 0.
+          if (violation.requiredDistance === 0)
+            intersections.get(violation.z!)!.push(violation)
+          else clearances.push(violation)
+        }
+      }
+    this.violations = [...intersections.values()].flat().concat(clearances)
     for (const violation of this.violations) {
       for (let id = 0; id < this.connections.length; id++)
         if (
