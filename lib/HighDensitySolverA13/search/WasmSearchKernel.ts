@@ -1,15 +1,7 @@
 import { kernelBase64 } from "./kernel.generated"
 
-type Inputs = {
-  traceCost: Uint16Array
-  viaCost: Uint16Array
-  fixed: Uint8Array
-  fixedVia: Uint8Array
-  history: Float64Array
-  viaHistory: Float64Array
-  heuristicCost: Float64Array
-  viaAllowed: Uint8Array
-}
+import type { SearchInputs } from "./SearchInputs"
+
 type KernelExports = {
   memory: WebAssembly.Memory
   __heap_base: WebAssembly.Global
@@ -91,7 +83,12 @@ export class WasmSearchKernel {
     if (bytes > memory.buffer.byteLength)
       memory.grow(Math.ceil((bytes - memory.buffer.byteLength) / 65536))
   }
-  begin(inputs: Inputs, start: number, goal: number, presentCost: number) {
+  begin(
+    inputs: SearchInputs,
+    start: number,
+    goal: number,
+    presentCost: number,
+  ) {
     // Views are intentionally recreated: memory.grow detaches old JS views.
     const target = new Uint8Array(this.exports.memory.buffer)
     const sources = [
