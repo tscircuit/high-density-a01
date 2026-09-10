@@ -60,14 +60,16 @@ test("hard-node backends preserve provisional routes and cached violation orderi
     searchBackend: "wasm",
   })
   let round = 0,
-    reroutes = -1
+    reroutes = -1,
+    routedCount = -1
   while (!js.solved && !js.failed) {
     js.step()
     wasm.step()
     expect(wasm.routingIterations).toBe(js.routingIterations)
     expect(wasm.phase).toBe(js.phase)
-    if (js.rerouteCount !== reroutes) {
+    if (js.rerouteCount !== reroutes || js.routedCount !== routedCount) {
       reroutes = js.rerouteCount
+      routedCount = js.routedCount
       expect(wasm.getOutput()).toEqual(js.getOutput())
     }
     if (js.round !== round) {
@@ -103,11 +105,13 @@ test("both backends report an exhausted frontier when no layer transition fits",
   expect(solvers[1]!.getOutput()).toEqual(solvers[0]!.getOutput())
 })
 
-test("auto falls back to JS when WebAssembly is unavailable", () => {
+test("auto uses JavaScript without attempting WebAssembly initialization", () => {
+  let attempts = 0
   const OriginalInstance = WebAssembly.Instance
   WebAssembly.Instance = class {
     readonly exports!: WebAssembly.Exports
     constructor() {
+      attempts++
       throw new WebAssembly.CompileError(
         "WebAssembly blocked for fallback test",
       )
@@ -124,6 +128,7 @@ test("auto falls back to JS when WebAssembly is unavailable", () => {
     expect(auto.solved).toBe(true)
     expect(auto.getOutput()).toEqual(js.getOutput())
     expect(auto.routingIterations).toBe(js.routingIterations)
+    expect(attempts).toBe(0)
     const forced = new HighDensitySolverA13({
       nodeWithPortPoints: smallNode,
       searchBackend: "wasm",

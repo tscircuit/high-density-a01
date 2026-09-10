@@ -95,7 +95,7 @@ Against `cdfd68a` (merged PR #115), three warmed, alternating, sequential local 
 
 The ratio of summed medians is **2.10×**, on top of the previous optimization. Every paired run had identical output SHA-256, negotiation rounds, and search expansions. All five seeds still route at 1× with zero configured-clearance violations. Raw measurements are in [a13-performance-v2.json](./a13-performance-v2.json). These results describe this isolated node on this machine, not a guaranteed speedup on every input or runtime.
 
-`searchBackend` accepts `"auto"` (default), `"wasm"`, or `"javascript"`. Auto falls back to the original JS search if WebAssembly/SIMD is unavailable or blocked by CSP. The fallback retains the TypeScript caching and geometry improvements, but the 2.10× result uses WebAssembly. Forced WASM reports initialization failures instead of silently falling back. Solve, Step, and Animate remain synchronous and use the same debugger step boundaries and search budget.
+In the PR #116 baseline, `searchBackend` accepts `"auto"` (default), `"wasm"`, or `"javascript"`. Auto falls back to the original JS search if WebAssembly/SIMD is unavailable or blocked by CSP. The fallback retains the TypeScript caching and geometry improvements, but the 2.10× result uses WebAssembly. Forced WASM reports initialization failures instead of silently falling back. Solve, Step, and Animate remain synchronous and use the same debugger step boundaries and search budget.
 
 Tests compare both backends at each debugger step, including fractional step/budget values, non-contiguous layers, an exhausted frontier, and blocked-WASM fallback. The hard-node parity test checks every round's cached findings against a fresh full geometry check, including ordering, and exercises heap growth. The geometry changes also produced identical ordered results to PR #115 on 500 deterministic randomized multilayer route sets; boundary tests cover trace, via/trace, and via/via clearance on both axes.
 
@@ -119,3 +119,37 @@ BUN_UPDATE_SNAPSHOTS=1 bun test tests/a13/search-backends.test.ts tests/a13/hard
 ```
 
 The recorded compiler was LLVM 22.1.8. Keep `-ffp-contract=off`, do not enable fast-math, and regenerate the checked-in module whenever the C source changes. The binary uses standard wasm32 SIMD; unsupported runtimes take the JS fallback. Additional memory includes the per-solver search buffers and bounded heuristic cache, traded for fewer repeated calculations and smaller priority-queue entries.
+
+## C-to-JavaScript experiment
+
+This follow-up branch makes `searchBackend: "auto"` and `"javascript"` use [JavascriptSearchKernel.ts](../lib/HighDensitySolverA13/search/JavascriptSearchKernel.ts), a close translation of the C kernel. Neither path compiles or instantiates WebAssembly. Explicit `"wasm"` remains available for direct comparison, with the C source and generated module unchanged. The older pre-WASM JS search loop has been removed so both backends now share the same begin/run/copyParents interface.
+
+The translation preserves `configure` topology flags, `push`/`pop` comparisons, stale-entry versions, the nonnegative-cost early rejection, left/right/down/up/via visitation, operation order, and debugger chunk/budget boundaries. JavaScript numbers preserve the C double arithmetic. Constructor closures replace the C module's private globals; scalar return fields replace temporary C structs to avoid per-pop object allocation. Heap priority/index/version fields use Float64Array/Int32Array/Uint32Array arrays (16 bytes per entry in total). A literal packed-buffer translation was also tried; separate arrays performed better locally while preserving every comparison and queue operation. Search inputs are referenced rather than copied because the router does not mutate them while that search is active.
+
+**The full WASM gain is not retained.** Two separate warmed, alternating, sequential comparisons on Bun 1.4.1, each with three trials per seed:
+
+| Seed | WASM median | JS median (vs WASM) | Pre-WASM PR #115 median | JS median (vs PR #115) |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 0.570 s | 0.944 s | 1.231 s | 1.007 s |
+| 1 | 0.341 s | 0.623 s | 0.756 s | 0.661 s |
+| 2 | 0.496 s | 0.863 s | 1.035 s | 0.893 s |
+| 3 | 1.026 s | 1.752 s | 2.238 s | 1.855 s |
+| 4 | 1.435 s | 2.302 s | 3.322 s | 2.378 s |
+
+The summed-median ratios show **1.68× the WASM runtime** (about 68% longer) and **1.26× faster than pre-WASM PR #115**. All 30 paired runs retained identical geometry SHA-256, rounds, and expansions, with all five seeds routing at 1× and zero configured-clearance violations. These are local isolated-node measurements, not a guarantee for other engines or inputs. The two comparisons ran separately, so their JS times are reported separately rather than mixing measurements across runs.
+
+Raw measurements: [JS vs WASM](./a13-javascript-vs-wasm.json) and [JS vs PR #115](./a13-javascript-vs-pr115.json). This is an experimental default for evaluating the translation, not evidence that replacing WASM is performance-neutral. Backend parity tests compare every debugger step and provisional route change, verify each round's exact ordered DRC findings, and assert that the default path never attempts WASM initialization.
+
+Reproduce with isolated baseline files (both baseline revisions must be available locally):
+
+```sh
+wasm_baseline=$(mktemp -d)
+js_baseline=$(mktemp -d)
+git archive 3aedab6 lib | tar -x -C "$wasm_baseline"
+git archive cdfd68a lib | tar -x -C "$js_baseline"
+ln -s "$PWD/node_modules" "$wasm_baseline/node_modules"
+ln -s "$PWD/node_modules" "$js_baseline/node_modules"
+bun scripts/benchmark-a13-performance.ts --baseline "$wasm_baseline/lib/HighDensitySolverA13/HighDensitySolverA13.ts" --repeats 3 --output /tmp/js-vs-wasm.json
+bun scripts/benchmark-a13-performance.ts --baseline "$js_baseline/lib/HighDensitySolverA13/HighDensitySolverA13.ts" --repeats 3 --output /tmp/js-vs-pr115.json
+rm -r "$wasm_baseline" "$js_baseline"
+```

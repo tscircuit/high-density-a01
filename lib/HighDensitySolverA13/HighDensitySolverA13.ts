@@ -1,3 +1,4 @@
+import { JavascriptSearchKernel } from "./search/JavascriptSearchKernel"
 import { WasmSearchKernel } from "./search/WasmSearchKernel"
 import { BaseSolver } from "@tscircuit/solver-utils"
 import type { GraphicsObject } from "graphics-debug"
@@ -24,74 +25,9 @@ type Routed = {
   cells: number[]
   viaCells: number[]
 }
-/** Reusable structure-of-arrays heap. Tie comparisons intentionally match the
- * original heap so the optimization does not change route ordering. */
-class Heap {
-  private indices = new Int32Array(1024)
-  private costs = new Float64Array(1024)
-  private priorities = new Float64Array(1024)
-  size = 0
-  index = 0
-  g = 0
-  clear() {
-    this.size = 0
-  }
-  push(index: number, g: number, f: number) {
-    if (this.size === this.indices.length) {
-      const indices = new Int32Array(this.size * 2)
-      const costs = new Float64Array(this.size * 2)
-      const priorities = new Float64Array(this.size * 2)
-      indices.set(this.indices)
-      costs.set(this.costs)
-      priorities.set(this.priorities)
-      this.indices = indices
-      this.costs = costs
-      this.priorities = priorities
-    }
-    let i = this.size++
-    while (i > 0) {
-      const parent = (i - 1) >> 1
-      if (this.priorities[parent]! <= f) break
-      this.indices[i] = this.indices[parent]!
-      this.costs[i] = this.costs[parent]!
-      this.priorities[i] = this.priorities[parent]!
-      i = parent
-    }
-    this.indices[i] = index
-    this.costs[i] = g
-    this.priorities[i] = f
-  }
-  pop() {
-    this.index = this.indices[0]!
-    this.g = this.costs[0]!
-    const last = --this.size
-    if (!last) return
-    const index = this.indices[last]!,
-      g = this.costs[last]!,
-      f = this.priorities[last]!
-    let i = 0
-    while (i * 2 + 1 < last) {
-      let child = i * 2 + 1
-      if (
-        child + 1 < last &&
-        this.priorities[child + 1]! < this.priorities[child]!
-      )
-        child++
-      if (f <= this.priorities[child]!) break
-      this.indices[i] = this.indices[child]!
-      this.costs[i] = this.costs[child]!
-      this.priorities[i] = this.priorities[child]!
-      i = child
-    }
-    this.indices[i] = index
-    this.costs[i] = g
-    this.priorities[i] = f
-  }
-}
-
 export interface HighDensitySolverA13Props {
   nodeWithPortPoints: NodeWithPortPoints
-  /** Auto uses WebAssembly when permitted, otherwise the identical JS search. */
+  /** Auto and javascript use the C-to-JS translation; wasm is a comparison backend. */
   searchBackend?: "auto" | "javascript" | "wasm"
   cellSizeMm?: number
   traceThickness?: number
@@ -155,10 +91,8 @@ export class HighDensitySolverA13 extends BaseSolver {
   private fixedVia!: Uint8Array
   private history!: Float64Array
   private viaHistory!: Float64Array
-  private distance!: Float64Array
   private parent!: Int32Array
-  private heap = new Heap()
-  private searchKernel?: WasmSearchKernel
+  private searchKernel!: JavascriptSearchKernel | WasmSearchKernel
   private heuristicCost!: Float64Array
   private heuristicCache = new Map<number, Float64Array>()
   private viaAllowed!: Uint8Array
@@ -241,22 +175,18 @@ export class HighDensitySolverA13 extends BaseSolver {
       )
         this.viaAllowed[xy] = 1
     }
-    this.distance = new Float64Array(states)
     this.parent = new Int32Array(states)
-    if (this.props.searchBackend !== "javascript") {
-      try {
-        this.searchKernel = new WasmSearchKernel(
-          this.cols,
-          this.rows,
-          this.layers.length,
-          this.pitchX,
-          this.pitchY,
-        )
-      } catch (error) {
-        // Environments whose CSP disables WASM can still use A13 synchronously.
-        if (this.props.searchBackend === "wasm") throw error
-      }
-    }
+    const Kernel =
+      this.props.searchBackend === "wasm"
+        ? WasmSearchKernel
+        : JavascriptSearchKernel
+    this.searchKernel = new Kernel(
+      this.cols,
+      this.rows,
+      this.layers.length,
+      this.pitchX,
+      this.pitchY,
+    )
     const grouped = new Map<string, PortPoint[]>()
     for (const p of n.portPoints) {
       if (!this.layers.includes(p.z))
@@ -375,18 +305,13 @@ export class HighDensitySolverA13 extends BaseSolver {
         )
       }
     }
-    if (!this.searchKernel) {
-      this.distance.fill(Infinity)
-      this.parent.fill(-1)
-      this.heap.clear()
-    }
     const start = this.index(conn.start)
     this.goal = this.index(conn.end)
     const goal = this.point(this.goal)
     const cached = this.heuristicCache.get(this.goal)
     if (cached) this.heuristicCost = cached
     else {
-      this.heuristicCost = new Float64Array(this.distance.length)
+      this.heuristicCost = new Float64Array(this.parent.length)
       // Cache the identical physical-coordinate heuristic once per search rather
       // than allocating two points for every edge relaxation.
       for (let z = 0; z < this.layers.length; z++)
@@ -410,11 +335,7 @@ export class HighDensitySolverA13 extends BaseSolver {
         this.heuristicCache.set(this.goal, this.heuristicCost)
       }
     }
-    if (!this.searchKernel) {
-      this.distance[start] = 0
-      this.heap.push(start, 0, this.heuristic(start))
-    }
-    this.searchKernel?.begin(
+    this.searchKernel.begin(
       {
         traceCost: this.traceCost,
         viaCost: this.viaCost,
@@ -430,10 +351,6 @@ export class HighDensitySolverA13 extends BaseSolver {
       this.presentCost,
     )
   }
-  private heuristic(index: number) {
-    return this.heuristicCost[index]!
-  }
-
   override _step() {
     if (this.phase === "negotiating") {
       this.negotiate()
@@ -447,74 +364,20 @@ export class HighDensitySolverA13 extends BaseSolver {
       }
       this.prepareSearch(id)
     }
-    if (this.searchKernel) {
-      const { status, expansions } = this.searchKernel.run(
-        this.props.stepMultiplier ?? 1000,
-        (this.props.maxSearchIterations ?? 50_000_000) - this.routingIterations,
-      )
-      this.routingIterations += expansions
-      if (status === 1) {
-        this.searchKernel.copyParents(this.parent)
-        this.commit(this.goal)
-      } else if (status === 2) {
-        this.failed = true
-        this.error = `No path between fixed terminals of ${this.connections[this.activeConnectionIndex]!.start.connectionName}`
-      } else if (status === 3) {
-        this.failed = true
-        this.error = "A13 exhausted its search budget"
-      }
-      return
-    }
-    for (let step = 0; step < (this.props.stepMultiplier ?? 1000); step++) {
-      if (
-        this.routingIterations >= (this.props.maxSearchIterations ?? 50_000_000)
-      ) {
-        this.failed = true
-        this.error = "A13 exhausted its search budget"
-        return
-      }
-      if (!this.heap.size) {
-        this.failed = true
-        this.error = `No path between fixed terminals of ${this.connections[this.activeConnectionIndex]!.start.connectionName}`
-        return
-      }
-      this.heap.pop()
-      const currentIndex = this.heap.index,
-        currentG = this.heap.g
-      if (currentG !== this.distance[currentIndex]) continue
-      this.routingIterations++
-      if (currentIndex === this.goal) {
-        this.commit(currentIndex)
-        return
-      }
-      const xy = currentIndex % this.plane,
-        col = xy % this.cols,
-        row = Math.floor(xy / this.cols),
-        z = Math.floor(currentIndex / this.plane)
-      const visit = (next: number, base: number, via: boolean) => {
-        const nxy = next % this.plane
-        if (this.fixed[next] && next !== this.goal) return
-        if (via && this.fixedVia[nxy]) return
-        const congestion = via ? this.viaCost[nxy]! : this.traceCost[next]!
-        const history = via ? this.viaHistory[nxy]! : this.history[next]!
-        const g = currentG + base + this.presentCost * congestion + history
-        if (g >= this.distance[next]!) return
-        this.distance[next] = g
-        this.parent[next] = currentIndex
-        this.heap.push(next, g, g + this.heuristic(next))
-      }
-      if (col > 0)
-        visit(currentIndex - 1, this.pitchX * (z % 2 ? 1.05 : 1), false)
-      if (col + 1 < this.cols)
-        visit(currentIndex + 1, this.pitchX * (z % 2 ? 1.05 : 1), false)
-      if (row > 0)
-        visit(currentIndex - this.cols, this.pitchY * (z % 2 ? 1 : 1.05), false)
-      if (row + 1 < this.rows)
-        visit(currentIndex + this.cols, this.pitchY * (z % 2 ? 1 : 1.05), false)
-      if (this.viaAllowed[xy]) {
-        for (let layer = 0; layer < this.layers.length; layer++)
-          if (layer !== z) visit(layer * this.plane + xy, 0.8, true)
-      }
+    const { status, expansions } = this.searchKernel.run(
+      this.props.stepMultiplier ?? 1000,
+      (this.props.maxSearchIterations ?? 50_000_000) - this.routingIterations,
+    )
+    this.routingIterations += expansions
+    if (status === 1) {
+      this.searchKernel.copyParents(this.parent)
+      this.commit(this.goal)
+    } else if (status === 2) {
+      this.failed = true
+      this.error = `No path between fixed terminals of ${this.connections[this.activeConnectionIndex]!.start.connectionName}`
+    } else if (status === 3) {
+      this.failed = true
+      this.error = "A13 exhausted its search budget"
     }
   }
   private commit(goal: number) {
