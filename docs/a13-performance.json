@@ -1,0 +1,175 @@
+{
+  "runtime": "1.4.1",
+  "repeats": 3,
+  "seeds": [
+    {
+      "seed": 0,
+      "beforeMs": 2413.943959000004,
+      "afterMs": 1127.3126669999983,
+      "speedup": 2.141326031068191
+    },
+    {
+      "seed": 1,
+      "beforeMs": 1376.4495419999948,
+      "afterMs": 647.6703749999942,
+      "speedup": 2.125231591764572
+    },
+    {
+      "seed": 2,
+      "beforeMs": 2115.058666000001,
+      "afterMs": 954.3637919999965,
+      "speedup": 2.216197516847966
+    },
+    {
+      "seed": 3,
+      "beforeMs": 4665.646958000012,
+      "afterMs": 2068.2352089999986,
+      "speedup": 2.2558589746936346
+    },
+    {
+      "seed": 4,
+      "beforeMs": 7467.4702499999985,
+      "afterMs": 3096.461833000001,
+      "speedup": 2.4116138524352984
+    }
+  ],
+  "aggregateSpeedup": 2.285086029207679,
+  "identicalGeometry": true,
+  "trials": [
+    {
+      "repeat": 0,
+      "seed": 0,
+      "beforeMs": 2391.859,
+      "afterMs": 1117.9443340000007,
+      "rounds": 34,
+      "expansions": 4079934,
+      "hash": "b1faea1ba010320babcf475073314d25a5fcd6adac753bab694d7889773ea48a"
+    },
+    {
+      "repeat": 0,
+      "seed": 1,
+      "beforeMs": 1343.3842079999995,
+      "afterMs": 644.3016669999997,
+      "rounds": 11,
+      "expansions": 2801118,
+      "hash": "fb64fddd0e7c04c2cc64d4edef4b15f417b7044af66d1b97cb0dd7a0bbe14f56"
+    },
+    {
+      "repeat": 0,
+      "seed": 2,
+      "beforeMs": 2115.058666000001,
+      "afterMs": 942.4888339999998,
+      "rounds": 25,
+      "expansions": 3768696,
+      "hash": "92ed81699bbab05209623e05e23de0036fb09489736735e54cdac897c51f5de6"
+    },
+    {
+      "repeat": 0,
+      "seed": 3,
+      "beforeMs": 4598.889333000001,
+      "afterMs": 2068.2352089999986,
+      "rounds": 71,
+      "expansions": 7452422,
+      "hash": "c436008f795b150c90265168401eac878042282c77978b0acae6a6430c608d11"
+    },
+    {
+      "repeat": 0,
+      "seed": 4,
+      "beforeMs": 7222.481124999998,
+      "afterMs": 3043.756290999998,
+      "rounds": 127,
+      "expansions": 9473422,
+      "hash": "2e580cbccdb6e7d0a8652da417fe5b5f0c97b9035de8510b34ad85c9150c2491"
+    },
+    {
+      "repeat": 1,
+      "seed": 0,
+      "beforeMs": 2459.7076249999955,
+      "afterMs": 1127.3126669999983,
+      "rounds": 34,
+      "expansions": 4079934,
+      "hash": "b1faea1ba010320babcf475073314d25a5fcd6adac753bab694d7889773ea48a"
+    },
+    {
+      "repeat": 1,
+      "seed": 1,
+      "beforeMs": 1376.4495419999948,
+      "afterMs": 658.0051250000033,
+      "rounds": 11,
+      "expansions": 2801118,
+      "hash": "fb64fddd0e7c04c2cc64d4edef4b15f417b7044af66d1b97cb0dd7a0bbe14f56"
+    },
+    {
+      "repeat": 1,
+      "seed": 2,
+      "beforeMs": 2100.5834170000016,
+      "afterMs": 959.8115830000024,
+      "rounds": 25,
+      "expansions": 3768696,
+      "hash": "92ed81699bbab05209623e05e23de0036fb09489736735e54cdac897c51f5de6"
+    },
+    {
+      "repeat": 1,
+      "seed": 3,
+      "beforeMs": 5039.953041000001,
+      "afterMs": 2088.3921249999985,
+      "rounds": 71,
+      "expansions": 7452422,
+      "hash": "c436008f795b150c90265168401eac878042282c77978b0acae6a6430c608d11"
+    },
+    {
+      "repeat": 1,
+      "seed": 4,
+      "beforeMs": 7467.4702499999985,
+      "afterMs": 3096.461833000001,
+      "rounds": 127,
+      "expansions": 9473422,
+      "hash": "2e580cbccdb6e7d0a8652da417fe5b5f0c97b9035de8510b34ad85c9150c2491"
+    },
+    {
+      "repeat": 2,
+      "seed": 0,
+      "beforeMs": 2413.943959000004,
+      "afterMs": 1141.106832999998,
+      "rounds": 34,
+      "expansions": 4079934,
+      "hash": "b1faea1ba010320babcf475073314d25a5fcd6adac753bab694d7889773ea48a"
+    },
+    {
+      "repeat": 2,
+      "seed": 1,
+      "beforeMs": 1384.1140419999938,
+      "afterMs": 647.6703749999942,
+      "rounds": 11,
+      "expansions": 2801118,
+      "hash": "fb64fddd0e7c04c2cc64d4edef4b15f417b7044af66d1b97cb0dd7a0bbe14f56"
+    },
+    {
+      "repeat": 2,
+      "seed": 2,
+      "beforeMs": 2115.475458000001,
+      "afterMs": 954.3637919999965,
+      "rounds": 25,
+      "expansions": 3768696,
+      "hash": "92ed81699bbab05209623e05e23de0036fb09489736735e54cdac897c51f5de6"
+    },
+    {
+      "repeat": 2,
+      "seed": 3,
+      "beforeMs": 4665.646958000012,
+      "afterMs": 2054.8692919999958,
+      "rounds": 71,
+      "expansions": 7452422,
+      "hash": "c436008f795b150c90265168401eac878042282c77978b0acae6a6430c608d11"
+    },
+    {
+      "repeat": 2,
+      "seed": 4,
+      "beforeMs": 7653.105582999997,
+      "afterMs": 3263.0412499999948,
+      "rounds": 127,
+      "expansions": 9473422,
+      "hash": "2e580cbccdb6e7d0a8652da417fe5b5f0c97b9035de8510b34ad85c9150c2491"
+    }
+  ]
+}
