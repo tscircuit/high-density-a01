@@ -428,6 +428,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private ripChain!: TypedRipChain
   private seqCounter = 0
 
+  private viaFootprintCellIds!: Array<Uint32Array | undefined>
   private _viaOccs: ConnId[] = []
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
@@ -620,6 +621,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.overlapFriendlyRootNets = new Set()
 
     this.unsolvedSegs = this.buildConnectionSegs()
+    this.viaFootprintCellIds = new Array(this.planeSize)
 
     this.penalty2d = new Float64Array(this.planeSize)
     const widthInv = width > 0 ? 1 / width : 0
@@ -1346,11 +1348,27 @@ export class HighDensitySolverA03 extends BaseSolver {
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
+    const footprintCellIds = this.getViaFootprintCellIds(cellId)
+    for (let i = 0; i < footprintCellIds.length; i++) {
+      const occCellId = footprintCellIds[i]!
+      for (let z = 0; z < this.layers; z++) {
+        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
+      }
+    }
+  }
+
+  private getViaFootprintCellIds(cellId: number): Uint32Array {
+    const cachedCellIds = this.viaFootprintCellIds[cellId]
+    if (cachedCellIds) return cachedCellIds
+
+    // Grid geometry and the keepout radius stay fixed after setup. Occupancy
+    // changes during rip-up, so cache only the cells and read their owners live.
+    const footprintCellIds: number[] = []
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
       if (
-        !circleIntersectsRect(
+        circleIntersectsRect(
           cx,
           cy,
           this.viaKeepoutRadius,
@@ -1360,12 +1378,12 @@ export class HighDensitySolverA03 extends BaseSolver {
           this.cellMaxY[occCellId]!,
         )
       ) {
-        return
-      }
-      for (let z = 0; z < this.layers; z++) {
-        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
+        footprintCellIds.push(occCellId)
       }
     })
+    const cellIds = Uint32Array.from(footprintCellIds)
+    this.viaFootprintCellIds[cellId] = cellIds
+    return cellIds
   }
 
   private fillTraceOccupants(
