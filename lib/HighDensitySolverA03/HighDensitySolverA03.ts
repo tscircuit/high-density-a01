@@ -425,6 +425,8 @@ export class HighDensitySolverA03 extends BaseSolver {
   private ripChain!: TypedRipChain
   private seqCounter = 0
 
+  private occupantSeenStamp!: Uint32Array
+  private occupantQueryStamp = 0
   private _viaOccs: ConnId[] = []
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
@@ -615,6 +617,8 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.overlapFriendlyRootNets = new Set()
 
     this.unsolvedSegs = this.buildConnectionSegs()
+    this.occupantSeenStamp = new Uint32Array(this.connIdToName.length)
+    this.occupantQueryStamp = 0
 
     this.penalty2d = new Float64Array(this.planeSize)
     const widthInv = width > 0 ? 1 / width : 0
@@ -1327,6 +1331,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
+    this.nextOccupantQueryStamp()
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
@@ -1355,6 +1360,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     out: ConnId[],
   ): void {
     out.length = 0
+    this.nextOccupantQueryStamp()
     this.pushFlatOccupants(flatIdx, activeConn, out)
   }
 
@@ -1366,19 +1372,35 @@ export class HighDensitySolverA03 extends BaseSolver {
     const primaryOcc = this.usedCellsFlat[flatIdx]!
     if (
       primaryOcc !== -1 &&
-      primaryOcc !== activeConn &&
-      !this.allowSharedUse(activeConn, primaryOcc)
+      this.occupantSeenStamp[primaryOcc] !== this.occupantQueryStamp
     ) {
-      pushUnique(out, primaryOcc)
+      // Filtering is constant within a query, including excluded connections.
+      this.occupantSeenStamp[primaryOcc] = this.occupantQueryStamp
+      if (
+        primaryOcc !== activeConn &&
+        !this.allowSharedUse(activeConn, primaryOcc)
+      ) {
+        out.push(primaryOcc)
+      }
     }
 
     const sharedOccs = this.sharedCellsFlat[flatIdx]
     if (!sharedOccs) return
     for (let i = 0; i < sharedOccs.length; i++) {
       const occ = sharedOccs[i]!
+      if (this.occupantSeenStamp[occ] === this.occupantQueryStamp) continue
+      this.occupantSeenStamp[occ] = this.occupantQueryStamp
       if (occ === activeConn) continue
       if (this.allowSharedUse(activeConn, occ)) continue
-      pushUnique(out, occ)
+      out.push(occ)
+    }
+  }
+
+  private nextOccupantQueryStamp(): void {
+    this.occupantQueryStamp = (this.occupantQueryStamp + 1) >>> 0
+    if (this.occupantQueryStamp === 0) {
+      this.occupantSeenStamp.fill(0)
+      this.occupantQueryStamp = 1
     }
   }
 
