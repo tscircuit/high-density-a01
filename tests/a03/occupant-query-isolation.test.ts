@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { HighDensitySolverA03 } from "../../lib/HighDensitySolverA03/HighDensitySolverA03"
 import type { NodeWithPortPoints } from "../../lib/types"
 
-test("A03 occupancy queries preserve conflict order across layers, edits and stamp rollover", (): void => {
+test("A03 cached via footprints preserve live conflict order across layers and edits", (): void => {
   const connectionNames = ["active", "sibling", "first", "second"]
   const nodeWithPortPoints: NodeWithPortPoints = {
     capacityMeshNodeId: "occupant-query-isolation",
@@ -67,11 +67,9 @@ test("A03 occupancy queries preserve conflict order across layers, edits and sta
   solver["fillViaOccupants"](cellId, active)
   expect(solver["_viaOccs"]).toEqual([second])
 
-  solver["occupantQueryStamp"] = 0xffffffff
-  solver["occupantSeenStamp"].fill(1)
-  solver["fillViaOccupants"](cellId, active)
-  expect(solver["_viaOccs"]).toEqual([second])
   occupiedCells.fill(-1)
   solver["fillTraceOccupants"](0, active, traceOccupants)
   expect(traceOccupants).toEqual([])
+  solver["fillViaOccupants"](cellId, active)
+  expect(solver["_viaOccs"]).toEqual([])
 })

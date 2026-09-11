@@ -428,8 +428,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private ripChain!: TypedRipChain
   private seqCounter = 0
 
-  private occupantSeenStamp!: Uint32Array
-  private occupantQueryStamp = 0
+  private viaFootprintCellIds!: Array<Uint32Array | undefined>
   private _viaOccs: ConnId[] = []
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
@@ -622,8 +621,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.overlapFriendlyRootNets = new Set()
 
     this.unsolvedSegs = this.buildConnectionSegs()
-    this.occupantSeenStamp = new Uint32Array(this.connIdToName.length)
-    this.occupantQueryStamp = 0
+    this.viaFootprintCellIds = new Array(this.planeSize)
 
     this.penalty2d = new Float64Array(this.planeSize)
     const widthInv = width > 0 ? 1 / width : 0
@@ -1350,12 +1348,27 @@ export class HighDensitySolverA03 extends BaseSolver {
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
-    this.nextOccupantQueryStamp()
+    const footprintCellIds = this.getViaFootprintCellIds(cellId)
+    for (let i = 0; i < footprintCellIds.length; i++) {
+      const occCellId = footprintCellIds[i]!
+      for (let z = 0; z < this.layers; z++) {
+        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
+      }
+    }
+  }
+
+  private getViaFootprintCellIds(cellId: number): Uint32Array {
+    const cachedCellIds = this.viaFootprintCellIds[cellId]
+    if (cachedCellIds) return cachedCellIds
+
+    // Grid geometry and the keepout radius stay fixed after setup. Occupancy
+    // changes during rip-up, so cache only the cells and read their owners live.
+    const footprintCellIds: number[] = []
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
       if (
-        !circleIntersectsRect(
+        circleIntersectsRect(
           cx,
           cy,
           this.viaKeepoutRadius,
@@ -1365,12 +1378,12 @@ export class HighDensitySolverA03 extends BaseSolver {
           this.cellMaxY[occCellId]!,
         )
       ) {
-        return
-      }
-      for (let z = 0; z < this.layers; z++) {
-        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
+        footprintCellIds.push(occCellId)
       }
     })
+    const cellIds = Uint32Array.from(footprintCellIds)
+    this.viaFootprintCellIds[cellId] = cellIds
+    return cellIds
   }
 
   private fillTraceOccupants(
@@ -1379,7 +1392,6 @@ export class HighDensitySolverA03 extends BaseSolver {
     out: ConnId[],
   ): void {
     out.length = 0
-    this.nextOccupantQueryStamp()
     this.pushFlatOccupants(flatIdx, activeConn, out)
   }
 
@@ -1391,35 +1403,19 @@ export class HighDensitySolverA03 extends BaseSolver {
     const primaryOcc = this.usedCellsFlat[flatIdx]!
     if (
       primaryOcc !== -1 &&
-      this.occupantSeenStamp[primaryOcc] !== this.occupantQueryStamp
+      primaryOcc !== activeConn &&
+      !this.allowSharedUse(activeConn, primaryOcc)
     ) {
-      // Filtering is constant within a query, including excluded connections.
-      this.occupantSeenStamp[primaryOcc] = this.occupantQueryStamp
-      if (
-        primaryOcc !== activeConn &&
-        !this.allowSharedUse(activeConn, primaryOcc)
-      ) {
-        out.push(primaryOcc)
-      }
+      pushUnique(out, primaryOcc)
     }
 
     const sharedOccs = this.sharedCellsFlat[flatIdx]
     if (!sharedOccs) return
     for (let i = 0; i < sharedOccs.length; i++) {
       const occ = sharedOccs[i]!
-      if (this.occupantSeenStamp[occ] === this.occupantQueryStamp) continue
-      this.occupantSeenStamp[occ] = this.occupantQueryStamp
       if (occ === activeConn) continue
       if (this.allowSharedUse(activeConn, occ)) continue
-      out.push(occ)
-    }
-  }
-
-  private nextOccupantQueryStamp(): void {
-    this.occupantQueryStamp = (this.occupantQueryStamp + 1) >>> 0
-    if (this.occupantQueryStamp === 0) {
-      this.occupantSeenStamp.fill(0)
-      this.occupantQueryStamp = 1
+      pushUnique(out, occ)
     }
   }
 
