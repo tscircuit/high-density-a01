@@ -1167,10 +1167,36 @@ export class HighDensitySolverA03 extends BaseSolver {
     const endCellId = seg.endCellId
     const neighborStart = this.neighborOffset[cellId]!
     const neighborEnd = this.neighborOffset[cellId + 1]!
+    // Occupant penalties can only increase the move's base cost in this
+    // domain. Its base cost therefore proves some OPEN labels unbeatable
+    // before collecting occupants or constructing their rip histories.
+    const canBoundMoveCost =
+      Number.isFinite(g) &&
+      Number.isFinite(this.hyperParameters.ripCost) &&
+      this.hyperParameters.ripCost >= 0 &&
+      Number.isFinite(this.hyperParameters.ripTracePenalty) &&
+      this.hyperParameters.ripTracePenalty >= 0 &&
+      Number.isFinite(this.hyperParameters.ripViaPenalty) &&
+      this.hyperParameters.ripViaPenalty >= 0
 
     for (let i = neighborStart; i < neighborEnd; i++) {
       const neighborCellId = this.neighborIds[i]!
       const nextFlatIdx = z * this.planeSize + neighborCellId
+      // Search states are keyed only by layer and cell. A closed destination
+      // cannot be expanded again, regardless of its move cost or rip history.
+      if (visited[nextFlatIdx] === stamp) continue
+      if (canBoundMoveCost && this.bestGStamp[nextFlatIdx] === stamp) {
+        const baseCost =
+          0 +
+          this.neighborCosts[i]! +
+          Math.min(this.penalty2d[neighborCellId]!, this.penaltyCap)
+        if (
+          Number.isFinite(baseCost) &&
+          g + baseCost >= this.bestGValue[nextFlatIdx]!
+        ) {
+          continue
+        }
+      }
 
       this.computeMoveCostAndRips(
         activeConn,
@@ -1218,6 +1244,19 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+        if (visited[nextFlatIdx] === stamp) continue
+        if (canBoundMoveCost && this.bestGStamp[nextFlatIdx] === stamp) {
+          const baseCost =
+            0 +
+            this.hyperParameters.viaBaseCost +
+            Math.min(this.penalty2d[cellId]!, this.penaltyCap)
+          if (
+            Number.isFinite(baseCost) &&
+            g + baseCost >= this.bestGValue[nextFlatIdx]!
+          ) {
+            continue
+          }
+        }
 
         this.computeMoveCostAndRips(
           activeConn,
