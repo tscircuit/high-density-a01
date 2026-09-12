@@ -11,6 +11,8 @@ import type {
   PortPoint,
 } from "../types"
 
+import { OrderedOwnerRows } from "./OrderedOwnerRows"
+
 type ConnId = number
 
 type RegionName = "left" | "top" | "right" | "bottom" | "middle"
@@ -321,6 +323,18 @@ export interface HighDensitySolverA03Props {
   viaDiameter: number
   maxCellCount?: number
   stepMultiplier?: number
+  /**
+   * Selected during setup. Owner runs require canonical occupancy writes and
+   * fixed grid/footprint data during each search. Direct edits use dense mode.
+   */
+  viaOccupantQuery?: "dense" | "owner-runs"
+  /**
+   * Selected during setup. Physical expansion shares one through-via
+   * transition across destination layers. It requires canonical search hooks
+   * and geometry, occupancy and numeric costs fixed during each expansion.
+   * Immutable rip histories may share their backing entries across layers.
+   */
+  viaExpansion?: "per-layer" | "physical"
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
@@ -362,6 +376,8 @@ export class HighDensitySolverA03 extends BaseSolver {
   effort: number
   enableDiagonalMoves: boolean
   stepMultiplier: number
+  viaOccupantQuery: "dense" | "owner-runs"
+  viaExpansion: "per-layer" | "physical"
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
 
@@ -400,6 +416,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   neighborIds!: Int32Array
   neighborCosts!: Float32Array
 
+  private orderedOwnerRows: OrderedOwnerRows | null = null
+  private useOrderedOwnerRows = false
+  private usePhysicalViaExpansion = false
   private usedCellsFlat!: Int32Array
   private sharedCellsFlat!: Array<number[] | undefined>
   private portOwnerFlat!: Int32Array
@@ -526,6 +545,8 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.effort = props.effort ?? 1
     this.enableDiagonalMoves = props.enableDiagonalMoves ?? false
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
+    this.viaOccupantQuery = props.viaOccupantQuery ?? "dense"
+    this.viaExpansion = props.viaExpansion ?? "per-layer"
     this.hyperParameters = {
       shuffleSeed: 0,
       ripCost: 8,
@@ -550,6 +571,8 @@ export class HighDensitySolverA03 extends BaseSolver {
         viaDiameter: this.viaDiameter,
         maxCellCount: this.maxCellCount,
         stepMultiplier: this.stepMultiplier,
+        viaOccupantQuery: this.viaOccupantQuery,
+        viaExpansion: this.viaExpansion,
         traceThickness: this.traceThickness,
         traceMargin: this.traceMargin,
         viaMinDistFromBorder: this.viaMinDistFromBorder,
@@ -564,6 +587,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.orderedOwnerRows = null
+    this.useOrderedOwnerRows = this.viaOccupantQuery === "owner-runs"
+    this.usePhysicalViaExpansion = this.viaExpansion === "physical"
     const { nodeWithPortPoints } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -1107,6 +1133,15 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.bestGStamp[startStateIdx] = this.stamp
       this.bestGValue[startStateIdx] = 0
       this.heap.push(f, this.seqCounter++, startIdx)
+      if (this.useOrderedOwnerRows && this.layers > 1) {
+        this.orderedOwnerRows = new OrderedOwnerRows(
+          this.regions,
+          this.planeSize,
+          this.layers,
+          this.usedCellsFlat,
+          this.sharedCellsFlat,
+        )
+      }
       return
     }
 
@@ -1121,6 +1156,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         pen[i] = pen[i]! * 0.9
       }
       this.unsolvedSegs.push(this.activeConnSeg)
+      this.orderedOwnerRows = null
       this.activeConnSeg = null
       this.activeConnId = -1
       this.heap.clear()
@@ -1154,6 +1190,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     const seg = this.activeConnSeg
     if (z === seg.endZ && cellId === seg.endCellId) {
+      this.orderedOwnerRows = null
       this.finalizeRoute(nodeIdx)
       this.activeConnSeg = null
       this.activeConnId = -1
@@ -1167,10 +1204,36 @@ export class HighDensitySolverA03 extends BaseSolver {
     const endCellId = seg.endCellId
     const neighborStart = this.neighborOffset[cellId]!
     const neighborEnd = this.neighborOffset[cellId + 1]!
+    // Occupant penalties can only increase the move's base cost in this
+    // domain. Its base cost therefore proves some OPEN labels unbeatable
+    // before collecting occupants or constructing their rip histories.
+    const canBoundMoveCost =
+      Number.isFinite(g) &&
+      Number.isFinite(this.hyperParameters.ripCost) &&
+      this.hyperParameters.ripCost >= 0 &&
+      Number.isFinite(this.hyperParameters.ripTracePenalty) &&
+      this.hyperParameters.ripTracePenalty >= 0 &&
+      Number.isFinite(this.hyperParameters.ripViaPenalty) &&
+      this.hyperParameters.ripViaPenalty >= 0
 
     for (let i = neighborStart; i < neighborEnd; i++) {
       const neighborCellId = this.neighborIds[i]!
       const nextFlatIdx = z * this.planeSize + neighborCellId
+      // Search states are keyed only by layer and cell. A closed destination
+      // cannot be expanded again, regardless of its move cost or rip history.
+      if (visited[nextFlatIdx] === stamp) continue
+      if (canBoundMoveCost && this.bestGStamp[nextFlatIdx] === stamp) {
+        const baseCost =
+          0 +
+          this.neighborCosts[i]! +
+          Math.min(this.penalty2d[neighborCellId]!, this.penaltyCap)
+        if (
+          Number.isFinite(baseCost) &&
+          g + baseCost >= this.bestGValue[nextFlatIdx]!
+        ) {
+          continue
+        }
+      }
 
       this.computeMoveCostAndRips(
         activeConn,
@@ -1215,9 +1278,34 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
 
     if (this.viaAllowed[cellId]) {
+      if (this.usePhysicalViaExpansion && this.layers > 2) {
+        this.expandPhysicalVia(
+          nodeIdx,
+          z,
+          cellId,
+          g,
+          rippedHead,
+          ripCount,
+          canBoundMoveCost,
+        )
+        return
+      }
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+        if (visited[nextFlatIdx] === stamp) continue
+        if (canBoundMoveCost && this.bestGStamp[nextFlatIdx] === stamp) {
+          const baseCost =
+            0 +
+            this.hyperParameters.viaBaseCost +
+            Math.min(this.penalty2d[cellId]!, this.penaltyCap)
+          if (
+            Number.isFinite(baseCost) &&
+            g + baseCost >= this.bestGValue[nextFlatIdx]!
+          ) {
+            continue
+          }
+        }
 
         this.computeMoveCostAndRips(
           activeConn,
@@ -1260,6 +1348,115 @@ export class HighDensitySolverA03 extends BaseSolver {
         )
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
+    }
+  }
+
+  private expandPhysicalVia(
+    nodeIdx: number,
+    z: number,
+    cellId: number,
+    g: number,
+    rippedHead: number,
+    ripCount: number,
+    canBoundMoveCost: boolean,
+  ): void {
+    const visited = this.visitedStamp
+    const stamp = this.stamp
+    const activeConn = this.activeConnId
+    const seg = this.activeConnSeg!
+    const destinations: number[] = []
+    let sawRejectedPort = false
+    let lastPortRejected = false
+
+    for (let nz = 0; nz < this.layers; nz++) {
+      if (nz === z) continue
+      const nextFlatIdx = nz * this.planeSize + cellId
+      if (visited[nextFlatIdx] === stamp) continue
+      if (canBoundMoveCost && this.bestGStamp[nextFlatIdx] === stamp) {
+        const baseCost =
+          0 +
+          this.hyperParameters.viaBaseCost +
+          Math.min(this.penalty2d[cellId]!, this.penaltyCap)
+        if (
+          Number.isFinite(baseCost) &&
+          g + baseCost >= this.bestGValue[nextFlatIdx]!
+        ) {
+          continue
+        }
+      }
+
+      const fixedOwner = this.portOwnerFlat[nextFlatIdx]!
+      const allowFixedOverlap = this.allowSharedUse(activeConn, fixedOwner)
+      const isSegEnd = nz === seg.endZ && cellId === seg.endCellId
+      if (
+        fixedOwner >= 0 &&
+        fixedOwner !== activeConn &&
+        !allowFixedOverlap &&
+        !isSegEnd
+      ) {
+        sawRejectedPort = true
+        lastPortRejected = true
+        continue
+      }
+      lastPortRejected = false
+      destinations.push(nz)
+    }
+
+    if (destinations.length === 0) {
+      if (sawRejectedPort) {
+        this._moveCost = -1
+        this._moveRippedHead = rippedHead
+      }
+      return
+    }
+
+    // A through via encounters the same ordered occupants on every layer.
+    // Build its cost and immutable rip history once, then branch by layer.
+    this.computeMoveCostAndRips(
+      activeConn,
+      destinations[0]!,
+      cellId,
+      true,
+      rippedHead,
+      ripCount,
+      0,
+    )
+    const moveCost = this._moveCost
+    const moveRippedHead = this._moveRippedHead
+    const moveRipCount = this._moveRipCount
+    if (!(moveCost < 0)) {
+      for (let i = 0; i < destinations.length; i++) {
+        const nz = destinations[i]!
+        const nextFlatIdx = nz * this.planeSize + cellId
+        const nextStateIdx = this.getSearchStateIdx(nextFlatIdx, moveRipCount)
+        if (visited[nextStateIdx] === stamp) continue
+        const g2 = g + moveCost
+        if (
+          this.bestGStamp[nextStateIdx] === stamp &&
+          g2 >= this.bestGValue[nextStateIdx]!
+        ) {
+          continue
+        }
+        this.bestGStamp[nextStateIdx] = stamp
+        this.bestGValue[nextStateIdx] = g2
+        const f2 =
+          g2 +
+          this.computeH(nz, cellId, seg.endZ, seg.endCellId) *
+            this.hyperParameters.greedyMultiplier
+        const newNodeIdx = this.nodePool.push(
+          nz,
+          cellId,
+          g2,
+          nodeIdx,
+          moveRippedHead,
+          moveRipCount,
+        )
+        this.heap.push(f2, this.seqCounter++, newNodeIdx)
+      }
+    }
+    if (lastPortRejected) {
+      this._moveCost = -1
+      this._moveRippedHead = rippedHead
     }
   }
 
@@ -1344,6 +1541,15 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
+    const index = this.orderedOwnerRows
+    if (index) {
+      this.fillViaOccupantsFromRows(cellId, activeConn, index)
+      return
+    }
+    this.fillViaOccupantsDense(cellId, activeConn)
+  }
+
+  private fillViaOccupantsDense(cellId: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
     const cx = this.cellCenterX[cellId]!
@@ -1366,6 +1572,113 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
       }
     })
+  }
+
+  private fillViaOccupantsFromRows(
+    cellId: number,
+    activeConn: ConnId,
+    index: OrderedOwnerRows,
+  ): void {
+    const occs = this._viaOccs
+    occs.length = 0
+    const cx = this.cellCenterX[cellId]!
+    const cy = this.cellCenterY[cellId]!
+    const radius = this.viaKeepoutRadius
+    const minFineCol = clamp(
+      Math.floor((cx - radius - this.boundsMinX) / this.highResolutionCellSize),
+      0,
+      this.fineCols - 1,
+    )
+    const maxFineCol = clamp(
+      Math.floor((cx + radius - this.boundsMinX) / this.highResolutionCellSize),
+      0,
+      this.fineCols - 1,
+    )
+    const minFineRow = clamp(
+      Math.floor((cy - radius - this.boundsMinY) / this.highResolutionCellSize),
+      0,
+      this.fineRows - 1,
+    )
+    const maxFineRow = clamp(
+      Math.floor((cy + radius - this.boundsMinY) / this.highResolutionCellSize),
+      0,
+      this.fineRows - 1,
+    )
+
+    for (let regionIdx = 0; regionIdx < this.regions.length; regionIdx++) {
+      const region = this.regions[regionIdx]!
+      if (region.rows === 0 || region.cols === 0) continue
+
+      const regionFineRowMin = Math.max(minFineRow, region.fineOriginRow)
+      const regionFineRowMax = Math.min(
+        maxFineRow,
+        region.fineOriginRow + region.fineRows - 1,
+      )
+      const regionFineColMin = Math.max(minFineCol, region.fineOriginCol)
+      const regionFineColMax = Math.min(
+        maxFineCol,
+        region.fineOriginCol + region.fineCols - 1,
+      )
+      if (regionFineRowMin > regionFineRowMax) continue
+      if (regionFineColMin > regionFineColMax) continue
+
+      const localRowMin = Math.floor(
+        (regionFineRowMin - region.fineOriginRow) / region.cellScale,
+      )
+      const localRowMax = Math.floor(
+        (regionFineRowMax - region.fineOriginRow) / region.cellScale,
+      )
+      const localColMin = Math.floor(
+        (regionFineColMin - region.fineOriginCol) / region.cellScale,
+      )
+      const localColMax = Math.floor(
+        (regionFineColMax - region.fineOriginCol) / region.cellScale,
+      )
+
+      const rows = index.regions[regionIdx]!
+      for (let row = localRowMin; row <= localRowMax; row++) {
+        const runs = rows[row]
+        if (!runs) continue
+        let left = 0
+        let right = runs.length
+        while (left < right) {
+          const mid = (left + right) >>> 1
+          if (runs[mid]!.lastColumn < localColMin) left = mid + 1
+          else right = mid
+        }
+        for (let i = left; i < runs.length; i++) {
+          const run = runs[i]!
+          if (run.firstColumn > localColMax) break
+          const first = Math.max(localColMin, run.firstColumn)
+          const last = Math.min(localColMax, run.lastColumn)
+          for (let col = first; col <= last; col++) {
+            const occCellId = this.cellIdFor(region.id, row, col)
+            if (
+              !circleIntersectsRect(
+                cx,
+                cy,
+                this.viaKeepoutRadius,
+                this.cellMinX[occCellId]!,
+                this.cellMinY[occCellId]!,
+                this.cellMaxX[occCellId]!,
+                this.cellMaxY[occCellId]!,
+              )
+            ) {
+              continue
+            }
+            for (let z = 0; z < this.layers; z++) {
+              this.pushFlatOccupants(
+                z * this.planeSize + occCellId,
+                activeConn,
+                occs,
+              )
+            }
+            // Every later cell in this run has the same ordered owner tuple.
+            break
+          }
+        }
+      }
+    }
   }
 
   private fillTraceOccupants(
