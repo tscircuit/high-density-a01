@@ -13,6 +13,21 @@ import type {
 
 type ConnId = number
 
+const EMPTY_OCCUPANTS: readonly ConnId[] = Object.freeze([])
+const MAX_LAYER_OCCUPANT_CACHE_CELLS = 65_536
+const MAX_DISTANCE_CACHE_SLOTS = 65_536
+const defaultMath = Math
+const defaultHypot = Math.hypot
+const applyFunction = Reflect.apply
+const sameValue = Object.is
+
+interface DistanceCacheTable {
+  dx: Float64Array
+  dy: Float64Array
+  distance: Float64Array
+  valid: Uint8Array
+}
+
 type RegionName = "left" | "top" | "right" | "bottom" | "middle"
 
 const REGION_LEFT = 0
@@ -65,94 +80,82 @@ interface HyperParameters {
 
 class TypedMinHeap {
   private f = new Float64Array(1024)
-  private seq = new Uint32Array(1024)
   private id = new Int32Array(1024)
   private n = 0
 
-  push(f: number, seq: number, id: number) {
+  // Nodes are enqueued once, immediately after allocation. Their pool index is
+  // the insertion order, so equal priorities need no separate sequence array.
+  push(f: number, id: number): void {
     this.ensureCapacity(this.n + 1)
+    // Move parents into the hole, then write the new tuple once.
     let i = this.n++
-    this.f[i] = f
-    this.seq[i] = seq
-    this.id[i] = id
     while (i > 0) {
       const p = (i - 1) >> 1
-      if (this.less(p, i)) break
-      this.swap(i, p)
+      const parentF = this.f[p]!
+      const parentId = this.id[p]!
+      if (parentF !== f ? parentF < f : parentId < id) break
+      this.f[i] = parentF
+      this.id[i] = parentId
       i = p
     }
+    this.f[i] = f
+    this.id[i] = id
   }
 
   pop(): number {
     const out = this.id[0]!
     this.n--
     if (this.n > 0) {
-      this.f[0] = this.f[this.n]!
-      this.seq[0] = this.seq[this.n]!
-      this.id[0] = this.id[this.n]!
-      this.siftDown(0)
+      const f = this.f[this.n]!
+      const id = this.id[this.n]!
+      let i = 0
+      while (true) {
+        const left = i * 2 + 1
+        if (left >= this.n) break
+        const right = left + 1
+        let child = left
+        if (right < this.n) {
+          const leftF = this.f[left]!
+          const rightF = this.f[right]!
+          if (
+            !(leftF !== rightF
+              ? leftF < rightF
+              : this.id[left]! < this.id[right]!)
+          ) {
+            child = right
+          }
+        }
+        const childF = this.f[child]!
+        const childId = this.id[child]!
+        if (f !== childF ? f < childF : id < childId) break
+        this.f[i] = childF
+        this.id[i] = childId
+        i = child
+      }
+      this.f[i] = f
+      this.id[i] = id
     }
     return out
   }
 
-  get size() {
+  get size(): number {
     return this.n
   }
 
-  clear() {
+  clear(): void {
     this.n = 0
   }
 
-  private ensureCapacity(size: number) {
+  private ensureCapacity(size: number): void {
     if (size <= this.f.length) return
     let next = this.f.length
     while (next < size) next *= 2
-
-    const nf = new Float64Array(next)
-    nf.set(this.f)
-    this.f = nf
-
-    const ns = new Uint32Array(next)
-    ns.set(this.seq)
-    this.seq = ns
-
-    const ni = new Int32Array(next)
-    ni.set(this.id)
-    this.id = ni
-  }
-
-  private siftDown(i: number) {
-    while (true) {
-      const l = i * 2 + 1
-      const r = l + 1
-      if (l >= this.n) return
-      let m = l
-      if (r < this.n && !this.less(l, r)) m = r
-      if (this.less(i, m)) return
-      this.swap(i, m)
-      i = m
-    }
-  }
-
-  private less(i: number, j: number) {
-    const fi = this.f[i]!
-    const fj = this.f[j]!
-    if (fi !== fj) return fi < fj
-    return this.seq[i]! < this.seq[j]!
-  }
-
-  private swap(i: number, j: number) {
-    const tf = this.f[i]!
-    this.f[i] = this.f[j]!
-    this.f[j] = tf
-
-    const ts = this.seq[i]!
-    this.seq[i] = this.seq[j]!
-    this.seq[j] = ts
-
-    const ti = this.id[i]!
-    this.id[i] = this.id[j]!
-    this.id[j] = ti
+    const f = new Float64Array(next)
+    f.set(this.f)
+    this.f = f
+    const id = new Int32Array(next)
+    id.set(this.id)
+    this.id = id
   }
 }
 
@@ -426,9 +429,20 @@ export class HighDensitySolverA03 extends BaseSolver {
   private nodePool!: TypedNodePool
   private heap!: TypedMinHeap
   private ripChain!: TypedRipChain
-  private seqCounter = 0
+
+  // FIFO goal tables retain exact same-engine distances across searches. The
+  // numeric payload is bounded to 65,536 * 25 = 1,638,400 bytes, plus table headers.
+  private distanceByGoal = new Map<number, DistanceCacheTable>()
+  private distanceCacheSlots = 0
+  private distanceCacheCapacity = 0
 
   private _viaOccs: ConnId[] = []
+  private viaOccupantsByCell = new Map<number, ConnId[]>()
+  private viaFootprintByCell = new Map<number, Int32Array>()
+  private layerOccupantsByCell: Array<readonly ConnId[] | undefined> = []
+  private layerOccupantStamp = new Uint32Array(0)
+  private _layerOccs: ConnId[] = []
+  private rootOverlapAllowed = new Uint8Array(0)
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
@@ -564,6 +578,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.clearDistanceCache()
+    this.viaFootprintByCell.clear()
+    this.clearLayerOccupantCache()
     const { nodeWithPortPoints } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -654,6 +671,11 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.visitedFlatStamp = new Uint32Array(totalCells)
     this.stamp = 0
 
+    if (this.layers > 1 && this.planeSize <= MAX_LAYER_OCCUPANT_CACHE_CELLS) {
+      this.layerOccupantsByCell = new Array(this.planeSize).fill(undefined)
+      this.layerOccupantStamp = new Uint32Array(this.planeSize)
+    }
+
     const rootByPortFlat = new Map<number, string>()
     for (const pp of this.nodeWithPortPoints.portPoints) {
       const connId = this.connNameToId.get(pp.connectionName)
@@ -696,13 +718,28 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.nodePool = new TypedNodePool()
     this.heap = new TypedMinHeap()
     this.ripChain = new TypedRipChain()
-    this.seqCounter = 0
+    // Capacity is only an allocation bound, independent of live point geometry.
+    // Do not introduce a new read of a customized public planeSize getter.
+    const size = Object.getOwnPropertyDescriptor(this, "planeSize")?.value
+    if (
+      Number.isInteger(size) &&
+      size > 0 &&
+      size <= MAX_DISTANCE_CACHE_SLOTS
+    ) {
+      this.distanceCacheCapacity = size
+    }
   }
 
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved || this.failed) break
       this.stepOnce()
+    }
+    if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
+      this.viaOccupantsByCell.clear()
+      this.viaFootprintByCell.clear()
+      this.clearLayerOccupantCache()
+      this.clearDistanceCache()
     }
   }
 
@@ -1083,7 +1120,6 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.nodePool.clear()
       this.ripChain.clear()
       this.heap.clear()
-      this.seqCounter = 0
       this.searchIterations = 0
       this.nextStamp()
 
@@ -1106,7 +1142,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       const startStateIdx = this.getSearchStateIdx(startFlatIdx, 0)
       this.bestGStamp[startStateIdx] = this.stamp
       this.bestGValue[startStateIdx] = 0
-      this.heap.push(f, this.seqCounter++, startIdx)
+      this.heap.push(f, startIdx)
       return
     }
 
@@ -1171,6 +1207,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     for (let i = neighborStart; i < neighborEnd; i++) {
       const neighborCellId = this.neighborIds[i]!
       const nextFlatIdx = z * this.planeSize + neighborCellId
+      if (visited[nextFlatIdx] === stamp) continue
 
       this.computeMoveCostAndRips(
         activeConn,
@@ -1211,13 +1248,14 @@ export class HighDensitySolverA03 extends BaseSolver {
         this._moveRippedHead,
         this._moveRipCount,
       )
-      this.heap.push(f2, this.seqCounter++, newNodeIdx)
+      this.heap.push(f2, newNodeIdx)
     }
 
     if (this.viaAllowed[cellId]) {
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+        if (visited[nextFlatIdx] === stamp) continue
 
         this.computeMoveCostAndRips(
           activeConn,
@@ -1258,7 +1296,7 @@ export class HighDensitySolverA03 extends BaseSolver {
           this._moveRippedHead,
           this._moveRipCount,
         )
-        this.heap.push(f2, this.seqCounter++, newNodeIdx)
+        this.heap.push(f2, newNodeIdx)
       }
     }
   }
@@ -1276,28 +1314,28 @@ export class HighDensitySolverA03 extends BaseSolver {
     let head = rippedHead
     let ripCount = currentRipCount
     const toFlatIdx = toZ * this.planeSize + toCellId
+    const fixedOwner = this.portOwnerFlat[toFlatIdx]!
+    // Empty and self-owned cells need neither an overlap lookup nor an end
+    // exemption. In particular, avoid indexing the typed table with -1/-2.
+    if (
+      fixedOwner >= 0 &&
+      fixedOwner !== activeConn &&
+      this.rootOverlapAllowed[fixedOwner] !== 1
+    ) {
+      const seg = this.activeConnSeg
+      const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
+      if (!isSegEnd) {
+        this._moveCost = -1
+        this._moveRippedHead = head
+        return
+      }
+    }
 
     if (isVia) {
       cost += this.hyperParameters.viaBaseCost
       cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
 
-      const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const allowFixedOverlap = this.allowSharedUse(activeConn, fixedOwner)
-      const seg = this.activeConnSeg
-      const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
-      if (
-        fixedOwner >= 0 &&
-        fixedOwner !== activeConn &&
-        !allowFixedOverlap &&
-        !isSegEnd
-      ) {
-        this._moveCost = -1
-        this._moveRippedHead = head
-        return
-      }
-
-      this.fillViaOccupants(toCellId, activeConn)
-      const occs = this._viaOccs
+      const occs = this.getViaOccupants(toCellId, activeConn)
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!this.ripChain.contains(head, occ)) {
@@ -1310,21 +1348,6 @@ export class HighDensitySolverA03 extends BaseSolver {
     } else {
       cost += lateralCost
       cost += Math.min(this.penalty2d[toCellId]!, this.penaltyCap)
-
-      const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const allowFixedOverlap = this.allowSharedUse(activeConn, fixedOwner)
-      const seg = this.activeConnSeg
-      const isSegEnd = !!seg && toZ === seg.endZ && toCellId === seg.endCellId
-      if (
-        fixedOwner >= 0 &&
-        fixedOwner !== activeConn &&
-        !allowFixedOverlap &&
-        !isSegEnd
-      ) {
-        this._moveCost = -1
-        this._moveRippedHead = head
-        return
-      }
 
       this.fillTraceOccupants(toFlatIdx, activeConn, this._cellOccs)
       for (let i = 0; i < this._cellOccs.length; i++) {
@@ -1343,29 +1366,111 @@ export class HighDensitySolverA03 extends BaseSolver {
     this._moveRipCount = ripCount
   }
 
-  private fillViaOccupants(cellId: number, activeConn: ConnId): void {
-    const occs = this._viaOccs
-    occs.length = 0
+  private getViaFootprint(cellId: number): Int32Array {
+    const cached = this.viaFootprintByCell.get(cellId)
+    if (cached) return cached
+    const cells: number[] = []
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
-    this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
-      if (
-        !circleIntersectsRect(
-          cx,
-          cy,
-          this.viaKeepoutRadius,
-          this.cellMinX[occCellId]!,
-          this.cellMinY[occCellId]!,
-          this.cellMaxX[occCellId]!,
-          this.cellMaxY[occCellId]!,
-        )
-      ) {
-        return
+    // Grid geometry stays fixed when searches finalize or rip other routes.
+    this.forEachCellNearCircle(
+      cx,
+      cy,
+      this.viaKeepoutRadius,
+      (neighborCellId) => {
+        if (
+          circleIntersectsRect(
+            cx,
+            cy,
+            this.viaKeepoutRadius,
+            this.cellMinX[neighborCellId]!,
+            this.cellMinY[neighborCellId]!,
+            this.cellMaxX[neighborCellId]!,
+            this.cellMaxY[neighborCellId]!,
+          )
+        ) {
+          cells.push(neighborCellId)
+        }
+      },
+    )
+    const footprint = new Int32Array(cells)
+    this.viaFootprintByCell.set(cellId, footprint)
+    return footprint
+  }
+
+  private getViaOccupants(cellId: number, activeConn: ConnId): ConnId[] {
+    // With two layers, the reverse via targets an already visited state, so
+    // this cell is scanned at most once per search. More layers can reuse it.
+    const shouldCache = this.layers > 2
+    if (shouldCache) {
+      const cached = this.viaOccupantsByCell.get(cellId)
+      if (cached) return cached
+    }
+    // Uncached callers consume the list synchronously. Cached lists must stay
+    // independent of the scratch array used by later moves.
+    const occs: ConnId[] = shouldCache ? [] : this._viaOccs
+    occs.length = 0
+    const canReuseLayers =
+      this.layerOccupantStamp.length > 0 &&
+      this.stamp !== 0 &&
+      activeConn >= 0 &&
+      activeConn === this.activeConnId
+    for (const occCellId of this.getViaFootprint(cellId)) {
+      if (!canReuseLayers) {
+        for (let z = 0; z < this.layers; z++) {
+          this.pushFlatOccupants(
+            z * this.planeSize + occCellId,
+            activeConn,
+            occs,
+          )
+        }
+        continue
       }
-      for (let z = 0; z < this.layers; z++) {
-        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
+      const occupants =
+        this.layerOccupantStamp[occCellId] === this.stamp
+          ? this.layerOccupantsByCell[occCellId]!
+          : this.getLayerOccupants(occCellId, activeConn)
+      for (let i = 0; i < occupants.length; i++) {
+        pushUnique(occs, occupants[i]!)
       }
-    })
+    }
+    if (shouldCache) this.viaOccupantsByCell.set(cellId, occs)
+    return occs
+  }
+
+  private getLayerOccupants(
+    cellId: number,
+    activeConn: ConnId,
+  ): readonly ConnId[] {
+    const cacheable =
+      cellId >= 0 &&
+      cellId < this.layerOccupantStamp.length &&
+      this.stamp !== 0 &&
+      activeConn >= 0 &&
+      activeConn === this.activeConnId
+    if (cacheable && this.layerOccupantStamp[cellId] === this.stamp) {
+      return this.layerOccupantsByCell[cellId]!
+    }
+
+    // Overlapping via footprints repeatedly inspect the same occupancy cell.
+    // Layers, primary/shared ordering, and root filtering match the original
+    // scan; the outer footprint traversal still performs its ordered union.
+    const occupants = this._layerOccs
+    occupants.length = 0
+    for (let z = 0; z < this.layers; z++) {
+      this.pushFlatOccupants(z * this.planeSize + cellId, activeConn, occupants)
+    }
+    if (!cacheable) return occupants
+    const cached = occupants.length ? occupants.slice() : EMPTY_OCCUPANTS
+    this.layerOccupantsByCell[cellId] = cached
+    this.layerOccupantStamp[cellId] = this.stamp
+    return cached
+  }
+
+  private clearLayerOccupantCache(): void {
+    this.layerOccupantsByCell = []
+    this.layerOccupantStamp = new Uint32Array(0)
+    this._layerOccs.length = 0
   }
 
   private fillTraceOccupants(
@@ -1386,7 +1491,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     if (
       primaryOcc !== -1 &&
       primaryOcc !== activeConn &&
-      !this.allowSharedUse(activeConn, primaryOcc)
+      this.rootOverlapAllowed[primaryOcc] !== 1
     ) {
       pushUnique(out, primaryOcc)
     }
@@ -1396,7 +1501,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     for (let i = 0; i < sharedOccs.length; i++) {
       const occ = sharedOccs[i]!
       if (occ === activeConn) continue
-      if (this.allowSharedUse(activeConn, occ)) continue
+      if (this.rootOverlapAllowed[occ] === 1) continue
       pushUnique(out, occ)
     }
   }
@@ -1456,11 +1561,23 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   private nextStamp(): void {
+    // Occupancy and the active connection remain fixed during each search.
+    // Finalizing or ripping routes can change both before the next search.
+    this.viaOccupantsByCell.clear()
+    const roots = this.connIdToRootNet
+    if (this.rootOverlapAllowed.length !== roots.length) {
+      this.rootOverlapAllowed = new Uint8Array(roots.length)
+    }
+    const activeRoot = roots[this.activeConnId]!
+    for (let conn = 0; conn < roots.length; conn++) {
+      this.rootOverlapAllowed[conn] = roots[conn] === activeRoot ? 1 : 0
+    }
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
       this.bestGStamp.fill(0)
       this.visitedFlatStamp.fill(0)
+      this.layerOccupantStamp.fill(0)
       this.stamp = 1
     }
   }
@@ -1476,13 +1593,71 @@ export class HighDensitySolverA03 extends BaseSolver {
     toZ: number,
     toCellId: number,
   ): number {
-    const dist = Math.hypot(
-      this.cellCenterX[cellId]! - this.cellCenterX[toCellId]!,
-      this.cellCenterY[cellId]! - this.cellCenterY[toCellId]!,
-    )
+    // Resolve the callee before its arguments, including custom getters. Reading
+    // both displacements on every call also preserves mutable point geometry.
+    const math = Math
+    const hypot = math.hypot
+    const dx = this.cellCenterX[cellId]! - this.cellCenterX[toCellId]!
+    const dy = this.cellCenterY[cellId]! - this.cellCenterY[toCellId]!
+    let dist: number
+    const usesDefaultHypot = math === defaultMath && hypot === defaultHypot
+    const size = this.distanceCacheCapacity
+    if (
+      usesDefaultHypot &&
+      typeof dx === "number" &&
+      typeof dy === "number" &&
+      size > 0 &&
+      Number.isInteger(cellId) &&
+      cellId >= 0 &&
+      cellId < size &&
+      Number.isInteger(toCellId) &&
+      toCellId >= 0 &&
+      toCellId < size
+    ) {
+      let table = this.distanceByGoal.get(toCellId)
+      if (!table) {
+        while (this.distanceCacheSlots + size > MAX_DISTANCE_CACHE_SLOTS) {
+          const oldestGoal = this.distanceByGoal.keys().next().value!
+          this.distanceCacheSlots -=
+            this.distanceByGoal.get(oldestGoal)!.valid.length
+          this.distanceByGoal.delete(oldestGoal)
+        }
+        table = {
+          dx: new Float64Array(size),
+          dy: new Float64Array(size),
+          distance: new Float64Array(size),
+          valid: new Uint8Array(size),
+        }
+        this.distanceByGoal.set(toCellId, table)
+        this.distanceCacheSlots += size
+      }
+      if (
+        table.valid[cellId] === 1 &&
+        sameValue(table.dx[cellId], dx) &&
+        sameValue(table.dy[cellId], dy)
+      ) {
+        dist = table.distance[cellId]!
+      } else {
+        dist = hypot(dx, dy)
+        table.dx[cellId] = dx
+        table.dy[cellId] = dy
+        table.distance[cellId] = dist
+        table.valid[cellId] = 1
+      }
+    } else {
+      dist = usesDefaultHypot
+        ? hypot(dx, dy)
+        : applyFunction(hypot, math, [dx, dy])
+    }
 
     if (z === toZ) return dist
     return dist + this.hyperParameters.viaBaseCost
+  }
+
+  private clearDistanceCache(): void {
+    this.distanceByGoal.clear()
+    this.distanceCacheSlots = 0
+    this.distanceCacheCapacity = 0
   }
 
   private internConn(name: string, rootNetName?: string): ConnId {
@@ -1762,22 +1937,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     indices: number[],
     displacedByVias: ConnId[],
   ) {
-    const cx = this.cellCenterX[sourceCellId]!
-    const cy = this.cellCenterY[sourceCellId]!
-    this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (cellId) => {
-      if (
-        !circleIntersectsRect(
-          cx,
-          cy,
-          this.viaKeepoutRadius,
-          this.cellMinX[cellId]!,
-          this.cellMinY[cellId]!,
-          this.cellMaxX[cellId]!,
-          this.cellMaxY[cellId]!,
-        )
-      ) {
-        return
-      }
+    for (const cellId of this.getViaFootprint(sourceCellId)) {
       for (let z = 0; z < this.layers; z++) {
         const flatIdx = z * this.planeSize + cellId
         if (
@@ -1803,7 +1963,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         }
         indices.push(flatIdx)
       }
-    })
+    }
   }
 
   private forEachCellNearCircle(

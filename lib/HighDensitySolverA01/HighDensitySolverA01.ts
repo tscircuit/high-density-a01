@@ -6,11 +6,83 @@ import {
   computeGridToAffineTransform,
 } from "../gridToAffineTransform"
 import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
+import {
+  canRunNativeA01Search,
+  NativeA01SearchKernel,
+  type NativeA01SearchInput,
+} from "../native-search/NativeA01SearchKernel"
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
   PortPoint,
 } from "../types"
+
+// Static descriptor groups preserve validation order without rebuilding arrays
+// or allocating closures for every supervised native batch.
+const BATCH_WRITABLE_FIELDS = [
+  "iterations",
+  "searchIterations",
+  "nativeStepCount",
+  "nativeBatchedStepCount",
+  "nativeOpenSetLength",
+  "failed",
+  "error",
+] as const
+const BATCH_DATA_FIELDS = [
+  "_setupDone",
+  "solved",
+  "MAX_ITERATIONS",
+  "stepMultiplier",
+  "searchBudgetIters",
+  "nativeSearchForActiveConnection",
+  "nativeSearchKernel",
+  "hyperParameters",
+  "cellSizeMm",
+  "penaltyCap",
+] as const
+const BATCH_METHOD_FIELDS = [
+  "step",
+  "_step",
+  "stepOnce",
+  "advanceNativeSearch",
+  "tryFinalAcceptance",
+] as const
+const BATCH_COST_FIELDS = [
+  "viaBaseCost",
+  "ripCost",
+  "ripTracePenalty",
+  "ripViaPenalty",
+  "greedyMultiplier",
+] as const
+
+function hasOwnBatchData(
+  object: object,
+  name: string,
+  writable = false,
+): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(object, name)
+  return (
+    !!descriptor &&
+    "value" in descriptor &&
+    (!writable || descriptor.writable === true)
+  )
+}
+
+function hasBatchDataProperty(object: object, name: string): boolean {
+  for (
+    let current: object | null = object;
+    current;
+    current = Object.getPrototypeOf(current)
+  ) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, name)
+    if (descriptor) return "value" in descriptor
+  }
+  return false
+}
+
+function isBatchCounter(value: number): boolean {
+  return Number.isSafeInteger(value) && !(value < 0)
+}
 
 // --- Interned connection ID ---
 type ConnId = number
@@ -26,15 +98,50 @@ function rippedContains(r: RippedNode | null, id: ConnId): boolean {
   return false
 }
 
-// --- A* search node (stored in a pool) ---
-interface SearchNode {
-  z: number
-  row: number
-  col: number
-  g: number
-  f: number
-  parentIdx: number // -1 = root
-  ripped: RippedNode | null
+// Numeric search state is reused across connections without allocating a node object.
+class SearchNodePool {
+  // Flat cell IDs can exceed signed 32-bit range even when each coordinate
+  // fits, so retain the Number domain used by grid indexing.
+  cellIdx = new Float64Array(1024)
+  g = new Float64Array(1024)
+  parentIdx = new Int32Array(1024)
+  ripped: Array<RippedNode | null> = []
+  length = 0
+
+  clear(): void {
+    this.length = 0
+    this.ripped.length = 0
+  }
+
+  push(
+    cellIdx: number,
+    g: number,
+    parentIdx: number,
+    ripped: RippedNode | null,
+  ): number {
+    this.ensureCapacity(this.length + 1)
+    const index = this.length++
+    this.cellIdx[index] = cellIdx
+    this.g[index] = g
+    this.parentIdx[index] = parentIdx
+    this.ripped[index] = ripped
+    return index
+  }
+
+  private ensureCapacity(size: number): void {
+    if (size <= this.cellIdx.length) return
+    let next = this.cellIdx.length
+    while (next < size) next *= 2
+    const cellIdx = new Float64Array(next)
+    cellIdx.set(this.cellIdx)
+    this.cellIdx = cellIdx
+    const g = new Float64Array(next)
+    g.set(this.g)
+    this.g = g
+    const parentIdx = new Int32Array(next)
+    parentIdx.set(this.parentIdx)
+    this.parentIdx = parentIdx
+  }
 }
 
 // --- Connection segment ---
@@ -110,74 +217,83 @@ function createCircularGridOffsets(params: {
 
 // --- Min-heap for A* open set ---
 class MinHeap {
-  private f: number[] = []
-  private seq: number[] = []
-  private id: number[] = []
+  private f = new Float64Array(1024)
+  private id = new Int32Array(1024)
   private n = 0
 
-  push(f: number, seq: number, id: number) {
+  // Nodes are enqueued once, immediately after allocation. Their pool index is
+  // the insertion order, so equal priorities need no separate sequence array.
+  push(f: number, id: number): void {
+    this.ensureCapacity(this.n + 1)
+    // Move parents into the hole, then write the new tuple once.
     let i = this.n++
-    this.f[i] = f
-    this.seq[i] = seq
-    this.id[i] = id
     while (i > 0) {
       const p = (i - 1) >> 1
-      if (this.less(p, i)) break
-      this.swap(i, p)
+      const parentF = this.f[p]!
+      const parentId = this.id[p]!
+      if (parentF !== f ? parentF < f : parentId < id) break
+      this.f[i] = parentF
+      this.id[i] = parentId
       i = p
     }
+    this.f[i] = f
+    this.id[i] = id
   }
 
   pop(): number {
     const out = this.id[0]!
     this.n--
     if (this.n > 0) {
-      this.f[0] = this.f[this.n]!
-      this.seq[0] = this.seq[this.n]!
-      this.id[0] = this.id[this.n]!
-      this.siftDown(0)
+      const f = this.f[this.n]!
+      const id = this.id[this.n]!
+      let i = 0
+      while (true) {
+        const left = i * 2 + 1
+        if (left >= this.n) break
+        const right = left + 1
+        let child = left
+        if (right < this.n) {
+          const leftF = this.f[left]!
+          const rightF = this.f[right]!
+          if (
+            !(leftF !== rightF
+              ? leftF < rightF
+              : this.id[left]! < this.id[right]!)
+          ) {
+            child = right
+          }
+        }
+        const childF = this.f[child]!
+        const childId = this.id[child]!
+        if (f !== childF ? f < childF : id < childId) break
+        this.f[i] = childF
+        this.id[i] = childId
+        i = child
+      }
+      this.f[i] = f
+      this.id[i] = id
     }
     return out
   }
 
-  get size() {
+  get size(): number {
     return this.n
   }
 
-  clear() {
+  clear(): void {
     this.n = 0
   }
 
-  private siftDown(i: number) {
-    while (true) {
-      const l = i * 2 + 1
-      const r = l + 1
-      if (l >= this.n) return
-      let m = l
-      if (r < this.n && !this.less(l, r)) m = r
-      if (this.less(i, m)) return
-      this.swap(i, m)
-      i = m
-    }
-  }
-
-  private less(i: number, j: number) {
-    const fi = this.f[i]!
-    const fj = this.f[j]!
-    if (fi !== fj) return fi < fj
-    return this.seq[i]! < this.seq[j]!
-  }
-
-  private swap(i: number, j: number) {
-    const tmpF = this.f[i]!
-    this.f[i] = this.f[j]!
-    this.f[j] = tmpF
-    const tmpS = this.seq[i]!
-    this.seq[i] = this.seq[j]!
-    this.seq[j] = tmpS
-    const tmpI = this.id[i]!
-    this.id[i] = this.id[j]!
-    this.id[j] = tmpI
+  private ensureCapacity(size: number): void {
+    if (size <= this.f.length) return
+    let next = this.f.length
+    while (next < size) next *= 2
+    const f = new Float64Array(next)
+    f.set(this.f)
+    this.f = f
+    const id = new Int32Array(next)
+    id.set(this.id)
+    this.id = id
   }
 }
 
@@ -204,6 +320,10 @@ export interface HighDensitySolverA01Props {
   viaDiameter: number
   maxCellCount?: number
   stepMultiplier?: number
+  /** Opt in to the exact WASM search kernel. Grid/occupancy stay fixed during
+   * each connection search; numeric move costs remain live between steps.
+   * Unsupported domains or unavailable WASM use JS before search begins. */
+  useNativeSearch?: boolean
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
@@ -242,6 +362,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   showUsedCellMap: boolean
   effort: number
   stepMultiplier: number
+  useNativeSearch: boolean
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
@@ -271,7 +392,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   private portOwnerFlat!: Int32Array // layers * planeSize; -1 = none, -2 = shared
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
-  private visitedStamp!: Uint32Array // layers * planeSize
+  private visitedStamp!: Uint32Array
+  private heuristicStamp!: Uint32Array
+  private weightedHeuristicValue!: Float64Array // layers * planeSize
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -303,12 +426,20 @@ export class HighDensitySolverA01 extends BaseSolver {
   private activeConnSeg: ConnectionSeg | null = null
   private activeConnId: ConnId = -1
   private crossLayerSearch = false
-  private nodePool!: SearchNode[]
+  private nodePool!: SearchNodePool
   private heap!: MinHeap
-  private seqCounter = 0
+  private nativeSearchKernel: NativeA01SearchKernel | null = null
+  private nativeSearchForActiveConnection = false
+  private nativeOpenSetLength: number | null = null
+  private nativeStepCount = 0
+  private nativeBatchedStepCount = 0
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
+  private viaOccupantsByCell = new Map<number, ConnId[]>()
+  private viaScanFlatOffsets: Int32Array | null = null
+  private viaScanRadius = 0
+  private rootOverlapAllowed = new Uint8Array(0)
 
   // --- Convergence state ---
   private ripCount!: number[]
@@ -317,6 +448,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private consecutiveSkips = 0
   private penaltyCap!: number
   private baseSearchBudgetIters!: number
+  private searchBudgetIters = 0
 
   // --- Reusable scratch for computeMoveCostAndRips ---
   private _moveCost = 0
@@ -339,7 +471,16 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
   get openSet() {
-    return { length: this.heap?.size ?? 0 }
+    return { length: this.nativeOpenSetLength ?? this.heap?.size ?? 0 }
+  }
+  get nativeSearchActive(): boolean {
+    return this.nativeSearchForActiveConnection
+  }
+  get nativeSearchSteps(): number {
+    return this.nativeStepCount
+  }
+  get nativeSearchBatchedSteps(): number {
+    return this.nativeBatchedStepCount
   }
   get gridStats() {
     return {
@@ -362,6 +503,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
+    this.useNativeSearch = props.useNativeSearch ?? false
     this.hyperParameters = {
       shuffleSeed: 0,
       ripCost: 10,
@@ -384,6 +526,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         viaDiameter: this.viaDiameter,
         maxCellCount: this.maxCellCount,
         stepMultiplier: this.stepMultiplier,
+        useNativeSearch: this.useNativeSearch,
         traceThickness: this.traceThickness,
         traceMargin: this.traceMargin,
         viaMinDistFromBorder: this.viaMinDistFromBorder,
@@ -397,6 +540,13 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _setup(): void {
+    this.nativeSearchKernel?.release()
+    this.nativeSearchKernel = null
+    this.nativeSearchForActiveConnection = false
+    this.nativeOpenSetLength = null
+    this.nativeStepCount = 0
+    this.nativeBatchedStepCount = 0
+    this.viaScanFlatOffsets = null
     const { nodeWithPortPoints, cellSizeMm } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -479,6 +629,8 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
+    this.heuristicStamp = new Uint32Array(totalCells)
+    this.weightedHeuristicValue = new Float64Array(totalCells)
     this.stamp = 0
 
     // Existing traces already occupy their traceMargin halo, so a prospective
@@ -552,15 +704,127 @@ export class HighDensitySolverA01 extends BaseSolver {
     // A* state
     this.activeConnSeg = null
     this.activeConnId = -1
-    this.nodePool = []
+    this.nodePool = new SearchNodePool()
     this.heap = new MinHeap()
-    this.seqCounter = 0
+  }
+
+  /** Consume only ordinary nonterminal native steps. The caller must use step()
+   * when this returns zero, and re-read its scheduling limits after that call. */
+  stepNativeBatch(maxSteps: number): number {
+    if (!Number.isSafeInteger(maxSteps) || maxSteps < 1) return 0
+    // Inspect descriptors first: checking a getter's value would already change
+    // the conditional read counts of the ordinary step path.
+    for (const name of BATCH_WRITABLE_FIELDS) {
+      if (!hasOwnBatchData(this, name, true)) return 0
+    }
+    for (const name of BATCH_DATA_FIELDS) {
+      if (!hasOwnBatchData(this, name)) return 0
+    }
+    for (const name of BATCH_METHOD_FIELDS) {
+      if (!hasBatchDataProperty(this, name)) return 0
+    }
+    const original = HighDensitySolverA01.prototype
+    if (
+      this.step !== BaseSolver.prototype.step ||
+      this._step !== original._step ||
+      this.stepOnce !== original.stepOnce ||
+      this.advanceNativeSearch !== original.advanceNativeSearch ||
+      this.tryFinalAcceptance !== BaseSolver.prototype.tryFinalAcceptance ||
+      "computeProgress" in this ||
+      !this._setupDone ||
+      this.solved ||
+      this.failed ||
+      this.stepMultiplier !== 1 ||
+      !this.nativeSearchForActiveConnection ||
+      !this.nativeSearchKernel
+    )
+      return 0
+    const hp = this.hyperParameters
+    for (const name of BATCH_COST_FIELDS) {
+      if (!hasBatchDataProperty(hp, name)) return 0
+    }
+    // Non-number values can invoke user coercion callbacks or throw at the
+    // WASM boundary. Preserve their per-step conversion on the ordinary path.
+    if (
+      typeof this.cellSizeMm !== "number" ||
+      typeof this.penaltyCap !== "number" ||
+      typeof hp.viaBaseCost !== "number" ||
+      typeof hp.ripCost !== "number" ||
+      typeof hp.ripTracePenalty !== "number" ||
+      typeof hp.ripViaPenalty !== "number" ||
+      typeof hp.greedyMultiplier !== "number"
+    )
+      return 0
+    // Read every counter before validating any, as the original array literal
+    // did. Keep the later scheduling reads separate and in their original order.
+    const iterations = this.iterations
+    const maxIterations = this.MAX_ITERATIONS
+    const searchIterations = this.searchIterations
+    const searchBudget = this.searchBudgetIters
+    const nativeSteps = this.nativeStepCount
+    const batchedSteps = this.nativeBatchedStepCount
+    if (
+      !isBatchCounter(iterations) ||
+      !isBatchCounter(maxIterations) ||
+      !isBatchCounter(searchIterations) ||
+      !isBatchCounter(searchBudget) ||
+      !isBatchCounter(nativeSteps) ||
+      !isBatchCounter(batchedSteps)
+    )
+      return 0
+    const limit = Math.min(
+      maxSteps,
+      0xffff_ffff,
+      this.MAX_ITERATIONS - this.iterations - 1,
+      this.searchBudgetIters - this.searchIterations,
+      Number.MAX_SAFE_INTEGER - this.nativeStepCount,
+      Number.MAX_SAFE_INTEGER - this.nativeBatchedStepCount,
+    )
+    if (limit < 1) return 0
+    const kernel = this.nativeSearchKernel
+    let completed: number
+    try {
+      completed = kernel.advanceMany(
+        limit,
+        this.cellSizeMm,
+        hp,
+        this.penaltyCap,
+      )
+    } catch (error) {
+      // BaseSolver increments before _step; a throwing native advance does not
+      // increment nativeStepCount or publish its partially changed heap length.
+      this.iterations += kernel.lastBatchAttempts
+      this.searchIterations += kernel.lastBatchAttempts
+      this.nativeStepCount += kernel.lastBatchCompleted
+      this.nativeBatchedStepCount += kernel.lastBatchCompleted
+      this.nativeOpenSetLength = kernel.heapSize
+      this.error = `${this.getSolverName()} error: ${error}`
+      this.failed = true
+      throw error
+    }
+    this.iterations += completed
+    this.searchIterations += completed
+    this.nativeStepCount += completed
+    this.nativeBatchedStepCount += completed
+    this.nativeOpenSetLength = kernel.heapSize
+    return completed
   }
 
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved || this.failed) break
       this.stepOnce()
+    }
+    if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
+      this.viaOccupantsByCell.clear()
+      if (this.nativeSearchForActiveConnection) {
+        this.nativeSearchKernel!.copyVisitedTo(this.visitedStamp)
+      }
+      // Debug/heap state stays in TS. Relinquish this terminal owner before its
+      // instance is reused; oversized instances are released for GC instead.
+      this.nativeSearchForActiveConnection = false
+      this.nativeSearchKernel?.release()
+      this.nativeSearchKernel = null
     }
   }
 
@@ -577,14 +841,19 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.crossLayerSearch = next.startZ !== next.endZ
 
       // Reset A* state for this connection
-      this.nodePool = []
+      this.nodePool.clear()
       this.heap.clear()
-      this.seqCounter = 0
       this.searchIterations = 0
       this.nextStamp()
+      this.nativeSearchForActiveConnection = false
+      this.nativeOpenSetLength = null
+      if (this.tryBeginNativeSearch(next)) return
 
       // Push start node
-      const h = this.computeH(
+      const startFlatIdx =
+        (next.startZ * this.rows + next.startRow) * this.cols + next.startCol
+      const f = this.getCachedWeightedH(
+        startFlatIdx,
         next.startZ,
         next.startRow,
         next.startCol,
@@ -592,27 +861,14 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endRow,
         next.endCol,
       )
-      const f = h * this.hyperParameters.greedyMultiplier
-      this.nodePool.push({
-        z: next.startZ,
-        row: next.startRow,
-        col: next.startCol,
-        g: 0,
-        f,
-        parentIdx: -1,
-        ripped: null,
-      })
-      this.heap.push(f, this.seqCounter++, 0)
+      this.nodePool.push(startFlatIdx, 0, -1, null)
+      this.heap.push(f, 0)
       return
     }
 
     // 2. Per-search budget check
     this.searchIterations++
-    const connRips = this.ripCount[this.activeConnId] ?? 0
-    const budget = Math.round(
-      this.baseSearchBudgetIters * (1 + Math.min(connRips, 10) * 0.25),
-    )
-    if (this.searchIterations > budget) {
+    if (this.searchIterations > this.searchBudgetIters) {
       // Global penalty decay on budget-skip: gradually makes penalized zones
       // accessible to stuck connections without affecting non-skipping searches
       const pen = this.penalty2d
@@ -623,12 +879,22 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.activeConnSeg = null
       this.activeConnId = -1
       this.heap.clear()
-      this.nodePool = []
+      this.nodePool.clear()
+      if (this.nativeSearchForActiveConnection) {
+        this.nativeSearchKernel!.clear()
+        this.nativeSearchForActiveConnection = false
+        this.nativeOpenSetLength = 0
+      }
       this.consecutiveSkips++
       if (this.consecutiveSkips >= this.unsolvedSegs.length * 3) {
         this.error = `Convergence failure: ${this.unsolvedSegs.length} connections stuck`
         this.failed = true
       }
+      return
+    }
+
+    if (this.nativeSearchForActiveConnection) {
+      this.advanceNativeSearch()
       return
     }
 
@@ -641,13 +907,28 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // 3. Pop best node (O(log n))
     const nodeIdx = this.heap.pop()
-    const node = this.nodePool[nodeIdx]!
-    const { z, row, col, g, ripped } = node
+    const cellIdx = this.nodePool.cellIdx[nodeIdx]!
 
-    // 4. Skip if already visited (stamp check)
-    const cellIdx = (z * this.rows + row) * this.cols + col
+    // 4. Skip duplicates before decoding coordinates or loading move state.
     if (this.visitedStamp[cellIdx] === this.stamp) return
     this.visitedStamp[cellIdx] = this.stamp
+    let z: number
+    let row: number
+    let col: number
+    if (this.planeSize !== 0) {
+      z = Math.floor(cellIdx / this.planeSize)
+      const cellInPlane = cellIdx - z * this.planeSize
+      row = Math.floor(cellInPlane / this.cols)
+      col = cellInPlane - row * this.cols
+    } else {
+      // Sub-cell regions have no valid neighbors. Their sole start node
+      // retains its coordinates even though the physical flat key loses them.
+      z = this.activeConnSeg.startZ
+      row = this.activeConnSeg.startRow
+      col = this.activeConnSeg.startCol
+    }
+    const g = this.nodePool.g[nodeIdx]!
+    const ripped = this.nodePool.ripped[nodeIdx]!
 
     // 5. Check end condition
     const seg = this.activeConnSeg
@@ -682,21 +963,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
       const f2 =
-        g2 +
-        this.computeH(z, nr, nc, endZ, endRow, endCol) *
-          this.hyperParameters.greedyMultiplier
+        g2 + this.getCachedWeightedH(nIdx, z, nr, nc, endZ, endRow, endCol)
 
-      const newNodeIdx = this.nodePool.length
-      this.nodePool.push({
-        z,
-        row: nr,
-        col: nc,
-        g: g2,
-        f: f2,
-        parentIdx: nodeIdx,
-        ripped: this._moveRipped,
-      })
-      this.heap.push(f2, this.seqCounter++, newNodeIdx)
+      const newNodeIdx = this.nodePool.push(nIdx, g2, nodeIdx, this._moveRipped)
+      this.heap.push(f2, newNodeIdx)
     }
 
     // 6b. Via moves (to other layers at same position)
@@ -726,21 +996,15 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
         const f2 =
-          g2 +
-          this.computeH(nz, row, col, endZ, endRow, endCol) *
-            this.hyperParameters.greedyMultiplier
+          g2 + this.getCachedWeightedH(nIdx, nz, row, col, endZ, endRow, endCol)
 
-        const newNodeIdx = this.nodePool.length
-        this.nodePool.push({
-          z: nz,
-          row,
-          col,
-          g: g2,
-          f: f2,
-          parentIdx: nodeIdx,
-          ripped: this._moveRipped,
-        })
-        this.heap.push(f2, this.seqCounter++, newNodeIdx)
+        const newNodeIdx = this.nodePool.push(
+          nIdx,
+          g2,
+          nodeIdx,
+          this._moveRipped,
+        )
+        this.heap.push(f2, newNodeIdx)
       }
     }
   }
@@ -751,6 +1015,137 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.hyperParameters.ripCost *
       (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0))
     )
+  }
+
+  private tryBeginNativeSearch(seg: ConnectionSeg): boolean {
+    if (!this.useNativeSearch) return false
+    const original = HighDensitySolverA01.prototype
+    if (
+      this.getCachedWeightedH !== original.getCachedWeightedH ||
+      this.computeH !== original.computeH ||
+      this.computeMoveCostAndRips !== original.computeMoveCostAndRips ||
+      this.getViaOccupants !== original.getViaOccupants ||
+      this.getRipCost !== original.getRipCost
+    )
+      return false
+    // Accessors can change a cost per neighbor, rather than per public step.
+    // Check descriptors without invoking them before deciding the backend.
+    const isDataProperty = (object: object, name: string): boolean => {
+      for (
+        let current: object | null = object;
+        current;
+        current = Object.getPrototypeOf(current)
+      ) {
+        const descriptor = Object.getOwnPropertyDescriptor(current, name)
+        if (descriptor) return "value" in descriptor
+      }
+      return false
+    }
+    // A11 adds history-based rip costs and exact segment/via clearance.
+    // Those solver configurations remain in JS until the kernel supports them.
+    if (
+      !isDataProperty(this, "ripHistoryCostMultiplier") ||
+      !isDataProperty(this, "useExactViaTraceClearance") ||
+      this.ripHistoryCostMultiplier !== 0 ||
+      this.useExactViaTraceClearance
+    )
+      return false
+    if (
+      !["hyperParameters", "cellSizeMm", "penaltyCap"].every((name) =>
+        isDataProperty(this, name),
+      )
+    )
+      return false
+    const hp = this.hyperParameters
+    if (
+      ![
+        "viaBaseCost",
+        "ripCost",
+        "ripTracePenalty",
+        "ripViaPenalty",
+        "greedyMultiplier",
+      ].every((name) => isDataProperty(hp, name))
+    )
+      return false
+    const input: NativeA01SearchInput = {
+      rows: this.rows,
+      cols: this.cols,
+      layers: this.layers,
+      startZ: seg.startZ,
+      startRow: seg.startRow,
+      startCol: seg.startCol,
+      endZ: seg.endZ,
+      endRow: seg.endRow,
+      endCol: seg.endCol,
+      activeConnId: this.activeConnId,
+      stamp: this.stamp,
+      minViaRow: this.minViaRow,
+      maxViaRow: this.maxViaRow,
+      minViaCol: this.minViaCol,
+      maxViaCol: this.maxViaCol,
+      cellSizeMm: this.cellSizeMm,
+      viaBaseCost: hp.viaBaseCost,
+      ripCost: hp.ripCost,
+      ripTracePenalty: hp.ripTracePenalty,
+      ripViaPenalty: hp.ripViaPenalty,
+      greedyMultiplier: hp.greedyMultiplier,
+      penaltyCap: this.penaltyCap,
+      usedCells: this.usedCellsFlat,
+      portOwners: this.portOwnerFlat,
+      usedDiagonals: this.usedDiagFlat,
+      penalties: this.penalty2d,
+      rootOverlap: this.rootOverlapAllowed,
+      viaOffsetsDr: this.viaOccupantScanOffsetsDr,
+      viaOffsetsDc: this.viaOccupantScanOffsetsDc,
+    }
+    if (!canRunNativeA01Search(input)) return false
+    this.nativeSearchKernel ??= NativeA01SearchKernel.create(input)
+    if (!this.nativeSearchKernel) return false
+    this.nativeSearchKernel.begin(input)
+    this.nativeSearchForActiveConnection = true
+    this.nativeOpenSetLength = this.nativeSearchKernel.heapSize
+    return true
+  }
+
+  private advanceNativeSearch(): void {
+    const kernel = this.nativeSearchKernel!
+    // Ordinary public scalar writes between steps remain live. Existing
+    // weighted-H cache hits intentionally keep their earlier values, as in JS.
+    const status = kernel.advance(
+      this.cellSizeMm,
+      this.hyperParameters,
+      this.penaltyCap,
+    )
+    this.nativeStepCount++
+    this.nativeOpenSetLength = kernel.heapSize
+    if (status === 0) return
+    if (status === 2) {
+      this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
+      this.failed = true
+      return
+    }
+    if (status !== 1)
+      throw new Error(`Unexpected native search status ${status}`)
+    const { cellIds, rippedIds } = kernel.readGoal()
+    if (cellIds.length === 0)
+      throw new Error("Native search returned an empty goal chain")
+    // Finalization reads only the chosen chain and its persistent rip list.
+    // Keep all cell marking, rip ordering, penalties and output logic in TS.
+    this.nodePool.clear()
+    let parent = -1
+    for (const cell of cellIds)
+      parent = this.nodePool.push(cell, 0, parent, null)
+    let ripped: RippedNode | null = null
+    for (let i = rippedIds.length - 1; i >= 0; i--)
+      ripped = { id: rippedIds[i]!, prev: ripped }
+    this.nodePool.ripped[parent] = ripped
+    this.finalizeRoute(parent)
+    this.activeConnSeg = null
+    this.activeConnId = -1
+    kernel.clear()
+    this.nativeSearchForActiveConnection = false
+    // The original heap retains its remaining entries after reaching a goal.
+    // nativeOpenSetLength retains that public value until the next clear/start.
   }
 
   private computeMoveCostAndRips(
@@ -766,39 +1161,34 @@ export class HighDensitySolverA01 extends BaseSolver {
     let cost = 0
     let r = ripped
     const cols = this.cols
-
-    if (fromZ !== toZ) {
-      // Via transition
-      cost += this.hyperParameters.viaBaseCost
-      cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
-
-      const toFlatIdx = (toZ * this.rows + toRow) * cols + toCol
-      const fixedOwner = this.portOwnerFlat[toFlatIdx]!
-      const fixedSameRoot =
-        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
-      const allowFixedOverlap =
-        fixedSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+    const toFlatIdx = (toZ * this.rows + toRow) * cols + toCol
+    const fixedOwner = this.portOwnerFlat[toFlatIdx]!
+    // Empty and self-owned cells need neither an overlap lookup nor an end
+    // exemption. In particular, avoid indexing the typed table with -1/-2.
+    if (
+      fixedOwner >= 0 &&
+      fixedOwner !== activeConn &&
+      this.rootOverlapAllowed[fixedOwner] !== 1
+    ) {
       const seg = this.activeConnSeg
       const isSegEnd =
         !!seg &&
         toZ === seg.endZ &&
         toRow === seg.endRow &&
         toCol === seg.endCol
-      if (
-        fixedOwner >= 0 &&
-        fixedOwner !== activeConn &&
-        !allowFixedOverlap &&
-        !isSegEnd
-      ) {
+      if (!isSegEnd) {
         this._moveCost = -1
         this._moveRipped = r
         return
       }
+    }
 
-      // Via footprint occupants (reusable scratch array)
-      this.fillViaOccupants(toRow, toCol, activeConn)
-      const occs = this._viaOccs
+    if (fromZ !== toZ) {
+      // Via transition
+      cost += this.hyperParameters.viaBaseCost
+      cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
+
+      const occs = this.getViaOccupants(toRow, toCol, activeConn)
       for (let i = 0; i < occs.length; i++) {
         const occ = occs[i]!
         if (!rippedContains(r, occ)) {
@@ -814,37 +1204,12 @@ export class HighDensitySolverA01 extends BaseSolver {
       cost += (dr + dc > 1 ? Math.SQRT2 : 1) * this.cellSizeMm
       cost += Math.min(this.penalty2d[toRow * cols + toCol]!, this.penaltyCap)
 
-      const flatIdx = (toZ * this.rows + toRow) * cols + toCol
-      const fixedOwner = this.portOwnerFlat[flatIdx]!
-      const fixedSameRoot =
-        this.connIdToRootNet[fixedOwner] === this.connIdToRootNet[activeConn]
-      const allowFixedOverlap =
-        fixedSameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-      const seg = this.activeConnSeg
-      const isSegEnd =
-        !!seg &&
-        toZ === seg.endZ &&
-        toRow === seg.endRow &&
-        toCol === seg.endCol
+      const occ = this.usedCellsFlat[toFlatIdx]!
       if (
-        fixedOwner >= 0 &&
-        fixedOwner !== activeConn &&
-        !allowFixedOverlap &&
-        !isSegEnd
+        occ !== -1 &&
+        occ !== activeConn &&
+        this.rootOverlapAllowed[occ] !== 1
       ) {
-        this._moveCost = -1
-        this._moveRipped = r
-        return
-      }
-
-      const occ = this.usedCellsFlat[flatIdx]!
-      const sameRoot =
-        this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-      const allowSameRootOverlap =
-        sameRoot &&
-        this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-      if (occ !== -1 && occ !== activeConn && !allowSameRootOverlap) {
         if (!rippedContains(r, occ)) {
           cost += this.getRipCost(occ)
           r = { id: occ, prev: r }
@@ -888,15 +1253,10 @@ export class HighDensitySolverA01 extends BaseSolver {
         const sqCols = this.cols - 1
         const diagBase = ((toZ * (this.rows - 1) + sqRow) * sqCols + sqCol) * 2
         const crossingOcc = this.usedDiagFlat[diagBase + crossingSlot]!
-        const crossingSameRoot =
-          this.connIdToRootNet[crossingOcc] === this.connIdToRootNet[activeConn]
-        const allowCrossingOverlap =
-          crossingSameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
         if (
           crossingOcc !== -1 &&
           crossingOcc !== activeConn &&
-          !allowCrossingOverlap
+          this.rootOverlapAllowed[crossingOcc] !== 1
         ) {
           this._moveCost = -1
           this._moveRipped = r
@@ -909,9 +1269,23 @@ export class HighDensitySolverA01 extends BaseSolver {
     this._moveRipped = r
   }
 
-  // --- Via footprint unique occupants (fills _viaOccs scratch array) ---
-  private fillViaOccupants(row: number, col: number, activeConn: ConnId): void {
-    const occs = this._viaOccs
+  // Occupant lists are immutable until the active search ends.
+  private getViaOccupants(
+    row: number,
+    col: number,
+    activeConn: ConnId,
+  ): ConnId[] {
+    const cellIdx = row * this.cols + col
+    // With two layers, the reverse via targets an already visited state, so
+    // this cell is scanned at most once per search. More layers can reuse it.
+    const shouldCache = this.layers > 2
+    if (shouldCache) {
+      const cached = this.viaOccupantsByCell.get(cellIdx)
+      if (cached) return cached
+    }
+    // Uncached callers consume the list synchronously. Cached lists must stay
+    // independent of the scratch array used by later moves.
+    const occs: ConnId[] = shouldCache ? [] : this._viaOccs
     occs.length = 0
     const rows = this.rows
     const cols = this.cols
@@ -919,21 +1293,35 @@ export class HighDensitySolverA01 extends BaseSolver {
     const offDc = this.viaOccupantScanOffsetsDc
     const offLen = this.viaOccupantScanOffsetsLen
     const used = this.usedCellsFlat
+    let flatOffsets = this.viaScanFlatOffsets
+    if (!flatOffsets) {
+      flatOffsets = new Int32Array(offLen)
+      let radius = 0
+      for (let i = 0; i < offLen; i++) {
+        flatOffsets[i] = offDr[i]! * cols + offDc[i]!
+        radius = Math.max(radius, Math.abs(offDr[i]!), Math.abs(offDc[i]!))
+      }
+      this.viaScanFlatOffsets = flatOffsets
+      this.viaScanRadius = radius
+    }
+    const radius = this.viaScanRadius
+    const isInterior =
+      row >= radius &&
+      col >= radius &&
+      row + radius < rows &&
+      col + radius < cols
 
     for (let z = 0; z < this.layers; z++) {
-      const zBase = z * this.planeSize
+      const base = z * this.planeSize + cellIdx
       for (let i = 0; i < offLen; i++) {
-        const r = row + offDr[i]!
-        const c = col + offDc[i]!
-        if (r < 0 || c < 0 || r >= rows || c >= cols) continue
-        const occ = used[zBase + r * cols + c]!
+        if (!isInterior) {
+          const r = row + offDr[i]!
+          const c = col + offDc[i]!
+          if (r < 0 || c < 0 || r >= rows || c >= cols) continue
+        }
+        const occ = used[base + flatOffsets[i]!]!
         if (occ === -1 || occ === activeConn) continue
-        const sameRoot =
-          this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-        if (
-          sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-        ) {
+        if (this.rootOverlapAllowed[occ] === 1) {
           continue
         }
         // Small unique check (typically very few occupants)
@@ -947,6 +1335,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (!seen) occs.push(occ)
       }
     }
+    if (shouldCache) this.viaOccupantsByCell.set(cellIdx, occs)
+    return occs
   }
 
   private fillTraceSegmentViaOccupants(
@@ -1032,11 +1422,53 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Visited stamp management ---
   private nextStamp(): void {
+    // Occupancy and the active connection remain fixed during each search.
+    // Finalizing or ripping routes can change both before the next search.
+    this.viaOccupantsByCell.clear()
+    const connRips = this.ripCount[this.activeConnId] ?? 0
+    this.searchBudgetIters = Math.round(
+      this.baseSearchBudgetIters * (1 + Math.min(connRips, 10) * 0.25),
+    )
+    const roots = this.connIdToRootNet
+    if (this.rootOverlapAllowed.length !== roots.length) {
+      this.rootOverlapAllowed = new Uint8Array(roots.length)
+    }
+    const activeRoot = roots[this.activeConnId]!
+    if (this.overlapFriendlyRootNets.has(activeRoot)) {
+      for (let conn = 0; conn < roots.length; conn++) {
+        this.rootOverlapAllowed[conn] = roots[conn] === activeRoot ? 1 : 0
+      }
+    } else {
+      this.rootOverlapAllowed.fill(0)
+    }
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
+      this.heuristicStamp.fill(0)
       this.stamp = 1
     }
+  }
+
+  private getCachedWeightedH(
+    flatIdx: number,
+    z: number,
+    row: number,
+    col: number,
+    toZ: number,
+    toRow: number,
+    toCol: number,
+  ): number {
+    if (this.heuristicStamp[flatIdx] === this.stamp) {
+      return this.weightedHeuristicValue[flatIdx]!
+    }
+    // The destination and heuristic parameters, including greedyMultiplier,
+    // stay fixed for the search. Preserve h * multiplier before adding g.
+    const weightedH =
+      this.computeH(z, row, col, toZ, toRow, toCol) *
+      this.hyperParameters.greedyMultiplier
+    this.heuristicStamp[flatIdx] = this.stamp
+    this.weightedHeuristicValue[flatIdx] = weightedH
+    return weightedH
   }
 
   // --- Heuristic: Manhattan + via-zone awareness for cross-layer ---
@@ -1203,9 +1635,21 @@ export class HighDensitySolverA01 extends BaseSolver {
     const cells: Array<{ z: number; row: number; col: number }> = []
     let idx = goalNodeIdx
     while (idx >= 0) {
-      const n = this.nodePool[idx]!
-      cells.push({ z: n.z, row: n.row, col: n.col })
-      idx = n.parentIdx
+      const cellIdx = this.nodePool.cellIdx[idx]!
+      if (this.planeSize !== 0) {
+        const z = Math.floor(cellIdx / this.planeSize)
+        const cellInPlane = cellIdx - z * this.planeSize
+        const row = Math.floor(cellInPlane / this.cols)
+        const col = cellInPlane - row * this.cols
+        cells.push({ z, row, col })
+      } else {
+        cells.push({
+          z: this.activeConnSeg!.startZ,
+          row: this.activeConnSeg!.startRow,
+          col: this.activeConnSeg!.startCol,
+        })
+      }
+      idx = this.nodePool.parentIdx[idx]!
     }
     cells.reverse()
 
@@ -1237,9 +1681,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     const connId = this.activeConnId
 
     // Collect ripped traces from goal node's persistent list
-    const goalNode = this.nodePool[goalNodeIdx]!
     const rippedIds: ConnId[] = []
-    for (let cur = goalNode.ripped; cur; cur = cur.prev) {
+    for (let cur = this.nodePool.ripped[goalNodeIdx]; cur; cur = cur.prev) {
       rippedIds.push(cur.id)
     }
 
@@ -1532,6 +1975,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override visualize() {
+    if (this.nativeSearchForActiveConnection) {
+      this.nativeSearchKernel!.copyVisitedTo(this.visitedStamp)
+    }
     const LAYER_COLORS = ["red", "blue", "orange", "green"]
 
     const points: Array<{

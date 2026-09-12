@@ -1,0 +1,178 @@
+[
+  {
+    "width": 0.05,
+    "height": 0.05,
+    "startZ": 0,
+    "endZ": 0,
+    "solved": true,
+    "failed": false,
+    "error": null,
+    "iterations": 3,
+    "routeHash": "4351eb172e9bf759f4f2aa2ee6cfaae48e138c0fc1f6fec6a96d2268b54c61dd"
+  },
+  {
+    "width": 0.05,
+    "height": 0.05,
+    "startZ": 0,
+    "endZ": 1,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 0.05,
+    "height": 0.05,
+    "startZ": 1,
+    "endZ": 0,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 0.05,
+    "height": 0.05,
+    "startZ": 1,
+    "endZ": 1,
+    "solved": true,
+    "failed": false,
+    "error": null,
+    "iterations": 3,
+    "routeHash": "ef63d282c66eb885081e5956ac12a11e1b61620dd9a7ee7e01695ab44b07df61"
+  },
+  {
+    "width": 0.05,
+    "height": 1,
+    "startZ": 0,
+    "endZ": 0,
+    "solved": true,
+    "failed": false,
+    "error": null,
+    "iterations": 3,
+    "routeHash": "4351eb172e9bf759f4f2aa2ee6cfaae48e138c0fc1f6fec6a96d2268b54c61dd"
+  },
+  {
+    "width": 0.05,
+    "height": 1,
+    "startZ": 0,
+    "endZ": 1,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 0.05,
+    "height": 1,
+    "startZ": 1,
+    "endZ": 0,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 0.05,
+    "height": 1,
+    "startZ": 1,
+    "endZ": 1,
+    "solved": true,
+    "failed": false,
+    "error": null,
+    "iterations": 3,
+    "routeHash": "ef63d282c66eb885081e5956ac12a11e1b61620dd9a7ee7e01695ab44b07df61"
+  },
+  {
+    "width": 1,
+    "height": 0.05,
+    "startZ": 0,
+    "endZ": 0,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 1,
+    "height": 0.05,
+    "startZ": 0,
+    "endZ": 1,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 1,
+    "height": 0.05,
+    "startZ": 1,
+    "endZ": 0,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 1,
+    "height": 0.05,
+    "startZ": 1,
+    "endZ": 1,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 0.1,
+    "height": 0.1,
+    "startZ": 0,
+    "endZ": 0,
+    "solved": true,
+    "failed": false,
+    "error": null,
+    "iterations": 3,
+    "routeHash": "7c2aa85089b245bc95f416df8e5ff260c1b8bd166f766e99ed0434cad4b05a55"
+  },
+  {
+    "width": 0.1,
+    "height": 0.1,
+    "startZ": 0,
+    "endZ": 1,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 0.1,
+    "height": 0.1,
+    "startZ": 1,
+    "endZ": 0,
+    "solved": false,
+    "failed": true,
+    "error": "No path found for net1",
+    "iterations": 3,
+    "routeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "width": 0.1,
+    "height": 0.1,
+    "startZ": 1,
+    "endZ": 1,
+    "solved": true,
+    "failed": false,
+    "error": null,
+    "iterations": 3,
+    "routeHash": "0960de9b4de45b962f866cd7488fa1fb03859dff447dd9ef6a22d1bae16dcfdd"
+  }
+]
