@@ -1,4 +1,6 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import type { HighDensitySolverFailureCache } from "../HighDensitySolverFailureCache"
+import { HighDensitySolverFailureCacheController } from "../HighDensitySolverFailureCacheController"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
@@ -14,7 +16,7 @@ import type {
 
 // --- Interned connection ID ---
 type ConnId = number
-type CellId = number
+type GridCellIndex = number
 
 // --- Persistent ripped-trace linked list ---
 interface RippedNode {
@@ -310,7 +312,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
-  private viaOccupantsByCell = new Map<CellId, readonly ConnId[]>()
+  private viaOccupantsByCell = new Map<GridCellIndex, readonly ConnId[]>()
 
   // --- Convergence state ---
   private ripCount!: number[]
@@ -351,8 +353,19 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
-  constructor(props: HighDensitySolverA01Props) {
+  private readonly failureCacheController?: HighDensitySolverFailureCacheController
+
+  constructor(
+    props: HighDensitySolverA01Props,
+    highDensitySolverFailureCache?: HighDensitySolverFailureCache,
+  ) {
     super()
+    if (highDensitySolverFailureCache) {
+      this.failureCacheController = new HighDensitySolverFailureCacheController(
+        { solverName: "a01", constructorProps: props },
+        highDensitySolverFailureCache,
+      )
+    }
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.cellSizeMm = props.cellSizeMm
     this.viaDiameter = props.viaDiameter
@@ -560,10 +573,17 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _step(): void {
+    if (this.failureCacheController?.replayFailure(this)) return
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved || this.failed) break
       this.stepOnce()
     }
+    this.failureCacheController?.recordFailure(this)
+  }
+
+  override tryFinalAcceptance(): void {
+    super.tryFinalAcceptance()
+    this.failureCacheController?.recordIterationLimit(this)
   }
 
   private stepOnce(): void {

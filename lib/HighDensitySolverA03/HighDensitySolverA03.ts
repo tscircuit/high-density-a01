@@ -1,4 +1,6 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import type { HighDensitySolverFailureCache } from "../HighDensitySolverFailureCache"
+import { HighDensitySolverFailureCacheController } from "../HighDensitySolverFailureCacheController"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
@@ -12,7 +14,7 @@ import type {
 } from "../types"
 
 type ConnId = number
-type CellId = number
+type GridCellIndex = number
 
 type RegionName = "left" | "top" | "right" | "bottom" | "middle"
 
@@ -430,7 +432,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private seqCounter = 0
 
   private _viaOccs: ConnId[] = []
-  private viaOccupantsByCell = new Map<CellId, readonly ConnId[]>()
+  private viaOccupantsByCell = new Map<GridCellIndex, readonly ConnId[]>()
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
@@ -509,8 +511,19 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
   }
 
-  constructor(props: HighDensitySolverA03Props) {
+  private readonly failureCacheController?: HighDensitySolverFailureCacheController
+
+  constructor(
+    props: HighDensitySolverA03Props,
+    highDensitySolverFailureCache?: HighDensitySolverFailureCache,
+  ) {
     super()
+    if (highDensitySolverFailureCache) {
+      this.failureCacheController = new HighDensitySolverFailureCacheController(
+        { solverName: "a03", constructorProps: props },
+        highDensitySolverFailureCache,
+      )
+    }
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.highResolutionCellSize = props.highResolutionCellSize ?? 0.1
     this.highResolutionCellThickness = Math.max(
@@ -702,10 +715,17 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override _step(): void {
+    if (this.failureCacheController?.replayFailure(this)) return
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved || this.failed) break
       this.stepOnce()
     }
+    this.failureCacheController?.recordFailure(this)
+  }
+
+  override tryFinalAcceptance(): void {
+    super.tryFinalAcceptance()
+    this.failureCacheController?.recordIterationLimit(this)
   }
 
   private buildFiveRegionGrid(width: number, height: number) {

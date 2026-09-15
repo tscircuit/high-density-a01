@@ -179,6 +179,42 @@ solver.solve()
 const routes = solver.getOutput()
 ```
 
+### Sharing failed searches across retries
+
+A01 and A03 accept an optional `HighDensitySolverFailureCache` as their second
+constructor argument. Create one cache per routing run and pass the same object
+to its retries:
+
+```ts
+import {
+  HighDensitySolverA03,
+  HighDensitySolverFailureCache,
+} from "@tscircuit/high-density-a01"
+
+const highDensitySolverFailureCache = new HighDensitySolverFailureCache()
+const solver = new HighDensitySolverA03(
+  { nodeWithPortPoints, viaDiameter: 0.3 },
+  highDensitySolverFailureCache,
+)
+solver.solve()
+
+const retry = new HighDensitySolverA03(
+  { nodeWithPortPoints, viaDiameter: 0.3 },
+  highDensitySolverFailureCache,
+)
+retry.solve()
+```
+
+The cache keeps up to 128 completed failures and evicts the least recently used
+entry when full. Reuse requires the same solver, full constructor input, and
+effective iteration limit. Penalty callbacks bypass caching, and a search whose
+iteration limit changes after it starts does not populate the cache. Successful
+routes are never cached here. Omitting the argument performs an independent
+search without sharing failure results.
+
+Via-occupancy calculations remain local to each connection search. They are
+cleared before the next connection observes newly routed or ripped copper.
+
 ### A05
 
 Use `HighDensitySolverA05` when you want A03-style routing plus route
