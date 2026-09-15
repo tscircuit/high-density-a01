@@ -1,3 +1,4 @@
+import { getNativeEndpointBoundsError } from "./getNativeEndpointBoundsError"
 import {
   HighDensitySolverA01,
   type HighDensitySolverA01Props,
@@ -62,6 +63,12 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
   }
 
   override _setup(): void {
+    const boundsError = getNativeEndpointBoundsError(this.nodeWithPortPoints)
+    if (boundsError !== null) {
+      this.failed = true
+      this.error = boundsError
+      return
+    }
     super._setup()
     const endpointError = getFixedEndpointCopperOverlapError({
       portPoints: this.nodeWithPortPoints.portPoints,
