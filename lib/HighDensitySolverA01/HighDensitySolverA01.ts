@@ -246,6 +246,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
   protected ripHistoryCostMultiplier = 0
+  protected shareSameNetCopper = false
+  protected pruneUnrippedVisits = false
+  protected preservePhysicalEndpointPairs = false
 
   // Grid dimensions
   rows!: number
@@ -272,6 +275,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
+  private bestUnrippedStamp!: Uint32Array
+  private bestUnrippedG!: Float64Array
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -479,6 +484,10 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
+    if (this.pruneUnrippedVisits) {
+      this.bestUnrippedStamp = new Uint32Array(totalCells)
+      this.bestUnrippedG = new Float64Array(totalCells)
+    }
     this.stamp = 0
 
     // Existing traces already occupy their traceMargin halo, so a prospective
@@ -557,6 +566,23 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.seqCounter = 0
   }
 
+  protected releaseSearchResources(): void {
+    this.heap = new MinHeap()
+    this.nodePool = []
+    this.portOwnerFlat = new Int32Array(0)
+    this.usedDiagFlat = new Int32Array(0)
+    this.bestUnrippedStamp = new Uint32Array(0)
+    this.bestUnrippedG = new Float64Array(0)
+    this.viaOccupantScanOffsetsDr = new Int32Array(0)
+    this.viaOccupantScanOffsetsDc = new Int32Array(0)
+    this.viaOwnersByCell = new Map()
+    this.viaCenterIndicesByConn = []
+    this.usedIndicesByConn = []
+    this.usedDiagIndicesByConn = []
+    this._viaOccs = []
+    this._moveRipped = null
+  }
+
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
       if (this.solved || this.failed) return
@@ -582,6 +608,12 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.seqCounter = 0
       this.searchIterations = 0
       this.nextStamp()
+      if (this.pruneUnrippedVisits) {
+        this.isDominatedUnrippedVisit(
+          (next.startZ * this.rows + next.startRow) * this.cols + next.startCol,
+          0,
+        )
+      }
 
       // Push start node
       const h = this.computeH(
@@ -681,6 +713,12 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
+      if (
+        this.pruneUnrippedVisits &&
+        this._moveRipped === null &&
+        this.isDominatedUnrippedVisit(nIdx, g2)
+      )
+        continue
       const f2 =
         g2 +
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
@@ -725,6 +763,12 @@ export class HighDensitySolverA01 extends BaseSolver {
         )
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
+        if (
+          this.pruneUnrippedVisits &&
+          this._moveRipped === null &&
+          this.isDominatedUnrippedVisit(nIdx, g2)
+        )
+          continue
         const f2 =
           g2 +
           this.computeH(nz, row, col, endZ, endRow, endCol) *
@@ -1031,10 +1075,25 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // --- Visited stamp management ---
+  // With no ripped nets, the cell fully identifies the routing state. A more
+  // expensive arrival cannot improve its continuations. Ripped paths retain
+  // their distinct histories and are deliberately excluded from this pruning.
+  private isDominatedUnrippedVisit(cellIdx: number, g: number): boolean {
+    if (
+      this.bestUnrippedStamp[cellIdx] === this.stamp &&
+      this.bestUnrippedG[cellIdx]! <= g
+    )
+      return true
+    this.bestUnrippedStamp[cellIdx] = this.stamp
+    this.bestUnrippedG[cellIdx] = g
+    return false
+  }
+
   private nextStamp(): void {
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
+      if (this.pruneUnrippedVisits) this.bestUnrippedStamp.fill(0)
       this.stamp = 1
     }
   }
@@ -1090,6 +1149,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     const id = this.connIdToName.length
     this.connIdToName.push(name)
     this.connIdToRootNet.push(toRootNetName(name, rootNetName))
+    if (this.shareSameNetCopper) {
+      this.overlapFriendlyRootNets.add(this.connIdToRootNet[id]!)
+    }
     this.connNameToId.set(name, id)
     return id
   }
@@ -1124,11 +1186,22 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       const connId = this.internConn(name, conn.rootConnectionName)
       for (const [startPoint, endPoint] of pointPairs) {
+        if (
+          this.preservePhysicalEndpointPairs &&
+          startPoint.x === endPoint.x &&
+          startPoint.y === endPoint.y &&
+          startPoint.z === endPoint.z
+        )
+          continue
         const s = this.pointToCell(startPoint)
         const e = this.pointToCell(endPoint)
 
-        const endpointA = `${s.z}:${s.row}:${s.col}`
-        const endpointB = `${e.z}:${e.row}:${e.col}`
+        const endpointA = this.preservePhysicalEndpointPairs
+          ? `${startPoint.z}:${startPoint.x}:${startPoint.y}`
+          : `${s.z}:${s.row}:${s.col}`
+        const endpointB = this.preservePhysicalEndpointPairs
+          ? `${endPoint.z}:${endPoint.x}:${endPoint.y}`
+          : `${e.z}:${e.row}:${e.col}`
         const orderedEndpoints =
           endpointA < endpointB
             ? `${endpointA}|${endpointB}`
@@ -1732,6 +1805,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           points[0] = { ...route.startPoint }
           if (points.length > 1) {
             points[points.length - 1] = { ...route.endPoint }
+          } else if (this.preservePhysicalEndpointPairs) {
+            points.push({ ...route.endPoint })
           }
         }
         result.push({
