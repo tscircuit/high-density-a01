@@ -52,7 +52,10 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
 
   override _step(): void {
     super._step()
-    if (!this.solved) return
+    if (!this.solved) {
+      if (this.failed) this.releaseSearchResources()
+      return
+    }
 
     const geometryError = getRouteGeometryViolationError(this.getOutput())
     if (geometryError) {
@@ -60,6 +63,12 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
       this.failed = true
       this.error = `A11 solution failed geometry validation: ${geometryError}`
     }
+    this.releaseSearchResources()
+  }
+
+  override tryFinalAcceptance(): void {
+    super.tryFinalAcceptance()
+    this.releaseSearchResources()
   }
 
   override _setup(): void {
@@ -77,6 +86,7 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
     if (endpointError !== null) {
       this.failed = true
       this.error = endpointError
+      this.releaseSearchResources()
       return
     }
   }

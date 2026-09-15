@@ -566,6 +566,23 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.seqCounter = 0
   }
 
+  protected releaseSearchResources(): void {
+    this.heap = new MinHeap()
+    this.nodePool = []
+    this.portOwnerFlat = new Int32Array(0)
+    this.usedDiagFlat = new Int32Array(0)
+    this.bestUnrippedStamp = new Uint32Array(0)
+    this.bestUnrippedG = new Float64Array(0)
+    this.viaOccupantScanOffsetsDr = new Int32Array(0)
+    this.viaOccupantScanOffsetsDc = new Int32Array(0)
+    this.viaOwnersByCell = new Map()
+    this.viaCenterIndicesByConn = []
+    this.usedIndicesByConn = []
+    this.usedDiagIndicesByConn = []
+    this._viaOccs = []
+    this._moveRipped = null
+  }
+
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
       if (this.solved || this.failed) return
