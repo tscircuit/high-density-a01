@@ -2,7 +2,10 @@ import {
   HighDensitySolverA01,
   type HighDensitySolverA01Props,
 } from "../HighDensitySolverA01/HighDensitySolverA01"
-import { getFixedEndpointCopperOverlapError, getRouteGeometryViolationError } from "../routeGeometryValidation"
+import {
+  getFixedEndpointCopperOverlapError,
+  getRouteGeometryViolationError,
+} from "../routeGeometryValidation"
 
 export type HighDensitySolverA11Props = Omit<
   HighDensitySolverA01Props,

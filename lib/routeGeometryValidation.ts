@@ -1,5 +1,9 @@
 import { getConnectionPortPointPairs } from "./getConnectionPortPointPairs"
-import type { HighDensityIntraNodeRoute, HighDensityRoutePoint, PortPoint } from "./types"
+import type {
+  HighDensityIntraNodeRoute,
+  HighDensityRoutePoint,
+  PortPoint,
+} from "./types"
 
 interface Point {
   x: number
@@ -225,7 +229,12 @@ function segmentDistance(a1: Point, a2: Point, b1: Point, b2: Point): number {
   )
 }
 
-function toRootNetName(route: Pick<HighDensityIntraNodeRoute, "rootConnectionName" | "connectionName">): string {
+function toRootNetName(
+  route: Pick<
+    HighDensityIntraNodeRoute,
+    "rootConnectionName" | "connectionName"
+  >,
+): string {
   return (
     route.rootConnectionName ?? route.connectionName.replace(/_mst\d+$/, "")
   )
@@ -246,9 +255,11 @@ export function getFixedEndpointCopperOverlapError(params: {
   const endpoints: Array<{ point: PortPoint; rootNet: string }> = []
   for (const points of pointsByConnection.values()) {
     const rootNet = toRootNetName(points[0]!)
-    const requiredPoints = new Set(getConnectionPortPointPairs(points)
-      .filter(([a, b]) => a.x !== b.x || a.y !== b.y || a.z !== b.z)
-      .flat())
+    const requiredPoints = new Set(
+      getConnectionPortPointPairs(points)
+        .filter(([a, b]) => a.x !== b.x || a.y !== b.y || a.z !== b.z)
+        .flat(),
+    )
     for (const point of requiredPoints) endpoints.push({ point, rootNet })
   }
   for (let i = 0; i < endpoints.length; i++) {
@@ -263,7 +274,8 @@ export function getFixedEndpointCopperOverlapError(params: {
         a.point.portPointId &&
         a.point.portPointId === b.point.portPointId &&
         pointsShareLocation(a.point, b.point)
-      ) continue
+      )
+        continue
       return `Fixed endpoint copper overlaps between ${a.point.connectionName} and ${b.point.connectionName} on layer ${a.point.z}: distance ${distance}, required ${params.traceThickness}`
     }
   }

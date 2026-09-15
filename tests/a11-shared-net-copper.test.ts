@@ -15,14 +15,43 @@ test("A11 routes crossing branches of one net without ripping shared copper", ()
     height: 2,
     availableZ: [0],
     portPoints: [
-      { connectionName: "horizontal", rootConnectionName: "supply", x: -1, y: 0, z: 0 },
-      { connectionName: "horizontal", rootConnectionName: "supply", x: 1, y: 0, z: 0 },
-      { connectionName: "vertical", rootConnectionName: "supply", x: 0, y: -1, z: 0 },
-      { connectionName: "vertical", rootConnectionName: "supply", x: 0, y: 1, z: 0 },
+      {
+        connectionName: "horizontal",
+        rootConnectionName: "supply",
+        x: -1,
+        y: 0,
+        z: 0,
+      },
+      {
+        connectionName: "horizontal",
+        rootConnectionName: "supply",
+        x: 1,
+        y: 0,
+        z: 0,
+      },
+      {
+        connectionName: "vertical",
+        rootConnectionName: "supply",
+        x: 0,
+        y: -1,
+        z: 0,
+      },
+      {
+        connectionName: "vertical",
+        rootConnectionName: "supply",
+        x: 0,
+        y: 1,
+        z: 0,
+      },
     ],
   }
   const originalNode = structuredClone(nodeWithPortPoints)
-  const props = { nodeWithPortPoints, viaDiameter: 0.3, traceThickness: 0.1, traceMargin: 0.1 }
+  const props = {
+    nodeWithPortPoints,
+    viaDiameter: 0.3,
+    traceThickness: 0.1,
+    traceMargin: 0.1,
+  }
   const separateBranches = new SeparateBranchCopperSolver(props)
   separateBranches.solve()
   expect(separateBranches.failed).toBe(true)
@@ -36,10 +65,17 @@ test("A11 routes crossing branches of one net without ripping shared copper", ()
   expect(routes).toHaveLength(2)
   expect(getRouteGeometryViolationError(routes)).toBeNull()
   for (const route of routes) {
-    const ports = nodeWithPortPoints.portPoints.filter((port) => port.connectionName === route.connectionName)
+    const ports = nodeWithPortPoints.portPoints.filter(
+      (port) => port.connectionName === route.connectionName,
+    )
     const endpoints = [route.route[0]!, route.route[route.route.length - 1]!]
     for (const port of ports) {
-      expect(endpoints.some((point) => point.x === port.x && point.y === port.y && point.z === port.z)).toBe(true)
+      expect(
+        endpoints.some(
+          (point) =>
+            point.x === port.x && point.y === port.y && point.z === port.z,
+        ),
+      ).toBe(true)
     }
   }
   expect(nodeWithPortPoints).toEqual(originalNode)
@@ -48,7 +84,10 @@ test("A11 routes crossing branches of one net without ripping shared copper", ()
     ...props,
     nodeWithPortPoints: {
       ...nodeWithPortPoints,
-      portPoints: nodeWithPortPoints.portPoints.map((port) => ({ ...port, rootConnectionName: port.connectionName })),
+      portPoints: nodeWithPortPoints.portPoints.map((port) => ({
+        ...port,
+        rootConnectionName: port.connectionName,
+      })),
     },
   })
   differentNets.solve()

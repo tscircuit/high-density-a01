@@ -697,9 +697,11 @@ export class HighDensitySolverA01 extends BaseSolver {
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
       if (
-        this.pruneUnrippedVisits && this._moveRipped === null &&
+        this.pruneUnrippedVisits &&
+        this._moveRipped === null &&
         this.isDominatedUnrippedVisit(nIdx, g2)
-      ) continue
+      )
+        continue
       const f2 =
         g2 +
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
@@ -745,9 +747,11 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
         if (
-          this.pruneUnrippedVisits && this._moveRipped === null &&
+          this.pruneUnrippedVisits &&
+          this._moveRipped === null &&
           this.isDominatedUnrippedVisit(nIdx, g2)
-        ) continue
+        )
+          continue
         const f2 =
           g2 +
           this.computeH(nz, row, col, endZ, endRow, endCol) *
@@ -1061,7 +1065,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     if (
       this.bestUnrippedStamp[cellIdx] === this.stamp &&
       this.bestUnrippedG[cellIdx]! <= g
-    ) return true
+    )
+      return true
     this.bestUnrippedStamp[cellIdx] = this.stamp
     this.bestUnrippedG[cellIdx] = g
     return false
@@ -1166,9 +1171,11 @@ export class HighDensitySolverA01 extends BaseSolver {
       for (const [startPoint, endPoint] of pointPairs) {
         if (
           this.preservePhysicalEndpointPairs &&
-          startPoint.x === endPoint.x && startPoint.y === endPoint.y &&
+          startPoint.x === endPoint.x &&
+          startPoint.y === endPoint.y &&
           startPoint.z === endPoint.z
-        ) continue
+        )
+          continue
         const s = this.pointToCell(startPoint)
         const e = this.pointToCell(endPoint)
 

@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test"
 import { HighDensitySolverA11 } from "../lib/HighDensitySolverA11/HighDensitySolverA11"
-import { getFixedEndpointCopperOverlapError, getRouteGeometryViolationError } from "../lib/routeGeometryValidation"
+import {
+  getFixedEndpointCopperOverlapError,
+  getRouteGeometryViolationError,
+} from "../lib/routeGeometryValidation"
 import type { NodeWithPortPoints } from "../lib/types"
 
 test("A11 rejects unavoidable endpoint copper overlap before search", () => {
@@ -18,7 +21,12 @@ test("A11 rejects unavoidable endpoint copper overlap before search", () => {
     ],
   }
   const original = structuredClone(nodeWithPortPoints)
-  const solver = new HighDensitySolverA11({ nodeWithPortPoints, traceThickness: 0.15, traceMargin: 0.1, viaDiameter: 0.3 })
+  const solver = new HighDensitySolverA11({
+    nodeWithPortPoints,
+    traceThickness: 0.15,
+    traceMargin: 0.1,
+    viaDiameter: 0.3,
+  })
   solver.solve()
   expect(solver.failed).toBe(true)
   expect(solver.solved).toBe(false)
@@ -30,32 +38,60 @@ test("A11 rejects unavoidable endpoint copper overlap before search", () => {
     connectionName,
     traceThickness: 0.15,
     viaDiameter: 0.3,
-    route: nodeWithPortPoints.portPoints.filter((point) => point.connectionName === connectionName),
+    route: nodeWithPortPoints.portPoints.filter(
+      (point) => point.connectionName === connectionName,
+    ),
     vias: [],
   }))
   expect(getRouteGeometryViolationError(routes)).not.toBeNull()
 
-  const params = { portPoints: nodeWithPortPoints.portPoints, traceThickness: 0.15 }
-  expect(getFixedEndpointCopperOverlapError({
-    ...params,
-    portPoints: params.portPoints.map((point) => ({ ...point, rootConnectionName: "shared-net" })),
-  })).toBeNull()
-  expect(getFixedEndpointCopperOverlapError({
-    ...params,
-    portPoints: params.portPoints.map((point) => ({ ...point, z: point.connectionName === "b" ? 1 : 0 })),
-  })).toBeNull()
-  for (const distance of [0.15, 0.15 - 0.0000005]) {
-    expect(getFixedEndpointCopperOverlapError({
-      ...params,
-      portPoints: params.portPoints.map((point) => ({ ...point, y: point.connectionName === "b" ? distance : 0 })),
-    })).toBeNull()
+  const params = {
+    portPoints: nodeWithPortPoints.portPoints,
+    traceThickness: 0.15,
   }
-  expect(getFixedEndpointCopperOverlapError({
-    ...params,
-    portPoints: params.portPoints.slice(0, 3),
-  })).toBeNull()
-  expect(getFixedEndpointCopperOverlapError({
-    ...params,
-    portPoints: params.portPoints.map((point) => ({ ...point, y: 0, portPointId: String(point.x) })),
-  })).toBeNull()
+  expect(
+    getFixedEndpointCopperOverlapError({
+      ...params,
+      portPoints: params.portPoints.map((point) => ({
+        ...point,
+        rootConnectionName: "shared-net",
+      })),
+    }),
+  ).toBeNull()
+  expect(
+    getFixedEndpointCopperOverlapError({
+      ...params,
+      portPoints: params.portPoints.map((point) => ({
+        ...point,
+        z: point.connectionName === "b" ? 1 : 0,
+      })),
+    }),
+  ).toBeNull()
+  for (const distance of [0.15, 0.15 - 0.0000005]) {
+    expect(
+      getFixedEndpointCopperOverlapError({
+        ...params,
+        portPoints: params.portPoints.map((point) => ({
+          ...point,
+          y: point.connectionName === "b" ? distance : 0,
+        })),
+      }),
+    ).toBeNull()
+  }
+  expect(
+    getFixedEndpointCopperOverlapError({
+      ...params,
+      portPoints: params.portPoints.slice(0, 3),
+    }),
+  ).toBeNull()
+  expect(
+    getFixedEndpointCopperOverlapError({
+      ...params,
+      portPoints: params.portPoints.map((point) => ({
+        ...point,
+        y: 0,
+        portPointId: String(point.x),
+      })),
+    }),
+  ).toBeNull()
 })

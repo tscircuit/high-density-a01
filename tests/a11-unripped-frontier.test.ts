@@ -21,7 +21,12 @@ test("A11 removes dominated queue entries without changing a routed crossing", (
       { connectionName: "vertical", x: 0, y: 2, z: 0 },
     ],
   }
-  const props = { nodeWithPortPoints, traceThickness: 0.15, traceMargin: 0.1, viaDiameter: 0.3 }
+  const props = {
+    nodeWithPortPoints,
+    traceThickness: 0.15,
+    traceMargin: 0.1,
+    viaDiameter: 0.3,
+  }
   const unpruned = new UnprunedA11(props)
   const pruned = new HighDensitySolverA11(props)
   unpruned.solve()
