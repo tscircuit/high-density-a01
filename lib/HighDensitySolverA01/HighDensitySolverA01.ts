@@ -248,6 +248,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   protected ripHistoryCostMultiplier = 0
   protected shareSameNetCopper = false
   protected pruneUnrippedVisits = false
+  protected preservePhysicalEndpointPairs = false
 
   // Grid dimensions
   rows!: number
@@ -1163,11 +1164,20 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       const connId = this.internConn(name, conn.rootConnectionName)
       for (const [startPoint, endPoint] of pointPairs) {
+        if (
+          this.preservePhysicalEndpointPairs &&
+          startPoint.x === endPoint.x && startPoint.y === endPoint.y &&
+          startPoint.z === endPoint.z
+        ) continue
         const s = this.pointToCell(startPoint)
         const e = this.pointToCell(endPoint)
 
-        const endpointA = `${s.z}:${s.row}:${s.col}`
-        const endpointB = `${e.z}:${e.row}:${e.col}`
+        const endpointA = this.preservePhysicalEndpointPairs
+          ? `${startPoint.z}:${startPoint.x}:${startPoint.y}`
+          : `${s.z}:${s.row}:${s.col}`
+        const endpointB = this.preservePhysicalEndpointPairs
+          ? `${endPoint.z}:${endPoint.x}:${endPoint.y}`
+          : `${e.z}:${e.row}:${e.col}`
         const orderedEndpoints =
           endpointA < endpointB
             ? `${endpointA}|${endpointB}`
@@ -1771,6 +1781,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           points[0] = { ...route.startPoint }
           if (points.length > 1) {
             points[points.length - 1] = { ...route.endPoint }
+          } else if (this.preservePhysicalEndpointPairs) {
+            points.push({ ...route.endPoint })
           }
         }
         result.push({

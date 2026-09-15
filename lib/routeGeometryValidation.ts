@@ -246,7 +246,9 @@ export function getFixedEndpointCopperOverlapError(params: {
   const endpoints: Array<{ point: PortPoint; rootNet: string }> = []
   for (const points of pointsByConnection.values()) {
     const rootNet = toRootNetName(points[0]!)
-    const requiredPoints = new Set(getConnectionPortPointPairs(points).flat())
+    const requiredPoints = new Set(getConnectionPortPointPairs(points)
+      .filter(([a, b]) => a.x !== b.x || a.y !== b.y || a.z !== b.z)
+      .flat())
     for (const point of requiredPoints) endpoints.push({ point, rootNet })
   }
   for (let i = 0; i < endpoints.length; i++) {
