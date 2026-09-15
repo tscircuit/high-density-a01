@@ -30,6 +30,8 @@ export function getA11CellSizeMm(props: HighDensitySolverA11Props): number {
 export class HighDensitySolverA11 extends HighDensitySolverA01 {
   protected override useExactViaTraceClearance = true
   protected override ripHistoryCostMultiplier = 1
+  // Branches of one electrical net may share copper; they must not rip each other.
+  protected override shareSameNetCopper = true
 
   override getSolverName(): string {
     return "HighDensitySolverA11"

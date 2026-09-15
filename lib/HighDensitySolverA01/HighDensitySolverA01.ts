@@ -246,6 +246,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
   protected ripHistoryCostMultiplier = 0
+  protected shareSameNetCopper = false
 
   // Grid dimensions
   rows!: number
@@ -1090,6 +1091,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     const id = this.connIdToName.length
     this.connIdToName.push(name)
     this.connIdToRootNet.push(toRootNetName(name, rootNetName))
+    if (this.shareSameNetCopper) {
+      this.overlapFriendlyRootNets.add(this.connIdToRootNet[id]!)
+    }
     this.connNameToId.set(name, id)
     return id
   }
