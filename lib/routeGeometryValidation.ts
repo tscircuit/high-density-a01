@@ -1,4 +1,5 @@
-import type { HighDensityIntraNodeRoute, HighDensityRoutePoint } from "./types"
+import { getConnectionPortPointPairs } from "./getConnectionPortPointPairs"
+import type { HighDensityIntraNodeRoute, HighDensityRoutePoint, PortPoint } from "./types"
 
 interface Point {
   x: number
@@ -224,10 +225,47 @@ function segmentDistance(a1: Point, a2: Point, b1: Point, b2: Point): number {
   )
 }
 
-function toRootNetName(route: HighDensityIntraNodeRoute): string {
+function toRootNetName(route: Pick<HighDensityIntraNodeRoute, "rootConnectionName" | "connectionName">): string {
   return (
     route.rootConnectionName ?? route.connectionName.replace(/_mst\d+$/, "")
   )
+}
+
+/** Required endpoints cannot move, so overlapping endpoint copper proves failure. */
+export function getFixedEndpointCopperOverlapError(params: {
+  portPoints: PortPoint[]
+  traceThickness: number
+}): string | null {
+  type ConnectionName = string
+  const pointsByConnection = new Map<ConnectionName, PortPoint[]>()
+  for (const point of params.portPoints) {
+    const points = pointsByConnection.get(point.connectionName)
+    if (points) points.push(point)
+    else pointsByConnection.set(point.connectionName, [point])
+  }
+  const endpoints: Array<{ point: PortPoint; rootNet: string }> = []
+  for (const points of pointsByConnection.values()) {
+    const rootNet = toRootNetName(points[0]!)
+    const requiredPoints = new Set(getConnectionPortPointPairs(points).flat())
+    for (const point of requiredPoints) endpoints.push({ point, rootNet })
+  }
+  for (let i = 0; i < endpoints.length; i++) {
+    const a = endpoints[i]!
+    for (let j = i + 1; j < endpoints.length; j++) {
+      const b = endpoints[j]!
+      if (a.rootNet === b.rootNet || a.point.z !== b.point.z) continue
+      const distance = pointDistance(a.point, b.point)
+      if (distance + CLEARANCE_TOLERANCE >= params.traceThickness) continue
+      if (
+        distance <= POINT_TOLERANCE &&
+        a.point.portPointId &&
+        a.point.portPointId === b.point.portPointId &&
+        pointsShareLocation(a.point, b.point)
+      ) continue
+      return `Fixed endpoint copper overlaps between ${a.point.connectionName} and ${b.point.connectionName} on layer ${a.point.z}: distance ${distance}, required ${params.traceThickness}`
+    }
+  }
+  return null
 }
 
 function pushViolation(

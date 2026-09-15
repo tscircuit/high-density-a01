@@ -2,7 +2,7 @@ import {
   HighDensitySolverA01,
   type HighDensitySolverA01Props,
 } from "../HighDensitySolverA01/HighDensitySolverA01"
-import { getRouteGeometryViolationError } from "../routeGeometryValidation"
+import { getFixedEndpointCopperOverlapError, getRouteGeometryViolationError } from "../routeGeometryValidation"
 
 export type HighDensitySolverA11Props = Omit<
   HighDensitySolverA01Props,
@@ -53,6 +53,19 @@ export class HighDensitySolverA11 extends HighDensitySolverA01 {
       this.solved = false
       this.failed = true
       this.error = `A11 solution failed geometry validation: ${geometryError}`
+    }
+  }
+
+  override _setup(): void {
+    super._setup()
+    const endpointError = getFixedEndpointCopperOverlapError({
+      portPoints: this.nodeWithPortPoints.portPoints,
+      traceThickness: this.traceThickness,
+    })
+    if (endpointError !== null) {
+      this.failed = true
+      this.error = endpointError
+      return
     }
   }
 }
