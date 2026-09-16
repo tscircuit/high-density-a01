@@ -25,7 +25,6 @@ export {
   HighDensitySolverA12,
   type HighDensitySolverA12Props,
 } from "./HighDensitySolverA12/HighDensitySolverA12"
-export { HighDensitySolverFailureCache } from "./HighDensitySolverFailureCache"
 export * from "./routeGeometryValidation"
 export * from "./types"
 

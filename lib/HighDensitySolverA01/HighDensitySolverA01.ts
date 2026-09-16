@@ -1,6 +1,4 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
-import type { HighDensitySolverFailureCache } from "../HighDensitySolverFailureCache"
-import { HighDensitySolverFailureCacheController } from "../HighDensitySolverFailureCacheController"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
@@ -353,19 +351,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
-  private readonly failureCacheController?: HighDensitySolverFailureCacheController
-
-  constructor(
-    props: HighDensitySolverA01Props,
-    highDensitySolverFailureCache?: HighDensitySolverFailureCache,
-  ) {
+  constructor(props: HighDensitySolverA01Props) {
     super()
-    if (highDensitySolverFailureCache) {
-      this.failureCacheController = new HighDensitySolverFailureCacheController(
-        { solverName: "a01", constructorProps: props },
-        highDensitySolverFailureCache,
-      )
-    }
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.cellSizeMm = props.cellSizeMm
     this.viaDiameter = props.viaDiameter
@@ -573,17 +560,10 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _step(): void {
-    if (this.failureCacheController?.replayFailure(this)) return
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) break
+      if (this.solved || this.failed) return
       this.stepOnce()
     }
-    this.failureCacheController?.recordFailure(this)
-  }
-
-  override tryFinalAcceptance(): void {
-    super.tryFinalAcceptance()
-    this.failureCacheController?.recordIterationLimit(this)
   }
 
   private stepOnce(): void {
