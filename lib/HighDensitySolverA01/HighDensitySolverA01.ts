@@ -14,6 +14,7 @@ import type {
 
 // --- Interned connection ID ---
 type ConnId = number
+type GridCellIndex = number
 
 // --- Persistent ripped-trace linked list ---
 interface RippedNode {
@@ -309,6 +310,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
+  private viaOccupantsByCell = new Map<GridCellIndex, readonly ConnId[]>()
 
   // --- Convergence state ---
   private ripCount!: number[]
@@ -575,6 +577,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.activeConnSeg = next
       this.activeConnId = next.connId
       this.crossLayerSearch = next.startZ !== next.endZ
+
+      // Occupancy and the active net stay fixed until this search finishes.
+      // Clear before another connection observes newly routed or ripped copper.
+      this.viaOccupantsByCell.clear()
 
       // Reset A* state for this connection
       this.nodePool = []
@@ -913,6 +919,12 @@ export class HighDensitySolverA01 extends BaseSolver {
   private fillViaOccupants(row: number, col: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
+    const cellId = row * this.cols + col
+    const cachedOccupants = this.viaOccupantsByCell.get(cellId)
+    if (cachedOccupants) {
+      for (const connId of cachedOccupants) occs.push(connId)
+      return
+    }
     const rows = this.rows
     const cols = this.cols
     const offDr = this.viaOccupantScanOffsetsDr
@@ -947,6 +959,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (!seen) occs.push(occ)
       }
     }
+    // Keep the cached list separate from the mutable scratch array.
+    this.viaOccupantsByCell.set(cellId, occs.slice())
   }
 
   private fillTraceSegmentViaOccupants(

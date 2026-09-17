@@ -12,6 +12,7 @@ import type {
 } from "../types"
 
 type ConnId = number
+type GridCellIndex = number
 
 type RegionName = "left" | "top" | "right" | "bottom" | "middle"
 
@@ -429,6 +430,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private seqCounter = 0
 
   private _viaOccs: ConnId[] = []
+  private viaOccupantsByCell = new Map<GridCellIndex, readonly ConnId[]>()
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
@@ -1080,6 +1082,10 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.activeConnSeg = next
       this.activeConnId = next.connId
 
+      // Via occupants are independent of the search layer and ripped path.
+      // A new connection must see copper changes made by the previous search.
+      this.viaOccupantsByCell.clear()
+
       this.nodePool.clear()
       this.ripChain.clear()
       this.heap.clear()
@@ -1346,6 +1352,11 @@ export class HighDensitySolverA03 extends BaseSolver {
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
+    const cachedOccupants = this.viaOccupantsByCell.get(cellId)
+    if (cachedOccupants) {
+      for (const connId of cachedOccupants) occs.push(connId)
+      return
+    }
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
@@ -1366,6 +1377,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
       }
     })
+    this.viaOccupantsByCell.set(cellId, occs.slice())
   }
 
   private fillTraceOccupants(
