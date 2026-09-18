@@ -8,7 +8,7 @@ const { values } = parseArgs({
     seed: { type: "string", default: "0" },
     budget: { type: "string", default: "50000000" },
     rounds: { type: "string", default: "200" },
-    greedy: { type: "string", default: "1.1" },
+    greedy: { type: "string" },
     output: { type: "string" },
   },
 })
@@ -24,7 +24,9 @@ const solver = new HighDensitySolverA13({
   maxSearchIterations: Number(values.budget),
   hyperParameters: {
     shuffleSeed: Number(values.seed),
-    greedyMultiplier: Number(values.greedy),
+    ...(values.greedy === undefined
+      ? {}
+      : { greedyMultiplier: Number(values.greedy) }),
   },
 })
 const start = performance.now()
@@ -38,6 +40,7 @@ while (!solver.solved && !solver.failed) {
 const report = {
   node: node.capacityMeshNodeId,
   growth: 1,
+  greedyMultiplier: solver.hyperParameters.greedyMultiplier,
   solved: solver.solved,
   error: solver.error,
   routingIterations: solver.routingIterations,

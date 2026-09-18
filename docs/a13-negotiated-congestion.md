@@ -12,7 +12,7 @@ A13 uses a fixed-size, multi-layer grid with negotiated congestion.
 
 The search uses Manhattan moves with a mild layer-direction preference and layer transitions. Exact terminal coordinates are connected by short leads. Collinear path compression removes redundant points, and occupancy is reconstructed from the emitted geometry rather than discarded grid points. Vias remain continuous across layer transitions; no route is stretched or scaled.
 
-Defaults: grid pitch at most 0.1 mm, trace width 0.1 mm, via diameter 0.3 mm, clearance 0.1 mm, weighted-A* heuristic 1.1, 200 negotiation rounds, and 50 million search expansions. The heuristic is deliberately close to ordinary A*. Grid pitch adjusts slightly so its limits coincide with the original node boundaries.
+Defaults: grid pitch at most 0.1 mm, trace width 0.1 mm, via diameter 0.3 mm, clearance 0.1 mm, weighted-A* heuristic 1.2, 200 negotiation rounds, and 50 million search expansions. The heuristic is deliberately close to ordinary A*. Grid pitch adjusts slightly so its limits coincide with the original node boundaries.
 
 ## Debugger
 
@@ -152,4 +152,28 @@ ln -s "$PWD/node_modules" "$js_baseline/node_modules"
 bun scripts/benchmark-a13-performance.ts --baseline "$wasm_baseline/lib/HighDensitySolverA13/HighDensitySolverA13.ts" --repeats 3 --output /tmp/js-vs-wasm.json
 bun scripts/benchmark-a13-performance.ts --baseline "$js_baseline/lib/HighDensitySolverA13/HighDensitySolverA13.ts" --repeats 3 --output /tmp/js-vs-pr115.json
 rm -r "$wasm_baseline" "$js_baseline"
+```
+
+## Greedy multiplier tuning
+
+The current default greedy/heuristic multiplier is **1.2**, increased from 1.1. The JavaScript backend remains the default. Geometry validation, physical dimensions, search budget, and round limit are unchanged. Unlike the kernel translation, this intentionally changes search order and can change the resulting routes.
+
+A sweep of 1.1, 1.12, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.75, 2, 3, and 4.5 showed that more greed is not consistently better. Values 1.75, 2, 3, and 4.5 failed at least one ordering seed within the original limits. The strongest moderate candidates were then compared on JavaScript, rotating execution order over three warmed trials per seed:
+
+| Seed | 1.1 median | 1.2 median | 1.3 median |
+| --- | ---: | ---: | ---: |
+| 0 | 0.917 s | 0.664 s | 0.471 s |
+| 1 | 0.588 s | 0.832 s | 0.331 s |
+| 2 | 0.820 s | 0.857 s | 1.625 s |
+| 3 | 1.795 s | 1.763 s | 0.424 s |
+| 4 | 2.350 s | 1.130 s | 2.591 s |
+
+At 1.2 the ratio of summed per-seed median times is **1.23×** versus 1.1. The fixture's seed 0 improves **1.38×**, from 0.917 s to 0.664 s; negotiation rounds fall from 34 to 18. All five seeds solve at 1× with zero violations in a fresh, full configured-clearance geometry check. Seed 1 is slower (0.588 s to 0.832 s), so this is an overall improvement, not a per-seed guarantee. At 1.3 the displayed seed is faster still, but aggregate time is worse than 1.2 and some other seeds regress substantially. Raw trials are in [a13-greedy-tuning.json](./a13-greedy-tuning.json).
+
+Historical WASM/JavaScript comparisons above used **1.1**. `benchmark-a13-performance.ts` explicitly uses 1.1 for both implementations by default, preserving an identical-policy comparison across revisions; pass `--greedy` to change it. `check-a13.ts` follows the solver's current default when `--greedy` is omitted and reports the effective multiplier:
+
+```sh
+bun scripts/check-a13.ts --seed 0
+bun scripts/check-a13.ts --seed 0 --greedy 1.1
+bun scripts/check-a13.ts --seed 0 --greedy 1.3
 ```

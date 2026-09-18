@@ -109,7 +109,7 @@ export class HighDensitySolverA13 extends BaseSolver {
     this.viaDiameter = props.viaDiameter ?? 0.3
     this.hyperParameters = {
       shuffleSeed: 0,
-      greedyMultiplier: 1.1,
+      greedyMultiplier: 1.2,
       ...props.hyperParameters,
     }
     for (const value of [
