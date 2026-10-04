@@ -53,7 +53,11 @@ function pairWithRoute() {
 test("native escaped route maps retain exact public-step state", () => {
   const { actual, reference } = pairWithRoute()
   let cacheSteps = 0
-  for (let index = 0; index < 5 && !reference.solved && !reference.failed; index++) {
+  for (
+    let index = 0;
+    index < 5 && !reference.solved && !reference.failed;
+    index++
+  ) {
     // Ordinary primitive edits to native records remain safe to inspect.
     for (const routes of actual.solvedConnectionsMap.values()) {
       for (const route of routes) route.startRow += 0
@@ -90,7 +94,11 @@ test("escaped native route accessors use original conditional reads", () => {
   }
   expect(actual.getHeuristicCacheForStep()).toBeUndefined()
   expect(calls).toEqual([0, 0])
-  for (let index = 0; index < 5 && !reference.solved && !reference.failed; index++) {
+  for (
+    let index = 0;
+    index < 5 && !reference.solved && !reference.failed;
+    index++
+  ) {
     stepPair(actual, reference)
     expect(calls[0]).toBe(calls[1])
     expect(actual.heuristicCache).toBeUndefined()
@@ -104,9 +112,18 @@ test("foreign map replacements and hooks are rejected without new callbacks", ()
   const route = routes[0]
   let traps = 0
   const handler = {
-    get() { traps++; throw new Error("unexpected Proxy access") },
-    getPrototypeOf() { traps++; throw new Error("unexpected Proxy introspection") },
-    ownKeys() { traps++; throw new Error("unexpected Proxy enumeration") },
+    get() {
+      traps++
+      throw new Error("unexpected Proxy access")
+    },
+    getPrototypeOf() {
+      traps++
+      throw new Error("unexpected Proxy introspection")
+    },
+    ownKeys() {
+      traps++
+      throw new Error("unexpected Proxy enumeration")
+    },
   }
   map.set(id, new Proxy(routes, handler))
   expect(actual.getHeuristicCacheForStep()).toBeUndefined()
@@ -130,7 +147,10 @@ test("foreign map replacements and hooks are rejected without new callbacks", ()
   let getCalls = 0
   Object.defineProperty(map, "get", {
     configurable: true,
-    get() { getCalls++; return Map.prototype.get },
+    get() {
+      getCalls++
+      return Map.prototype.get
+    },
   })
   expect(actual.getHeuristicCacheForStep()).toBeUndefined()
   expect(getCalls).toBe(0)
@@ -147,7 +167,6 @@ test("exposing mutable unsolved segments permanently keeps ordinary dispatch", (
   expect(actual.heuristicCache).toBeUndefined()
 })
 
-
 test("indirect public getter receivers mark the actual exposed containers", () => {
   const { actual, reference } = pair()
   expect(actual.solvedConnectionsMap).toBeUndefined()
@@ -163,10 +182,19 @@ test("indirect public getter receivers mark the actual exposed containers", () =
   const map = indirect.solvedConnectionsMap
   const [id, routes] = map.entries().next().value
   let traps = 0
-  map.set(id, new Proxy(routes, {
-    getPrototypeOf() { traps++; throw new Error("unexpected introspection") },
-    ownKeys() { traps++; throw new Error("unexpected enumeration") },
-  }))
+  map.set(
+    id,
+    new Proxy(routes, {
+      getPrototypeOf() {
+        traps++
+        throw new Error("unexpected introspection")
+      },
+      ownKeys() {
+        traps++
+        throw new Error("unexpected enumeration")
+      },
+    }),
+  )
   expect(withRoute.getHeuristicCacheForStep()).toBeUndefined()
   expect(traps).toBe(0)
 })

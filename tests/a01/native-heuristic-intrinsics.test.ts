@@ -84,7 +84,12 @@ test("cache eligibility does not invoke replaced global callbacks", () => {
     }
   }
   let coercions = 0
-  solver.iterations = { valueOf() { coercions++; return 0 } }
+  solver.iterations = {
+    valueOf() {
+      coercions++
+      return 0
+    },
+  }
   expect(solver.getHeuristicCacheForStep()).toBeUndefined()
   expect(coercions).toBe(0)
 })
