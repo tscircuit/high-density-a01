@@ -684,7 +684,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
   get solvedConnectionsMap() {
     const routes = this.solvedRoutes
-    if (routes && typeof routes === "object") markSolvedConnectionsExposed(routes)
+    if (routes && typeof routes === "object")
+      markSolvedConnectionsExposed(routes)
     return routes
   }
   get activeConnection() {
@@ -968,7 +969,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       const h = cache
         ? this.getCachedHeuristic(
             cache,
-            (next.startZ * this.rows + next.startRow) * this.cols + next.startCol,
+            (next.startZ * this.rows + next.startRow) * this.cols +
+              next.startCol,
             next.startZ,
             next.startRow,
             next.startCol,
@@ -1119,7 +1121,16 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
         const h = cache
-          ? this.getCachedHeuristic(cache, nIdx, nz, row, col, endZ, endRow, endCol)
+          ? this.getCachedHeuristic(
+              cache,
+              nIdx,
+              nz,
+              row,
+              col,
+              endZ,
+              endRow,
+              endCol,
+            )
           : this.computeH(nz, row, col, endZ, endRow, endCol)
         const f2 = g2 + h * this.hyperParameters.greedyMultiplier
 
@@ -1878,7 +1889,10 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // --- Finalize a found route ---
-  private finalizeRoute(goalNodeIdx: number, cache?: NativeHeuristicCache): void {
+  private finalizeRoute(
+    goalNodeIdx: number,
+    cache?: NativeHeuristicCache,
+  ): void {
     this.consecutiveSkips = Math.max(0, this.consecutiveSkips - 1)
 
     // Reconstruct path from parent chain (cell-based)
