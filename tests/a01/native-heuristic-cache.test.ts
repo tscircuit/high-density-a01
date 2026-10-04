@@ -46,19 +46,36 @@ test("native heuristic cache preserves the frozen numeric oracle and search epoc
     const toCol = (block * 13) % 20
     const key = (z * solver.rows + row) * solver.cols + col
     if (
-      cache.goalZ === toZ && cache.goalRow === toRow && cache.goalCol === toCol &&
-      cache.searchStamp === solver.stamp && cache.epochs[key] === cache.epoch
-    ) reusedEntries++
+      cache.goalZ === toZ &&
+      cache.goalRow === toRow &&
+      cache.goalCol === toCol &&
+      cache.searchStamp === solver.stamp &&
+      cache.epochs[key] === cache.epoch
+    )
+      reusedEntries++
     const expected = oracle.call(solver, z, row, col, toZ, toRow, toCol)
-    const actual = solver.getCachedHeuristic(cache, key, z, row, col, toZ, toRow, toCol)
+    const actual = solver.getCachedHeuristic(
+      cache,
+      key,
+      z,
+      row,
+      col,
+      toZ,
+      toRow,
+      toCol,
+    )
     expect(Object.is(actual, expected)).toBeTrue()
   }
   expect(reusedEntries).toBeGreaterThan(30_000)
   solver.cellSizeMm = -0
   solver.crossLayerSearch = false
   cache = solver.getHeuristicCacheForStep()
-  expect(Object.is(solver.getCachedHeuristic(cache, 0, 0, 0, 0, 0, 0, 0), -0)).toBeTrue()
-  expect(Object.is(solver.getCachedHeuristic(cache, 0, 0, 0, 0, 0, 0, 0), -0)).toBeTrue()
+  expect(
+    Object.is(solver.getCachedHeuristic(cache, 0, 0, 0, 0, 0, 0, 0), -0),
+  ).toBeTrue()
+  expect(
+    Object.is(solver.getCachedHeuristic(cache, 0, 0, 0, 0, 0, 0, 0), -0),
+  ).toBeTrue()
   cache.epoch = 0xffffffff
   solver.resetHeuristicEpoch(cache)
   expect(cache.epoch).toBe(1)
@@ -71,7 +88,12 @@ test("native heuristic cache preserves the frozen numeric oracle and search epoc
   for (const value of [Infinity, -Infinity, NaN]) {
     solver.cellSizeMm = value
     expect(solver.getHeuristicCacheForStep()).toBeUndefined()
-    expect(Object.is(solver.computeH(0, 0, 0, 0, 19, 19), oracle.call(solver, 0, 0, 0, 0, 19, 19))).toBeTrue()
+    expect(
+      Object.is(
+        solver.computeH(0, 0, 0, 0, 19, 19),
+        oracle.call(solver, 0, 0, 0, 0, 19, 19),
+      ),
+    ).toBeTrue()
   }
   solver.cellSizeMm = 0.1
   const originalHyperParameters = solver.hyperParameters
@@ -86,7 +108,10 @@ test("native heuristic cache preserves the frozen numeric oracle and search epoc
   let multiplierReads = 0
   Object.defineProperty(solver, "stepMultiplier", {
     configurable: true,
-    get() { multiplierReads++; return 1000 },
+    get() {
+      multiplierReads++
+      return 1000
+    },
   })
   expect(solver.getHeuristicCacheForStep()).toBeUndefined()
   expect(multiplierReads).toBe(0)
