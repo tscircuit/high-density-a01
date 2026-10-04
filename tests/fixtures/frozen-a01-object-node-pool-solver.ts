@@ -1,230 +1,18 @@
+// Frozen A01 routing implementation from 44005d6b9dde7d93a3d3a4815b4e7c8c52b59d34.
+// Only relative imports and the class name differ from that source.
 import { BaseSolver } from "@tscircuit/solver-utils"
-import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
+import { getConnectionPortPointPairs } from "../../lib/getConnectionPortPointPairs"
 import {
   type AffineTransform,
   applyAffineTransformToPoint,
   computeGridToAffineTransform,
-} from "../gridToAffineTransform"
-import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../maxIterationsByNodeSizeAndConnectionCount"
+} from "../../lib/gridToAffineTransform"
+import { computeMaxIterationsByNodeSizeAndConnectionCount } from "../../lib/maxIterationsByNodeSizeAndConnectionCount"
 import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
   PortPoint,
-} from "../types"
-
-// Only native A01 search owns the private heap, node pool and rip chains.
-// Public data and dispatch are checked again at each public search step.
-interface NativeHeuristicCache {
-  values: Float64Array
-  epochs: Uint32Array
-  epoch: number
-  bytes: number
-  signature: number[]
-  goalZ: number
-  goalRow: number
-  goalCol: number
-  searchStamp: number
-}
-
-const MAX_HEURISTIC_CACHE_STATES = 262_144
-const MAX_HEURISTIC_CACHE_BYTES = 32 * 1024 * 1024
-let allocatedHeuristicCacheBytes = 0
-const ownedHeuristicHyperParameters = new WeakMap<object, object>()
-const exposedUnsolvedConnections = new WeakSet<object>()
-const exposedSolvedConnections = new WeakSet<object>()
-const hasExposedUnsolvedConnections = WeakSet.prototype.has.bind(exposedUnsolvedConnections)
-const markUnsolvedConnectionsExposed = WeakSet.prototype.add.bind(exposedUnsolvedConnections)
-const hasExposedSolvedConnections = WeakSet.prototype.has.bind(exposedSolvedConnections)
-const markSolvedConnectionsExposed = WeakSet.prototype.add.bind(exposedSolvedConnections)
-type NativeRouteObjectKind = "routes" | "route" | "cells" | "cell" | "vias" | "via"
-const nativeRouteObjectKinds = new WeakMap<object, NativeRouteObjectKind>()
-const getNativeRouteObjectKind = WeakMap.prototype.get.bind(nativeRouteObjectKinds)
-const setNativeRouteObjectKind = WeakMap.prototype.set.bind(nativeRouteObjectKinds)
-const getOwnedHeuristicHyperParameters =
-  WeakMap.prototype.get.bind(ownedHeuristicHyperParameters)
-const setOwnedHeuristicHyperParameters =
-  WeakMap.prototype.set.bind(ownedHeuristicHyperParameters)
-const getOwnDescriptors = Object.getOwnPropertyDescriptors
-const getOwnDescriptor = Object.getOwnPropertyDescriptor
-const getPrototype = Object.getPrototypeOf
-const ownKeys = Reflect.ownKeys
-const isFiniteNumber = Number.isFinite
-const isSafeInteger = Number.isSafeInteger
-const sameNumber = Object.is
-const nativeFunctionSource = Function.prototype.toString
-const NativeFloat64Array = Float64Array
-const NativeUint32Array = Uint32Array
-const nativeGlobal = globalThis
-const nativeMath = Math
-const nativeNumber = Number
-const nativeArray = Array
-const nativeArrayPrototype = Array.prototype
-const nativeMapPrototype = Map.prototype
-const nativeSetPrototype = Set.prototype
-const nativeObjectPrototype = Object.prototype
-const nativeObjectDescriptors = getOwnDescriptors(nativeObjectPrototype)
-const nativeObjectKeys = ownKeys(nativeObjectDescriptors)
-const hasOwn = Function.prototype.call.bind(Object.prototype.hasOwnProperty) as (value: object, key: PropertyKey) => boolean
-const nativeSpeciesSymbol = Symbol.species
-const nativeArraySpecies = getOwnDescriptor(nativeArray, nativeSpeciesSymbol)!.get
-const nativeArrayIteratorPrototype = getPrototype([][Symbol.iterator]())
-const nativeMapIteratorPrototype = getPrototype(new Map()[Symbol.iterator]())
-const nativeSetIteratorPrototype = getPrototype(new Set()[Symbol.iterator]())
-const nativeCacheIntrinsics = [
-  ...["Array", "Map", "Set"].map((name) => ({
-    owner: nativeGlobal,
-    name,
-    value: getOwnDescriptor(nativeGlobal, name)!.value,
-  })),
-  { owner: Array.prototype, name: "constructor", value: Array },
-  ...[nativeArrayIteratorPrototype, nativeMapIteratorPrototype, nativeSetIteratorPrototype].map((owner) => ({
-    owner,
-    name: "next",
-    value: getOwnDescriptor(owner, "next")!.value,
-  })),
-  ...["abs", "min", "max", "round", "floor", "ceil"].map((name) => ({
-    owner: Math,
-    name,
-    value: getOwnDescriptor(Math, name)!.value,
-  })),
-  ...["push", "pop", "shift", "slice", "reverse", "map", "filter", "sort", "includes", "every"].map((name) => ({
-    owner: Array.prototype,
-    name,
-    value: getOwnDescriptor(Array.prototype, name)!.value,
-  })),
-  ...["get", "set", "has", "clear", "delete", "entries", "values"].map((name) => ({
-    owner: Map.prototype,
-    name,
-    value: getOwnDescriptor(Map.prototype, name)!.value,
-  })),
-  ...["has", "add", "delete", "values"].map((name) => ({
-    owner: Set.prototype,
-    name,
-    value: getOwnDescriptor(Set.prototype, name)!.value,
-  })),
-  { owner: Array.prototype, name: Symbol.iterator, value: getOwnDescriptor(Array.prototype, Symbol.iterator)!.value },
-  { owner: Map.prototype, name: Symbol.iterator, value: getOwnDescriptor(Map.prototype, Symbol.iterator)!.value },
-  { owner: Set.prototype, name: Symbol.iterator, value: getOwnDescriptor(Set.prototype, Symbol.iterator)!.value },
-]
-const nativeSqrt2 = getOwnDescriptor(Math, "SQRT2")!.value
-const nativeMapSize = getOwnDescriptor(Map.prototype, "size")!.get
-const nativeSetSize = getOwnDescriptor(Set.prototype, "size")!.get
-const nativeTypedArrayPrototype = getPrototype(Uint32Array.prototype)
-const nativeTypedArrayFill = getOwnDescriptor(nativeTypedArrayPrototype, "fill")!.value
-const nativeTypedArrayLength = getOwnDescriptor(nativeTypedArrayPrototype, "length")!.get
-const getNativeMapEntries = Function.prototype.call.bind(Map.prototype.entries) as (map: Map<unknown, unknown>) => MapIterator<[unknown, unknown]>
-const getNativeMapIteratorNext = Function.prototype.call.bind(getOwnDescriptor(nativeMapIteratorPrototype, "next")!.value) as (iterator: MapIterator<[unknown, unknown]>) => IteratorResult<[unknown, unknown]>
-const nativeIteratorChains: Array<{ owner: object; parent: object | null }> = []
-for (const initial of [nativeArrayIteratorPrototype, nativeMapIteratorPrototype, nativeSetIteratorPrototype]) {
-  for (let owner: object | null = initial; owner; owner = getPrototype(owner)) {
-    if (!nativeIteratorChains.some((entry) => entry.owner === owner)) {
-      nativeIteratorChains.push({ owner, parent: getPrototype(owner) })
-    }
-  }
-}
-const cacheIntrinsicsWereNative = [
-  ...nativeCacheIntrinsics.map(({ value }) => value),
-  nativeArraySpecies, nativeMapSize, nativeSetSize, nativeTypedArrayFill, nativeTypedArrayLength,
-].every((value) => nativeFunctionSource.call(value).includes("[native code]"))
-
-function hasOnlyOwnDataDescriptors(descriptors: PropertyDescriptorMap): boolean {
-  const keys = ownKeys(descriptors)
-  for (let index = 0; index < keys.length; index++) {
-    const descriptor = descriptors[keys[index] as keyof PropertyDescriptorMap]
-    if (!descriptor || !hasOwn(descriptor, "value")) return false
-  }
-  return true
-}
-
-function hasNativeObjectPrototype(): boolean {
-  const keys = ownKeys(nativeObjectPrototype)
-  if (keys.length !== nativeObjectKeys.length || getPrototype(nativeObjectPrototype) !== null) return false
-  for (let index = 0; index < keys.length; index++) {
-    const key = keys[index]!
-    if (key !== nativeObjectKeys[index]) return false
-    const descriptor = getOwnDescriptor(nativeObjectPrototype, key)!
-    const original = nativeObjectDescriptors[key as string]!
-    const fields = ["value", "get", "set", "writable", "enumerable", "configurable"] as const
-    for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
-      const field = fields[fieldIndex]!
-      if (hasOwn(descriptor, field) !== hasOwn(original, field)) return false
-      if (hasOwn(descriptor, field) && descriptor[field] !== original[field]) return false
-    }
-  }
-  return true
-}
-
-function hasNumericPrototypeProperties(prototype: object): boolean {
-  const keys = ownKeys(prototype)
-  for (let index = 0; index < keys.length; index++) {
-    const key = keys[index]
-    if (typeof key === "string" && isFiniteNumber(nativeNumber(key))) return true
-  }
-  return false
-}
-
-// Only native-created exposed route objects are inspected. Foreign values,
-// including Proxy replacements, fall back without property introspection.
-function validateExposedSolvedRoutes(map: Map<unknown, unknown>): boolean {
-  if (getPrototype(map) !== nativeMapPrototype || ownKeys(map).length !== 0) return false
-  let remainingObjects = MAX_HEURISTIC_CACHE_STATES
-  const arrayDescriptors = (value: unknown, kind: NativeRouteObjectKind) => {
-    if (!value || typeof value !== "object" || getNativeRouteObjectKind(value) !== kind) return undefined
-    if (getPrototype(value) !== nativeArrayPrototype) return undefined
-    const descriptors = getOwnDescriptors(value)
-    if (!hasOnlyOwnDataDescriptors(descriptors)) return undefined
-    const length = descriptors.length?.value
-    if (!isSafeInteger(length) || length < 0 || length >= remainingObjects) return undefined
-    const keys = ownKeys(descriptors)
-    if (keys.length !== length + 1) return undefined
-    for (let index = 0; index < length; index++) {
-      if (!hasOwn(descriptors, index)) return undefined
-    }
-    remainingObjects -= length + 1
-    return descriptors
-  }
-  const objectDescriptors = (value: unknown, kind: NativeRouteObjectKind) => {
-    if (!value || typeof value !== "object" || getNativeRouteObjectKind(value) !== kind) return undefined
-    if (getPrototype(value) !== nativeObjectPrototype || --remainingObjects < 0) return undefined
-    const descriptors = getOwnDescriptors(value)
-    return hasOnlyOwnDataDescriptors(descriptors) ? descriptors : undefined
-  }
-  const iterator = getNativeMapEntries(map)
-  for (;;) {
-    const entry = getNativeMapIteratorNext(iterator)
-    if (entry.done) return true
-    if (--remainingObjects < 0) return false
-    if (!isSafeInteger(entry.value[0])) return false
-    const routes = arrayDescriptors(entry.value[1], "routes")
-    if (!routes) return false
-    for (let routeIndex = 0; routeIndex < routes.length!.value; routeIndex++) {
-      const route = objectDescriptors(routes[routeIndex]!.value, "route")
-      if (!route) return false
-      const fields = ["connId", "startZ", "startRow", "startCol", "endZ", "endRow", "endCol"]
-      for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
-        if (!isSafeInteger(route[fields[fieldIndex]!]?.value)) return false
-      }
-      if (!hasOwn(route, "startPoint") || !hasOwn(route, "endPoint")) return false
-      // The native step copies endpoint references; it never reads their fields.
-      const groups = [
-        { array: "cells", arrayKind: "cells", pointKind: "cell", fields: ["z", "row", "col"] },
-        { array: "viaCells", arrayKind: "vias", pointKind: "via", fields: ["row", "col"] },
-      ] as const
-      for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
-        const group = groups[groupIndex]!
-        const points = arrayDescriptors(route[group.array]?.value, group.arrayKind)
-        if (!points) return false
-        for (let pointIndex = 0; pointIndex < points.length!.value; pointIndex++) {
-          const point = objectDescriptors(points[pointIndex]!.value, group.pointKind)
-          if (!point) return false
-          for (let fieldIndex = 0; fieldIndex < group.fields.length; fieldIndex++) {
-            if (!isSafeInteger(point[group.fields[fieldIndex]!]?.value)) return false
-          }
-        }
-      }
-    }
-  }
-}
+} from "../../lib/types"
 
 // --- Interned connection ID ---
 type ConnId = number
@@ -440,7 +228,7 @@ export interface HighDensitySolverA01Props {
 const DIRS_DR = [-1, -1, -1, 0, 0, 1, 1, 1] as const
 const DIRS_DC = [-1, 0, 1, -1, 1, -1, 0, 1] as const
 
-export class HighDensitySolverA01 extends BaseSolver {
+export class FrozenHighDensitySolverA01 extends BaseSolver {
   override getSolverName(): string {
     return "HighDensitySolverA01"
   }
@@ -489,7 +277,6 @@ export class HighDensitySolverA01 extends BaseSolver {
   private visitedStamp!: Uint32Array // layers * planeSize
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
-  private heuristicCache: NativeHeuristicCache | undefined
 
   // --- Precomputed via footprint offsets ---
   private viaOccupantScanOffsetsDr!: Int32Array
@@ -541,14 +328,10 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Test/debug compatibility getters ---
   get unsolvedConnections() {
-    const segments = this.unsolvedSegs
-    if (segments && typeof segments === "object") markUnsolvedConnectionsExposed(segments)
-    return segments
+    return this.unsolvedSegs
   }
   get solvedConnectionsMap() {
-    const routes = this.solvedRoutes
-    if (routes && typeof routes === "object") markSolvedConnectionsExposed(routes)
-    return routes
+    return this.solvedRoutes
   }
   get activeConnection() {
     if (!this.activeConnSeg) return null
@@ -592,7 +375,6 @@ export class HighDensitySolverA01 extends BaseSolver {
       greedyMultiplier: 1.5,
       ...props.hyperParameters,
     }
-    setOwnedHeuristicHyperParameters(this, this.hyperParameters)
     this.MAX_ITERATIONS = 100e6
     this.MAX_RIPS = 200
     this.initialPenaltyFn = props.initialPenaltyFn
@@ -780,24 +562,13 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   override _step(): void {
-    const cache = nativePrepareHeuristicCache(this)
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) {
-        if (cache) nativeReleaseHeuristicCache(this)
-        return
-      }
-      if (cache) this.stepOnce(cache)
-      else this.stepOnce()
-    }
-    if (
-      cache &&
-      (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS)
-    ) {
-      nativeReleaseHeuristicCache(this)
+      if (this.solved || this.failed) return
+      this.stepOnce()
     }
   }
 
-  private stepOnce(cache?: NativeHeuristicCache): void {
+  private stepOnce(): void {
     // 1. If no active connection, dequeue next
     if (!this.activeConnSeg) {
       if (this.unsolvedSegs.length === 0) {
@@ -821,32 +592,14 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.nextStamp()
 
       // Push start node
-      if (cache) {
-        this.resetHeuristicEpoch(cache)
-        cache.goalZ = next.endZ
-        cache.goalRow = next.endRow
-        cache.goalCol = next.endCol
-        cache.searchStamp = this.stamp
-      }
-      const h = cache
-        ? this.getCachedHeuristic(
-            cache,
-            (next.startZ * this.rows + next.startRow) * this.cols + next.startCol,
-            next.startZ,
-            next.startRow,
-            next.startCol,
-            next.endZ,
-            next.endRow,
-            next.endCol,
-          )
-        : this.computeH(
-            next.startZ,
-            next.startRow,
-            next.startCol,
-            next.endZ,
-            next.endRow,
-            next.endCol,
-          )
+      const h = this.computeH(
+        next.startZ,
+        next.startRow,
+        next.startCol,
+        next.endZ,
+        next.endRow,
+        next.endCol,
+      )
       const f = h * this.hyperParameters.greedyMultiplier
       this.nodePool.push({
         z: next.startZ,
@@ -907,8 +660,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     // 5. Check end condition
     const seg = this.activeConnSeg
     if (z === seg.endZ && row === seg.endRow && col === seg.endCol) {
-      if (cache) this.finalizeRoute(nodeIdx, cache)
-      else this.finalizeRoute(nodeIdx)
+      this.finalizeRoute(nodeIdx)
       this.activeConnSeg = null
       this.activeConnId = -1
       return
@@ -937,10 +689,10 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.computeMoveCostAndRips(activeConn, z, row, col, z, nr, nc, ripped)
       if (this._moveCost < 0) continue
       const g2 = g + this._moveCost
-      const h = cache
-        ? this.getCachedHeuristic(cache, nIdx, z, nr, nc, endZ, endRow, endCol)
-        : this.computeH(z, nr, nc, endZ, endRow, endCol)
-      const f2 = g2 + h * this.hyperParameters.greedyMultiplier
+      const f2 =
+        g2 +
+        this.computeH(z, nr, nc, endZ, endRow, endCol) *
+          this.hyperParameters.greedyMultiplier
 
       const newNodeIdx = this.nodePool.length
       this.nodePool.push({
@@ -981,10 +733,10 @@ export class HighDensitySolverA01 extends BaseSolver {
         )
         if (this._moveCost < 0) continue
         const g2 = g + this._moveCost
-        const h = cache
-          ? this.getCachedHeuristic(cache, nIdx, nz, row, col, endZ, endRow, endCol)
-          : this.computeH(nz, row, col, endZ, endRow, endCol)
-        const f2 = g2 + h * this.hyperParameters.greedyMultiplier
+        const f2 =
+          g2 +
+          this.computeH(nz, row, col, endZ, endRow, endCol) *
+            this.hyperParameters.greedyMultiplier
 
         const newNodeIdx = this.nodePool.length
         this.nodePool.push({
@@ -1303,220 +1055,6 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
-  private getHeuristicCacheForStep(): NativeHeuristicCache | undefined {
-    // Constructor registration excludes Proxy receivers. Native setup owns all
-    // private search containers; subclasses and custom kernels stay ordinary.
-    const ownedHyperParameters = getOwnedHeuristicHyperParameters(this)
-    if (!ownedHyperParameters) return undefined
-    if (getPrototype(this) !== HighDensitySolverA01.prototype) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    // The portfolio batches 1000 native expansions. For smaller public steps,
-    // repeated eligibility and exposed-route scans exceed the arithmetic saved.
-    const stepDescriptor = getOwnDescriptor(this, "stepMultiplier")
-    if (
-      !stepDescriptor || !hasOwn(stepDescriptor, "value") ||
-      !isSafeInteger(stepDescriptor.value) || stepDescriptor.value < 1000
-    ) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    if (!hasNativeObjectPrototype()) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    const descriptors = getOwnDescriptors(this) as PropertyDescriptorMap
-    if (
-      !hasOnlyOwnDataDescriptors(descriptors) || !cacheIntrinsicsWereNative ||
-      hasExposedUnsolvedConnections(descriptors.unsolvedSegs?.value)
-    ) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    for (let index = 0; index < nativeHeuristicMethods.length; index++) {
-      const { name, value } = nativeHeuristicMethods[index]!
-      const descriptor = descriptors[name] ?? getOwnDescriptor(HighDensitySolverA01.prototype, name)
-      if (!descriptor || !hasOwn(descriptor, "value") || descriptor.value !== value) {
-        nativeReleaseHeuristicCache(this)
-        return undefined
-      }
-    }
-    for (let index = 0; index < nativeCacheIntrinsics.length; index++) {
-      const { owner, name, value } = nativeCacheIntrinsics[index]!
-      const descriptor = getOwnDescriptor(owner, name)
-      if (!descriptor || !hasOwn(descriptor, "value") || descriptor.value !== value) {
-        nativeReleaseHeuristicCache(this)
-        return undefined
-      }
-    }
-    for (let index = 0; index < nativeIteratorChains.length; index++) {
-      const { owner, parent } = nativeIteratorChains[index]!
-      if (getPrototype(owner) !== parent || getOwnDescriptor(owner, "return") !== undefined) {
-        nativeReleaseHeuristicCache(this)
-        return undefined
-      }
-    }
-    if (
-      getOwnDescriptor(nativeGlobal, "Math")?.value !== nativeMath ||
-      getOwnDescriptor(nativeArray, nativeSpeciesSymbol)?.get !== nativeArraySpecies ||
-      getOwnDescriptor(nativeMath, "SQRT2")?.value !== nativeSqrt2 ||
-      getOwnDescriptor(nativeMapPrototype, "size")?.get !== nativeMapSize ||
-      getOwnDescriptor(nativeSetPrototype, "size")?.get !== nativeSetSize ||
-      getOwnDescriptor(nativeTypedArrayPrototype, "fill")?.value !== nativeTypedArrayFill ||
-      getOwnDescriptor(nativeTypedArrayPrototype, "length")?.get !== nativeTypedArrayLength ||
-      getOwnDescriptor(NativeUint32Array.prototype, "fill") !== undefined ||
-      getOwnDescriptor(NativeUint32Array.prototype, "length") !== undefined ||
-      getOwnDescriptor(NativeFloat64Array.prototype, "length") !== undefined ||
-      getPrototype(NativeUint32Array.prototype) !== nativeTypedArrayPrototype ||
-      getPrototype(NativeFloat64Array.prototype) !== nativeTypedArrayPrototype ||
-      getPrototype(nativeTypedArrayPrototype) !== nativeObjectPrototype ||
-      getPrototype(nativeArrayPrototype) !== nativeObjectPrototype ||
-      getPrototype(nativeObjectPrototype) !== null ||
-      hasNumericPrototypeProperties(nativeArrayPrototype) ||
-      hasNumericPrototypeProperties(nativeObjectPrototype) ||
-      descriptors.hyperParameters?.value !== ownedHyperParameters ||
-      getPrototype(ownedHyperParameters) !== nativeObjectPrototype
-    ) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    const hyperDescriptors = getOwnDescriptors(ownedHyperParameters)
-    if (!hasOnlyOwnDataDescriptors(hyperDescriptors)) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    const hyperNames = ["shuffleSeed", "ripCost", "ripTracePenalty", "ripViaPenalty", "viaBaseCost", "greedyMultiplier"]
-    for (let index = 0; index < hyperNames.length; index++) {
-      if (!isFiniteNumber(hyperDescriptors[hyperNames[index]!]?.value)) {
-        nativeReleaseHeuristicCache(this)
-        return undefined
-      }
-    }
-    const publicNumericNames = ["traceMargin", "MAX_RIPS", "MAX_ITERATIONS", "iterations", "ripHistoryCostMultiplier"]
-    for (let index = 0; index < publicNumericNames.length; index++) {
-      if (!isFiniteNumber(descriptors[publicNumericNames[index]!]?.value)) {
-        nativeReleaseHeuristicCache(this)
-        return undefined
-      }
-    }
-    const rows = descriptors.rows?.value
-    const cols = descriptors.cols?.value
-    const layers = descriptors.layers?.value
-    if (!isSafeInteger(rows) || rows <= 0 || !isSafeInteger(cols) || cols <= 0 || !isSafeInteger(layers) || layers <= 0) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    const totalStates = rows * cols * layers
-    const signature = [
-      rows, cols, layers, descriptors.cellSizeMm?.value,
-      descriptors.crossLayerSearch?.value ? 1 : 0,
-      hyperDescriptors.viaBaseCost!.value,
-      descriptors.minViaRow?.value, descriptors.maxViaRow?.value,
-      descriptors.minViaCol?.value, descriptors.maxViaCol?.value,
-    ]
-    if (
-      typeof descriptors.solved?.value !== "boolean" ||
-      typeof descriptors.failed?.value !== "boolean" ||
-      typeof descriptors.crossLayerSearch?.value !== "boolean" ||
-      !isSafeInteger(rows) || rows <= 0 || !isSafeInteger(cols) || cols <= 0 ||
-      !isSafeInteger(layers) || layers <= 0 || !isSafeInteger(totalStates) ||
-      totalStates > MAX_HEURISTIC_CACHE_STATES ||
-      !isSafeInteger(descriptors.stepMultiplier?.value) || descriptors.stepMultiplier!.value <= 0 ||
-      descriptors.planeSize?.value !== rows * cols ||
-      typeof descriptors.visitedStamp?.value !== "object" || descriptors.visitedStamp!.value === null ||
-      getPrototype(descriptors.visitedStamp!.value) !== NativeUint32Array.prototype ||
-      descriptors.visitedStamp!.value.length !== totalStates ||
-      !signature.every(isFiniteNumber)
-    ) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    if (
-      hasExposedSolvedConnections(descriptors.solvedRoutes?.value) &&
-      !validateExposedSolvedRoutes(descriptors.solvedRoutes?.value)
-    ) {
-      nativeReleaseHeuristicCache(this)
-      return undefined
-    }
-    let cache = this.heuristicCache
-    if (cache && cache.values.length !== totalStates) {
-      nativeReleaseHeuristicCache(this)
-      cache = undefined
-    }
-    if (!cache) {
-      const bytes = totalStates * 12
-      if (allocatedHeuristicCacheBytes + bytes > MAX_HEURISTIC_CACHE_BYTES) return undefined
-      cache = {
-        values: new NativeFloat64Array(totalStates),
-        epochs: new NativeUint32Array(totalStates),
-        epoch: 1,
-        bytes,
-        signature,
-        goalZ: -1,
-        goalRow: -1,
-        goalCol: -1,
-        searchStamp: -1,
-      }
-      this.heuristicCache = cache
-      allocatedHeuristicCacheBytes += bytes
-    } else if (!cache.signature.every((value, index) => sameNumber(value, signature[index]))) {
-      this.resetHeuristicEpoch(cache)
-      cache.signature = signature
-    }
-    return cache
-  }
-
-  private resetHeuristicEpoch(cache: NativeHeuristicCache): void {
-    cache.epoch = (cache.epoch + 1) >>> 0
-    if (cache.epoch === 0) {
-      cache.epochs.fill(0)
-      cache.epoch = 1
-    }
-  }
-
-  private releaseHeuristicCache(): void {
-    const cache = this.heuristicCache
-    if (!cache) return
-    allocatedHeuristicCacheBytes -= cache.bytes
-    this.heuristicCache = undefined
-  }
-
-  private getCachedHeuristic(
-    cache: NativeHeuristicCache,
-    index: number,
-    z: number,
-    row: number,
-    col: number,
-    toZ: number,
-    toRow: number,
-    toCol: number,
-  ): number {
-    if (
-      cache.goalZ !== toZ || cache.goalRow !== toRow || cache.goalCol !== toCol ||
-      cache.searchStamp !== this.stamp
-    ) {
-      this.resetHeuristicEpoch(cache)
-      cache.goalZ = toZ
-      cache.goalRow = toRow
-      cache.goalCol = toCol
-      cache.searchStamp = this.stamp
-    }
-    if (
-      z < 0 || z >= this.layers || row < 0 || row >= this.rows || col < 0 || col >= this.cols ||
-      !isSafeInteger(index) || index < 0 || index >= cache.values.length
-    ) {
-      return this.computeH(z, row, col, toZ, toRow, toCol)
-    }
-    if (cache.epochs[index] === cache.epoch) return cache.values[index]!
-    const value = this.computeH(z, row, col, toZ, toRow, toCol)
-    if (isFiniteNumber(value)) {
-      cache.values[index] = value
-      cache.epochs[index] = cache.epoch
-    }
-    return value
-  }
-
   // --- Heuristic: Manhattan + via-zone awareness for cross-layer ---
   private computeH(
     z: number,
@@ -1674,7 +1212,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   }
 
   // --- Finalize a found route ---
-  private finalizeRoute(goalNodeIdx: number, cache?: NativeHeuristicCache): void {
+  private finalizeRoute(goalNodeIdx: number): void {
     this.consecutiveSkips = Math.max(0, this.consecutiveSkips - 1)
 
     // Reconstruct path from parent chain (cell-based)
@@ -1862,12 +1400,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.usedDiagIndicesByConn[connId] = usedDiagIndices
 
     // Store solved route (cell-based)
-    const existingSolvedRoutes = this.solvedRoutes.get(connId)
-    const solvedRoutes = existingSolvedRoutes ?? []
-    if (cache && (existingSolvedRoutes === undefined || existingSolvedRoutes === null)) {
-      setNativeRouteObjectKind(solvedRoutes, "routes")
-    }
-    const solvedRoute = {
+    const solvedRoutes = this.solvedRoutes.get(connId) ?? []
+    solvedRoutes.push({
       connId,
       startZ: firstCell.z,
       startRow: firstCell.row,
@@ -1879,19 +1413,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       endPoint: this.activeConnSeg!.endPoint,
       cells,
       viaCells,
-    }
-    if (cache) {
-      setNativeRouteObjectKind(solvedRoute, "route")
-      setNativeRouteObjectKind(cells, "cells")
-      setNativeRouteObjectKind(viaCells, "vias")
-      for (let index = 0; index < cells.length; index++) {
-        setNativeRouteObjectKind(cells[index]!, "cell")
-      }
-      for (let index = 0; index < viaCells.length; index++) {
-        setNativeRouteObjectKind(viaCells[index]!, "via")
-      }
-    }
-    solvedRoutes.push(solvedRoute)
+    })
     this.solvedRoutes.set(connId, solvedRoutes)
 
     if (this.useExactViaTraceClearance) {
@@ -2247,19 +1769,3 @@ export class HighDensitySolverA01 extends BaseSolver {
     return result
   }
 }
-
-const nativePrepareHeuristicCache = Function.prototype.call.bind(
-  HighDensitySolverA01.prototype["getHeuristicCacheForStep"],
-) as (solver: HighDensitySolverA01) => NativeHeuristicCache | undefined
-const nativeReleaseHeuristicCache = Function.prototype.call.bind(
-  HighDensitySolverA01.prototype["releaseHeuristicCache"],
-) as (solver: HighDensitySolverA01) => void
-const nativeHeuristicMethods = [
-  "_setup", "_step", "stepOnce", "computeH", "getRipCost", "computeMoveCostAndRips",
-  "fillViaOccupants", "fillTraceSegmentViaOccupants", "nextStamp", "finalizeRoute",
-  "ripTrace", "shouldSkipFixedPortHalo", "getHeuristicCacheForStep", "getCachedHeuristic",
-  "resetHeuristicEpoch", "releaseHeuristicCache",
-].map((name) => ({
-  name,
-  value: getOwnDescriptor(HighDensitySolverA01.prototype, name)!.value,
-}))
