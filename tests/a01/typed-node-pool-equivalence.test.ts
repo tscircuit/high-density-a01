@@ -112,7 +112,9 @@ test("A01 typed nodes preserve queued values, public steps and rip reconstructio
     observedRips ||= actual["ripCount"].some((count) => count > 0)
     expect(actual.getOutput()).toEqual(reference.getOutput())
     expect(actual.nodeWithPortPoints).toEqual(originalInput)
-    expect(actual.getConstructorParams()).toEqual(reference.getConstructorParams())
+    expect(actual.getConstructorParams()).toEqual(
+      reference.getConstructorParams(),
+    )
     if (actual instanceof CustomRipCostSolver) {
       expect(actual.calls).toBe((reference as FrozenCustomRipCostSolver).calls)
     }
