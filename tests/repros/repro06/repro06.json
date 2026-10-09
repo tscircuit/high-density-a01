@@ -1,0 +1,364 @@
+{
+  "capacityMeshNodeId": "pipeline9_joint_drc_regular_fallback",
+  "center": {
+    "x": 6.871,
+    "y": 4.082922560771195
+  },
+  "width": 3,
+  "height": 3,
+  "availableZ": [0, 1],
+  "portPoints": [
+    {
+      "x": 6,
+      "y": 3.1496000000000066,
+      "z": 0,
+      "traceThickness": 0.15,
+      "portPointId": "pipeline9_fallback:source_trace_41_reroute_pcb_trace_168_0:start",
+      "nextPortPointId": "pipeline9_fallback:source_trace_41_reroute_pcb_trace_168_0:end",
+      "connectionName": "source_trace_41_reroute_pcb_trace_168_0",
+      "rootConnectionName": "source_trace_41"
+    },
+    {
+      "x": 5.581287467488449,
+      "y": 5.582922560771195,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:source_trace_41_reroute_pcb_trace_168_0:end",
+      "prevPortPointId": "pipeline9_fallback:source_trace_41_reroute_pcb_trace_168_0:start",
+      "connectionName": "source_trace_41_reroute_pcb_trace_168_0",
+      "rootConnectionName": "source_trace_41"
+    },
+    {
+      "x": 6,
+      "y": 3.8862000000000023,
+      "z": 0,
+      "traceThickness": 0.15,
+      "portPointId": "pipeline9_fallback:source_trace_40_reroute_pcb_trace_145_0:start",
+      "nextPortPointId": "pipeline9_fallback:source_trace_40_reroute_pcb_trace_145_0:end",
+      "connectionName": "source_trace_40_reroute_pcb_trace_145_0",
+      "rootConnectionName": "source_trace_40"
+    },
+    {
+      "x": 5.371,
+      "y": 3.927376274746766,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:source_trace_40_reroute_pcb_trace_145_0:end",
+      "prevPortPointId": "pipeline9_fallback:source_trace_40_reroute_pcb_trace_145_0:start",
+      "connectionName": "source_trace_40_reroute_pcb_trace_145_0",
+      "rootConnectionName": "source_trace_40"
+    },
+    {
+      "x": 6,
+      "y": 4.470400000000012,
+      "z": 0,
+      "traceThickness": 0.15,
+      "portPointId": "pipeline9_fallback:source_trace_39_reroute_pcb_trace_148_0:start",
+      "nextPortPointId": "pipeline9_fallback:source_trace_39_reroute_pcb_trace_148_0:end",
+      "connectionName": "source_trace_39_reroute_pcb_trace_148_0",
+      "rootConnectionName": "source_trace_39"
+    },
+    {
+      "x": 5.371,
+      "y": 4.566223647778182,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:source_trace_39_reroute_pcb_trace_148_0:end",
+      "prevPortPointId": "pipeline9_fallback:source_trace_39_reroute_pcb_trace_148_0:start",
+      "connectionName": "source_trace_39_reroute_pcb_trace_148_0",
+      "rootConnectionName": "source_trace_39"
+    },
+    {
+      "x": 5.371,
+      "y": 3.426,
+      "z": 1,
+      "portPointId": "pipeline9_fallback:source_trace_34_reroute_pcb_trace_138_0:start",
+      "nextPortPointId": "pipeline9_fallback:source_trace_34_reroute_pcb_trace_138_0:end",
+      "connectionName": "source_trace_34_reroute_pcb_trace_138_0",
+      "rootConnectionName": "source_trace_34"
+    },
+    {
+      "x": 5.3906196563055815,
+      "y": 5.582922560771195,
+      "z": 1,
+      "portPointId": "pipeline9_fallback:source_trace_34_reroute_pcb_trace_138_0:end",
+      "prevPortPointId": "pipeline9_fallback:source_trace_34_reroute_pcb_trace_138_0:start",
+      "connectionName": "source_trace_34_reroute_pcb_trace_138_0",
+      "rootConnectionName": "source_trace_34"
+    },
+    {
+      "x": 5.81754845023548,
+      "y": 2.5829225607711948,
+      "z": 1,
+      "portPointId": "pipeline9_fallback:source_trace_33_reroute_pcb_trace_139_0:start",
+      "nextPortPointId": "pipeline9_fallback:source_trace_33_reroute_pcb_trace_139_0:end",
+      "connectionName": "source_trace_33_reroute_pcb_trace_139_0",
+      "rootConnectionName": "source_trace_33"
+    },
+    {
+      "x": 6,
+      "y": 2.8376999999996144,
+      "z": 1,
+      "traceThickness": 0.15,
+      "portPointId": "pipeline9_fallback:source_trace_33_reroute_pcb_trace_139_0:end",
+      "prevPortPointId": "pipeline9_fallback:source_trace_33_reroute_pcb_trace_139_0:start",
+      "connectionName": "source_trace_33_reroute_pcb_trace_139_0",
+      "rootConnectionName": "source_trace_33"
+    },
+    {
+      "x": 7.368900000000394,
+      "y": 5.582922560771195,
+      "z": 1,
+      "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_1:start",
+      "nextPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_1:end",
+      "connectionName": "pipeline9_preloaded_drc_1",
+      "rootConnectionName": "connectivity_net12"
+    },
+    {
+      "x": 7.368900000000394,
+      "y": 3.0382000000000033,
+      "z": 1,
+      "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_1:end",
+      "prevPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_1:start",
+      "connectionName": "pipeline9_preloaded_drc_1",
+      "rootConnectionName": "connectivity_net12"
+    },
+    {
+      "x": 7.785100000000398,
+      "y": 4.470400000000012,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_8:start",
+      "nextPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_8:end",
+      "connectionName": "pipeline9_preloaded_drc_8",
+      "rootConnectionName": "connectivity_net5"
+    },
+    {
+      "x": 6,
+      "y": 4.470400000000012,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_8:end",
+      "prevPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_8:start",
+      "connectionName": "pipeline9_preloaded_drc_8",
+      "rootConnectionName": "connectivity_net5"
+    },
+    {
+      "x": 7.2263000000003785,
+      "y": 3.8862000000000023,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_9:start",
+      "nextPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_9:end",
+      "connectionName": "pipeline9_preloaded_drc_9",
+      "rootConnectionName": "connectivity_net4"
+    },
+    {
+      "x": 6,
+      "y": 3.8862000000000023,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_9:end",
+      "prevPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_9:start",
+      "connectionName": "pipeline9_preloaded_drc_9",
+      "rootConnectionName": "connectivity_net4"
+    },
+    {
+      "x": 8.371,
+      "y": 2.8470682659017834,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_10:start",
+      "nextPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_10:end",
+      "connectionName": "pipeline9_preloaded_drc_10",
+      "rootConnectionName": "connectivity_net4"
+    },
+    {
+      "x": 7.2263000000003785,
+      "y": 3.8862000000000023,
+      "z": 0,
+      "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_10:end",
+      "prevPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_10:start",
+      "connectionName": "pipeline9_preloaded_drc_10",
+      "rootConnectionName": "connectivity_net4"
+    }
+  ],
+  "portPointsInPairs": [
+    [
+      {
+        "x": 6,
+        "y": 3.1496000000000066,
+        "z": 0,
+        "traceThickness": 0.15,
+        "portPointId": "pipeline9_fallback:source_trace_41_reroute_pcb_trace_168_0:start",
+        "nextPortPointId": "pipeline9_fallback:source_trace_41_reroute_pcb_trace_168_0:end",
+        "connectionName": "source_trace_41_reroute_pcb_trace_168_0",
+        "rootConnectionName": "source_trace_41"
+      },
+      {
+        "x": 5.581287467488449,
+        "y": 5.582922560771195,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:source_trace_41_reroute_pcb_trace_168_0:end",
+        "prevPortPointId": "pipeline9_fallback:source_trace_41_reroute_pcb_trace_168_0:start",
+        "connectionName": "source_trace_41_reroute_pcb_trace_168_0",
+        "rootConnectionName": "source_trace_41"
+      }
+    ],
+    [
+      {
+        "x": 6,
+        "y": 3.8862000000000023,
+        "z": 0,
+        "traceThickness": 0.15,
+        "portPointId": "pipeline9_fallback:source_trace_40_reroute_pcb_trace_145_0:start",
+        "nextPortPointId": "pipeline9_fallback:source_trace_40_reroute_pcb_trace_145_0:end",
+        "connectionName": "source_trace_40_reroute_pcb_trace_145_0",
+        "rootConnectionName": "source_trace_40"
+      },
+      {
+        "x": 5.371,
+        "y": 3.927376274746766,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:source_trace_40_reroute_pcb_trace_145_0:end",
+        "prevPortPointId": "pipeline9_fallback:source_trace_40_reroute_pcb_trace_145_0:start",
+        "connectionName": "source_trace_40_reroute_pcb_trace_145_0",
+        "rootConnectionName": "source_trace_40"
+      }
+    ],
+    [
+      {
+        "x": 6,
+        "y": 4.470400000000012,
+        "z": 0,
+        "traceThickness": 0.15,
+        "portPointId": "pipeline9_fallback:source_trace_39_reroute_pcb_trace_148_0:start",
+        "nextPortPointId": "pipeline9_fallback:source_trace_39_reroute_pcb_trace_148_0:end",
+        "connectionName": "source_trace_39_reroute_pcb_trace_148_0",
+        "rootConnectionName": "source_trace_39"
+      },
+      {
+        "x": 5.371,
+        "y": 4.566223647778182,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:source_trace_39_reroute_pcb_trace_148_0:end",
+        "prevPortPointId": "pipeline9_fallback:source_trace_39_reroute_pcb_trace_148_0:start",
+        "connectionName": "source_trace_39_reroute_pcb_trace_148_0",
+        "rootConnectionName": "source_trace_39"
+      }
+    ],
+    [
+      {
+        "x": 5.371,
+        "y": 3.426,
+        "z": 1,
+        "portPointId": "pipeline9_fallback:source_trace_34_reroute_pcb_trace_138_0:start",
+        "nextPortPointId": "pipeline9_fallback:source_trace_34_reroute_pcb_trace_138_0:end",
+        "connectionName": "source_trace_34_reroute_pcb_trace_138_0",
+        "rootConnectionName": "source_trace_34"
+      },
+      {
+        "x": 5.3906196563055815,
+        "y": 5.582922560771195,
+        "z": 1,
+        "portPointId": "pipeline9_fallback:source_trace_34_reroute_pcb_trace_138_0:end",
+        "prevPortPointId": "pipeline9_fallback:source_trace_34_reroute_pcb_trace_138_0:start",
+        "connectionName": "source_trace_34_reroute_pcb_trace_138_0",
+        "rootConnectionName": "source_trace_34"
+      }
+    ],
+    [
+      {
+        "x": 5.81754845023548,
+        "y": 2.5829225607711948,
+        "z": 1,
+        "portPointId": "pipeline9_fallback:source_trace_33_reroute_pcb_trace_139_0:start",
+        "nextPortPointId": "pipeline9_fallback:source_trace_33_reroute_pcb_trace_139_0:end",
+        "connectionName": "source_trace_33_reroute_pcb_trace_139_0",
+        "rootConnectionName": "source_trace_33"
+      },
+      {
+        "x": 6,
+        "y": 2.8376999999996144,
+        "z": 1,
+        "traceThickness": 0.15,
+        "portPointId": "pipeline9_fallback:source_trace_33_reroute_pcb_trace_139_0:end",
+        "prevPortPointId": "pipeline9_fallback:source_trace_33_reroute_pcb_trace_139_0:start",
+        "connectionName": "source_trace_33_reroute_pcb_trace_139_0",
+        "rootConnectionName": "source_trace_33"
+      }
+    ],
+    [
+      {
+        "x": 7.368900000000394,
+        "y": 5.582922560771195,
+        "z": 1,
+        "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_1:start",
+        "nextPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_1:end",
+        "connectionName": "pipeline9_preloaded_drc_1",
+        "rootConnectionName": "connectivity_net12"
+      },
+      {
+        "x": 7.368900000000394,
+        "y": 3.0382000000000033,
+        "z": 1,
+        "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_1:end",
+        "prevPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_1:start",
+        "connectionName": "pipeline9_preloaded_drc_1",
+        "rootConnectionName": "connectivity_net12"
+      }
+    ],
+    [
+      {
+        "x": 7.785100000000398,
+        "y": 4.470400000000012,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_8:start",
+        "nextPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_8:end",
+        "connectionName": "pipeline9_preloaded_drc_8",
+        "rootConnectionName": "connectivity_net5"
+      },
+      {
+        "x": 6,
+        "y": 4.470400000000012,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_8:end",
+        "prevPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_8:start",
+        "connectionName": "pipeline9_preloaded_drc_8",
+        "rootConnectionName": "connectivity_net5"
+      }
+    ],
+    [
+      {
+        "x": 7.2263000000003785,
+        "y": 3.8862000000000023,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_9:start",
+        "nextPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_9:end",
+        "connectionName": "pipeline9_preloaded_drc_9",
+        "rootConnectionName": "connectivity_net4"
+      },
+      {
+        "x": 6,
+        "y": 3.8862000000000023,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_9:end",
+        "prevPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_9:start",
+        "connectionName": "pipeline9_preloaded_drc_9",
+        "rootConnectionName": "connectivity_net4"
+      }
+    ],
+    [
+      {
+        "x": 8.371,
+        "y": 2.8470682659017834,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_10:start",
+        "nextPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_10:end",
+        "connectionName": "pipeline9_preloaded_drc_10",
+        "rootConnectionName": "connectivity_net4"
+      },
+      {
+        "x": 7.2263000000003785,
+        "y": 3.8862000000000023,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:pipeline9_preloaded_drc_10:end",
+        "prevPortPointId": "pipeline9_fallback:pipeline9_preloaded_drc_10:start",
+        "connectionName": "pipeline9_preloaded_drc_10",
+        "rootConnectionName": "connectivity_net4"
+      }
+    ]
+  ]
+}
