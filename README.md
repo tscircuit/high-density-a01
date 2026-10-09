@@ -34,6 +34,21 @@ import {
 } from "@tscircuit/high-density-a01"
 ```
 
+### A01 via occupancy queries
+
+`HighDensitySolverA01` accepts `viaOccupantQuery: "dense" | "row-runs"`.
+The default is `"dense"`. The optional `"row-runs"` strategy maintains sorted
+occupied intervals in each grid row as the solver marks and removes routes.
+Via queries intersect these intervals with the original circular footprint,
+preserving layer, row, column, and first-owner encounter order.
+
+Select this option before setup. It requires fixed grid and footprint data and
+the solver's own occupancy writes during the solve. Consumers that directly
+edit the internal occupancy arrays or replace the occupancy-writing methods
+should use the default dense strategy. Calling setup rebuilds the index.
+This strategy does not retain answers to previous queries or change search
+priorities, routing costs, or iteration limits.
+
 ### A11
 
 Use `HighDensitySolverA11` for an A01-derived fine-grid solver that retries
