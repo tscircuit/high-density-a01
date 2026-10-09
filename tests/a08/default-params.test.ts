@@ -37,6 +37,7 @@ test("A08 breakout solver defaults stay aligned with defaultA08Params", () => {
   expect(solver.effort).toBe(defaultA08Params.effort)
   expect(solver.initialRectMarginMm).toBe(defaultA08Params.initialRectMarginMm)
   expect(solver.rectShrinkStepMm).toBe(defaultA08Params.rectShrinkStepMm)
+  expect(solver.maxShrinkMargin).toBe(defaultA08Params.maxShrinkMargin)
   expect(solver.breakoutTraceMarginMm).toBe(
     defaultA08Params.breakoutTraceMarginMm,
   )
