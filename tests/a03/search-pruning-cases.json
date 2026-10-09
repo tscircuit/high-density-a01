@@ -1,0 +1,86 @@
+[
+  {
+    "layers": 2,
+    "hyperParameters": {},
+    "solved": true,
+    "failed": false,
+    "error": null,
+    "iterations": 14369,
+    "outputSha256": "316c4e2a76b5864acecc8a3f76771ddca16d8646d740fef636dc48e0f74dae3f"
+  },
+  {
+    "layers": 2,
+    "hyperParameters": {
+      "ripTracePenalty": "-1"
+    },
+    "solved": false,
+    "failed": true,
+    "error": "No path found for c",
+    "iterations": 1404,
+    "outputSha256": "c1b591e2a1ca07677a32c133ca7a569101ab2f145d8728056cbc3c386b6b525a"
+  },
+  {
+    "layers": 2,
+    "hyperParameters": {
+      "viaBaseCost": "1e+308"
+    },
+    "solved": false,
+    "failed": true,
+    "error": "Convergence failure: exceeded MAX_RIPS 200",
+    "iterations": 72689,
+    "outputSha256": "f4a9061bfef7147a2335f263e9b279cf3fad0c4f4ec39de96f0f84c681406dfa"
+  },
+  {
+    "layers": 2,
+    "hyperParameters": {
+      "viaBaseCost": "NaN"
+    },
+    "solved": false,
+    "failed": true,
+    "error": "Convergence failure: exceeded MAX_RIPS 200",
+    "iterations": 43323,
+    "outputSha256": "10c409b6ca40a9f027701b186d75bd7fab8a65ea236e710e45991f080f0ba5df"
+  },
+  {
+    "layers": 4,
+    "hyperParameters": {},
+    "solved": true,
+    "failed": false,
+    "error": null,
+    "iterations": 6540,
+    "outputSha256": "497ac0a89f28116708240684d88ceba5d3b2edcffc528ed77a053c0c4f627884"
+  },
+  {
+    "layers": 4,
+    "hyperParameters": {
+      "ripTracePenalty": "-1"
+    },
+    "solved": false,
+    "failed": true,
+    "error": "No path found for c",
+    "iterations": 3584,
+    "outputSha256": "ec751d52bbd4f816a3ec5df0369f6feba662cd8e6525360c0758a65f8445cf2b"
+  },
+  {
+    "layers": 4,
+    "hyperParameters": {
+      "viaBaseCost": "1e+308"
+    },
+    "solved": false,
+    "failed": true,
+    "error": "Convergence failure: exceeded MAX_RIPS 200",
+    "iterations": 72689,
+    "outputSha256": "0bd7d409444dd062833498d2739e7d26e8ca6955ed895aa3520cc983ed4e4090"
+  },
+  {
+    "layers": 4,
+    "hyperParameters": {
+      "viaBaseCost": "NaN"
+    },
+    "solved": false,
+    "failed": true,
+    "error": "Convergence failure: exceeded MAX_RIPS 200",
+    "iterations": 150410,
+    "outputSha256": "91a52c2b6fbce3f2f418a2c939404438a7e3757c74aa87ddcaef48a8adf3d408"
+  }
+]
