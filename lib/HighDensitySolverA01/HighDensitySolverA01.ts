@@ -33,7 +33,6 @@ interface SearchNode {
   row: number
   col: number
   g: number
-  f: number
   parentIdx: number // -1 = root
   ripped: RippedNode | null
 }
@@ -605,7 +604,6 @@ export class HighDensitySolverA01 extends BaseSolver {
         row: next.startRow,
         col: next.startCol,
         g: 0,
-        f,
         parentIdx: -1,
         ripped: null,
       })
@@ -699,7 +697,6 @@ export class HighDensitySolverA01 extends BaseSolver {
         row: nr,
         col: nc,
         g: g2,
-        f: f2,
         parentIdx: nodeIdx,
         ripped: this._moveRipped,
       })
@@ -743,7 +740,6 @@ export class HighDensitySolverA01 extends BaseSolver {
           row,
           col,
           g: g2,
-          f: f2,
           parentIdx: nodeIdx,
           ripped: this._moveRipped,
         })
