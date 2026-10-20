@@ -43,9 +43,12 @@ test("A03 lifetime footprints match all grid-cell intersections", (): void => {
         const dy = cy - qy
         if (dx * dx + dy * dy <= radius * radius) expected.push(candidateId)
       }
-      const footprint = solver["getViaFootprintCellIds"](cellId)
+      solver["fillViaOccupants"](cellId, 0)
+      const footprint = solver["viaFootprintCellIds"][cellId]!
       expect(Array.from(footprint)).toEqual(expected)
-      expect(solver["getViaFootprintCellIds"](cellId)).toBe(footprint)
+      solver["viaOccupantsByCell"].clear()
+      solver["fillViaOccupants"](cellId, 0)
+      expect(solver["viaFootprintCellIds"][cellId]).toBe(footprint)
     }
   }
 })
