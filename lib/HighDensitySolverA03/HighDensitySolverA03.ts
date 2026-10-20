@@ -432,10 +432,6 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private _viaOccs: ConnId[] = []
   private viaOccupantsByCell = new Map<GridCellIndex, readonly ConnId[]>()
-  private viaFootprintCellIds!: Array<Uint32Array | undefined>
-  private viaFootprintCacheEntries = 0
-  private maxViaFootprintCacheEntries = 0
-  private viaFootprintCacheClosed = false
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
@@ -627,12 +623,6 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.overlapFriendlyRootNets = new Set()
 
     this.unsolvedSegs = this.buildConnectionSegs()
-    this.viaFootprintCellIds = new Array(this.planeSize)
-    this.viaFootprintCacheEntries = 0
-    this.viaFootprintCacheClosed = false
-    // Bound retained footprint payload to 64 bytes per grid cell, comparable to
-    // the existing eight Float64 geometry columns, even for large via radii.
-    this.maxViaFootprintCacheEntries = 16 * this.planeSize
 
     this.penalty2d = new Float64Array(this.planeSize)
     const widthInv = width > 0 ? 1 / width : 0
@@ -1368,40 +1358,11 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (const connId of cachedOccupants) occs.push(connId)
       return
     }
-    const footprintCellIds = this.viaFootprintCellIds[cellId]
-    if (footprintCellIds) {
-      for (let i = 0; i < footprintCellIds.length; i++) {
-        const occCellId = footprintCellIds[i]!
-        for (let z = 0; z < this.layers; z++) {
-          this.pushFlatOccupants(
-            z * this.planeSize + occCellId,
-            activeConn,
-            occs,
-          )
-        }
-      }
-    } else {
-      this.fillViaOccupantsFromGeometry(cellId, activeConn, occs)
-    }
-    this.viaOccupantsByCell.set(cellId, occs.slice())
-  }
-
-  private fillViaOccupantsFromGeometry(
-    cellId: number,
-    activeConn: ConnId,
-    occs: ConnId[],
-  ): void {
-    // Grid geometry stays fixed across connection searches. Keep only that
-    // geometry here; the per-search cache above still owns occupancy results.
-    const remainingEntries =
-      this.maxViaFootprintCacheEntries - this.viaFootprintCacheEntries
-    let footprintCellIds: number[] | undefined =
-      !this.viaFootprintCacheClosed && remainingEntries > 0 ? [] : undefined
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
       if (
-        circleIntersectsRect(
+        !circleIntersectsRect(
           cx,
           cy,
           this.viaKeepoutRadius,
@@ -1411,30 +1372,13 @@ export class HighDensitySolverA03 extends BaseSolver {
           this.cellMaxY[occCellId]!,
         )
       ) {
-        if (footprintCellIds) {
-          if (footprintCellIds.length < remainingEntries) {
-            footprintCellIds.push(occCellId)
-          } else {
-            // Continue the original streaming geometry scan without retaining
-            // an oversized footprint or allocating more IDs after exhaustion.
-            footprintCellIds = undefined
-            this.viaFootprintCacheClosed = true
-          }
-        }
-        for (let z = 0; z < this.layers; z++) {
-          this.pushFlatOccupants(
-            z * this.planeSize + occCellId,
-            activeConn,
-            occs,
-          )
-        }
+        return
+      }
+      for (let z = 0; z < this.layers; z++) {
+        this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
       }
     })
-    if (footprintCellIds) {
-      const cellIds = Uint32Array.from(footprintCellIds)
-      this.viaFootprintCellIds[cellId] = cellIds
-      this.viaFootprintCacheEntries += cellIds.length
-    }
+    this.viaOccupantsByCell.set(cellId, occs.slice())
   }
 
   private fillTraceOccupants(
