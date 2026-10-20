@@ -118,15 +118,19 @@ class MinHeap {
 
   push(f: number, seq: number, id: number) {
     let i = this.n++
+    while (i > 0) {
+      const p = (i - 1) >> 1
+      const parentF = this.f[p]!
+      const parentSeq = this.seq[p]!
+      if (parentF !== f ? parentF < f : parentSeq < seq) break
+      this.f[i] = parentF
+      this.seq[i] = parentSeq
+      this.id[i] = this.id[p]!
+      i = p
+    }
     this.f[i] = f
     this.seq[i] = seq
     this.id[i] = id
-    while (i > 0) {
-      const p = (i - 1) >> 1
-      if (this.less(p, i)) break
-      this.swap(i, p)
-      i = p
-    }
   }
 
   pop(): number {
@@ -150,16 +154,25 @@ class MinHeap {
   }
 
   private siftDown(i: number) {
+    const f = this.f[i]!
+    const seq = this.seq[i]!
+    const id = this.id[i]!
     while (true) {
       const l = i * 2 + 1
       const r = l + 1
-      if (l >= this.n) return
+      if (l >= this.n) break
       let m = l
       if (r < this.n && !this.less(l, r)) m = r
-      if (this.less(i, m)) return
-      this.swap(i, m)
+      const childF = this.f[m]!
+      if (f !== childF ? f < childF : seq < this.seq[m]!) break
+      this.f[i] = childF
+      this.seq[i] = this.seq[m]!
+      this.id[i] = this.id[m]!
       i = m
     }
+    this.f[i] = f
+    this.seq[i] = seq
+    this.id[i] = id
   }
 
   private less(i: number, j: number) {
@@ -167,18 +180,6 @@ class MinHeap {
     const fj = this.f[j]!
     if (fi !== fj) return fi < fj
     return this.seq[i]! < this.seq[j]!
-  }
-
-  private swap(i: number, j: number) {
-    const tmpF = this.f[i]!
-    this.f[i] = this.f[j]!
-    this.f[j] = tmpF
-    const tmpS = this.seq[i]!
-    this.seq[i] = this.seq[j]!
-    this.seq[j] = tmpS
-    const tmpI = this.id[i]!
-    this.id[i] = this.id[j]!
-    this.id[j] = tmpI
   }
 }
 
