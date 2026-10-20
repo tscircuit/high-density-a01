@@ -26,6 +26,8 @@ const createHeap = (): Heap => {
   return solver["heap"]
 }
 
+// Full backing-array comparisons and proxy write instrumentation exceed the
+// default five-second limit on slower CI runners; retain the complete oracle.
 test("A01 hole sifts preserve the original heap for all Number priorities and reuse", (): void => {
   const actual = createHeap()
   const original = new FrozenA01MinHeap()
@@ -90,4 +92,4 @@ test("A01 hole sifts preserve the original heap for all Number priorities and re
   for (const item of items.sort((a, b) => a.f - b.f || a.seq - b.seq)) {
     expect(ordered.pop()).toBe(item.id)
   }
-})
+}, 30_000)
