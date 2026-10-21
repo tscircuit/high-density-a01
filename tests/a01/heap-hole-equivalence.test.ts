@@ -34,6 +34,7 @@ test("A01 hole sifts preserve the original heap for all Number priorities and re
   const actualStorage = actual as unknown as HeapStorage
   const originalStorage = original as unknown as HeapStorage
   const writes = [0, 0]
+  const operations = { pushes: 0, pops: 0, clears: 0 }
   for (const [index, storage] of [actualStorage, originalStorage].entries()) {
     for (const name of ["f", "seq", "id"] as const) {
       storage[name] = new Proxy(storage[name], {
@@ -65,13 +66,16 @@ test("A01 hole sifts preserve the original heap for all Number priorities and re
     if (operation > 0 && operation % 971 === 0) {
       actual.clear()
       original.clear()
+      operations.clears++
     } else if (original.size > 0 && random % 4 === 0) {
       expect(actual.pop()).toBe(original.pop())
+      operations.pops++
     } else {
       const priority = priorities[random % priorities.length]!
       const sequence = operation % 11 === 0 ? 0 : operation
       actual.push(priority, sequence, operation)
       original.push(priority, sequence, operation)
+      operations.pushes++
     }
     expect(actual.size).toBe(original.size)
     expect(actualStorage).toEqual(originalStorage)
@@ -79,8 +83,17 @@ test("A01 hole sifts preserve the original heap for all Number priorities and re
   while (original.size > 0) {
     expect(actual.pop()).toBe(original.pop())
     expect(actualStorage).toEqual(originalStorage)
+    operations.pops++
   }
   expect(writes[0]).toBeLessThan(writes[1]! * 0.6)
+  // Count actual indexed writes through proxies, rather than elapsed time.
+  // The complete arrays and every pop above must still match the frozen heap.
+  expect({
+    workload: operations,
+    beforeSwapSifts: { arrayWrites: writes[1] },
+    afterHoleSifts: { arrayWrites: writes[0] },
+    arrayWritesAvoided: writes[1]! - writes[0]!,
+  }).toMatchSnapshot("same queue behavior with fewer heap array writes")
 
   const ordered = createHeap()
   const items: Array<{ f: number; seq: number; id: number }> = []
