@@ -1,0 +1,18 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`A01 hole sifts preserve the original heap for all Number priorities and reuse: same queue behavior with fewer heap array writes 1`] = `
+{
+  "afterHoleSifts": {
+    "arrayWrites": 176079,
+  },
+  "arrayWritesAvoided": 120630,
+  "beforeSwapSifts": {
+    "arrayWrites": 296709,
+  },
+  "workload": {
+    "clears": 12,
+    "pops": 3167,
+    "pushes": 8994,
+  },
+}
+`;
