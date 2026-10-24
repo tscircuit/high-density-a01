@@ -1,0 +1,17 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`A03 hole sifts reduce indexed typed-array writes while preserving every pop: same queue behavior with fewer typed heap writes 1`] = `
+{
+  "afterHoleSifts": {
+    "typedArrayWrites": 258132,
+  },
+  "beforeSwapSifts": {
+    "typedArrayWrites": 491691,
+  },
+  "typedArrayWritesAvoided": 233559,
+  "workload": {
+    "pops": 4096,
+    "pushes": 4096,
+  },
+}
+`;
