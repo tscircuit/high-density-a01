@@ -74,25 +74,46 @@ class TypedMinHeap {
   push(f: number, seq: number, id: number) {
     this.ensureCapacity(this.n + 1)
     let i = this.n++
-    this.f[i] = f
-    this.seq[i] = seq
-    this.id[i] = id
+    // Compare the same wrapped value that the Uint32Array would store.
+    const storedSeq = seq >>> 0
     while (i > 0) {
       const p = (i - 1) >> 1
-      if (this.less(p, i)) break
-      this.swap(i, p)
+      const parentF = this.f[p]!
+      if (parentF !== f ? parentF < f : this.seq[p]! < storedSeq) break
+      this.f[i] = parentF
+      this.seq[i] = this.seq[p]!
+      this.id[i] = this.id[p]!
       i = p
     }
+    this.f[i] = f
+    this.seq[i] = storedSeq
+    this.id[i] = id
   }
 
   pop(): number {
     const out = this.id[0]!
     this.n--
     if (this.n > 0) {
-      this.f[0] = this.f[this.n]!
-      this.seq[0] = this.seq[this.n]!
-      this.id[0] = this.id[this.n]!
-      this.siftDown(0)
+      const f = this.f[this.n]!
+      const seq = this.seq[this.n]!
+      const id = this.id[this.n]!
+      let i = 0
+      while (true) {
+        const l = i * 2 + 1
+        const r = l + 1
+        if (l >= this.n) break
+        let m = l
+        if (r < this.n && !this.less(l, r)) m = r
+        const childF = this.f[m]!
+        if (f !== childF ? f < childF : seq < this.seq[m]!) break
+        this.f[i] = childF
+        this.seq[i] = this.seq[m]!
+        this.id[i] = this.id[m]!
+        i = m
+      }
+      this.f[i] = f
+      this.seq[i] = seq
+      this.id[i] = id
     }
     return out
   }
@@ -123,38 +144,11 @@ class TypedMinHeap {
     this.id = ni
   }
 
-  private siftDown(i: number) {
-    while (true) {
-      const l = i * 2 + 1
-      const r = l + 1
-      if (l >= this.n) return
-      let m = l
-      if (r < this.n && !this.less(l, r)) m = r
-      if (this.less(i, m)) return
-      this.swap(i, m)
-      i = m
-    }
-  }
-
   private less(i: number, j: number) {
     const fi = this.f[i]!
     const fj = this.f[j]!
     if (fi !== fj) return fi < fj
     return this.seq[i]! < this.seq[j]!
-  }
-
-  private swap(i: number, j: number) {
-    const tf = this.f[i]!
-    this.f[i] = this.f[j]!
-    this.f[j] = tf
-
-    const ts = this.seq[i]!
-    this.seq[i] = this.seq[j]!
-    this.seq[j] = ts
-
-    const ti = this.id[i]!
-    this.id[i] = this.id[j]!
-    this.id[j] = ti
   }
 }
 
