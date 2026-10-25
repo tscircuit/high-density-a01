@@ -559,6 +559,19 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.seqCounter = 0
   }
 
+  // BaseSolver can fail after _step; wait for its full terminal bookkeeping.
+  override step(): void {
+    try {
+      super.step()
+    } finally {
+      // Routes and visualizations use occupancy, not these search records.
+      if (this.solved || this.failed) {
+        this.nodePool = []
+        this._moveRipped = null
+      }
+    }
+  }
+
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
       if (this.solved || this.failed) return
