@@ -87,6 +87,8 @@ export class HighDensitySolverA13 extends BaseSolver {
   private queue: number[] = []
   private traceCost!: Uint16Array
   private viaCost!: Uint16Array
+  private totalTraceCost!: Uint16Array
+  private totalViaCost!: Uint16Array
   private fixed!: Uint8Array
   private fixedVia!: Uint8Array
   private history!: Float64Array
@@ -155,6 +157,8 @@ export class HighDensitySolverA13 extends BaseSolver {
       throw new Error("A13 grid exceeds two million states")
     this.traceCost = new Uint16Array(states)
     this.viaCost = new Uint16Array(this.plane)
+    this.totalTraceCost = new Uint16Array(states)
+    this.totalViaCost = new Uint16Array(this.plane)
     this.fixed = new Uint8Array(states)
     this.fixedVia = new Uint8Array(this.plane)
     this.history = new Float64Array(states)
@@ -279,15 +283,15 @@ export class HighDensitySolverA13 extends BaseSolver {
   private prepareSearch(id: number) {
     this.activeConnectionIndex = id
     const conn = this.connections[id]!
-    this.traceCost.fill(0)
-    this.viaCost.fill(0)
+    this.traceCost.set(this.totalTraceCost)
+    this.viaCost.set(this.totalViaCost)
     this.fixed.fill(0)
     this.fixedVia.fill(0)
     // No route is deleted. Exclude just this net when searching its replacement.
     for (const [other, route] of this.routes) {
-      if (this.connections[other]!.root === conn.root) continue
-      for (const i of route.traceFootprint) this.traceCost[i]!++
-      for (const i of route.viaFootprint) this.viaCost[i]!++
+      if (this.connections[other]!.root !== conn.root) continue
+      for (const i of route.traceFootprint) this.traceCost[i]!--
+      for (const i of route.viaFootprint) this.viaCost[i]!--
     }
     for (const other of this.connections) {
       if (other.root === conn.root) continue
@@ -354,6 +358,7 @@ export class HighDensitySolverA13 extends BaseSolver {
   override _step() {
     if (this.phase === "negotiating") {
       this.negotiate()
+      if (this.solved || this.failed) this.releaseCongestionTotals()
       return
     }
     if (this.activeConnectionIndex < 0) {
@@ -379,6 +384,10 @@ export class HighDensitySolverA13 extends BaseSolver {
       this.failed = true
       this.error = "A13 exhausted its search budget"
     }
+    if (this.failed) this.releaseCongestionTotals()
+  }
+  private releaseCongestionTotals() {
+    this.totalTraceCost = this.totalViaCost = new Uint16Array(0)
   }
   private commit(goal: number) {
     const id = this.activeConnectionIndex,
@@ -463,7 +472,14 @@ export class HighDensitySolverA13 extends BaseSolver {
         viaSet.add(xy),
       )
     }
-    if (this.routes.has(id)) this.rerouteCount++
+    const previous = this.routes.get(id)
+    if (previous) {
+      this.rerouteCount++
+      for (const i of previous.traceFootprint) this.totalTraceCost[i]!--
+      for (const i of previous.viaFootprint) this.totalViaCost[i]!--
+    }
+    for (const i of traces) this.totalTraceCost[i]!++
+    for (const i of viaSet) this.totalViaCost[i]!++
     this.routes.set(id, {
       output,
       clearanceOutput: {
