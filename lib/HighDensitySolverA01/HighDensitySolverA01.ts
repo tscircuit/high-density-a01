@@ -561,9 +561,16 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved || this.failed) break
       this.stepOnce()
     }
+    if (this.solved || this.failed) this.nodePool = []
+  }
+
+  override tryFinalAcceptance(): void {
+    super.tryFinalAcceptance()
+    // BaseSolver reaches the iteration limit after _step, before setting failed.
+    if (this.iterations >= this.MAX_ITERATIONS) this.nodePool = []
   }
 
   private stepOnce(): void {
