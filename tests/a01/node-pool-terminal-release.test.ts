@@ -11,7 +11,12 @@ test("A01 releases spare nodes on success and iteration-budget exhaustion", (): 
     })
     solver.setup()
     solver["nodePool"] = Array.from({ length: 64 }, () => ({
-      z: 0, row: 0, col: 0, g: 0, parentIdx: -1, ripped: null,
+      z: 0,
+      row: 0,
+      col: 0,
+      g: 0,
+      parentIdx: -1,
+      ripped: null,
     }))
     solver["resetNodePool"]()
     expect(solver["recycledSearchNodes"].length).toBe(64)

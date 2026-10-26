@@ -48,10 +48,20 @@ export function getA01SearchTrace(
     for (let ripped = node.ripped; ripped; ripped = ripped.prev) {
       rippedIds.push(ripped.id)
     }
-    trace.update(JSON.stringify([
-      "queue", f, seq, id, node.z, node.row, node.col, node.g,
-      node.parentIdx, rippedIds,
-    ]))
+    trace.update(
+      JSON.stringify([
+        "queue",
+        f,
+        seq,
+        id,
+        node.z,
+        node.row,
+        node.col,
+        node.g,
+        node.parentIdx,
+        rippedIds,
+      ]),
+    )
     queuedNodes++
     push(f, seq, id)
   }
@@ -63,11 +73,20 @@ export function getA01SearchTrace(
   }
   while (!solver.solved && !solver.failed) {
     solver.step()
-    trace.update(JSON.stringify([
-      "step", solver.iterations, solver.solved, solver.failed, solver.error,
-      solver["activeConnId"], solver["searchIterations"], solver["seqCounter"],
-      solver["ripCount"], solver["totalRipEvents"],
-    ]))
+    trace.update(
+      JSON.stringify([
+        "step",
+        solver.iterations,
+        solver.solved,
+        solver.failed,
+        solver.error,
+        solver["activeConnId"],
+        solver["searchIterations"],
+        solver["seqCounter"],
+        solver["ripCount"],
+        solver["totalRipEvents"],
+      ]),
+    )
   }
   return {
     traceHash: trace.digest("hex"),
