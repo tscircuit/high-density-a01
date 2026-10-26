@@ -211,6 +211,7 @@ export interface HighDensitySolverA01Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  enableEmptyHistoryOpenPruning?: boolean
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -225,8 +226,6 @@ export interface HighDensitySolverA01Props {
 // Static direction offsets for 8-connected neighbor expansion
 const DIRS_DR = [-1, -1, -1, 0, 0, 1, 1, 1] as const
 const DIRS_DC = [-1, 0, 1, -1, 1, -1, 0, 1] as const
-// Bound spare storage independently of the active search's unchanged budget.
-const MAX_RECYCLED_SEARCH_NODES = 16_384
 
 export class HighDensitySolverA01 extends BaseSolver {
   override getSolverName(): string {
@@ -244,6 +243,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   showPenaltyMap: boolean
   showUsedCellMap: boolean
   effort: number
+  readonly enableEmptyHistoryOpenPruning: boolean
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
@@ -275,6 +275,8 @@ export class HighDensitySolverA01 extends BaseSolver {
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
+  private emptyHistoryPriorityStamp!: Uint32Array
+  private emptyHistoryBestPriority!: Float64Array
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -307,7 +309,6 @@ export class HighDensitySolverA01 extends BaseSolver {
   private activeConnId: ConnId = -1
   private crossLayerSearch = false
   private nodePool!: SearchNode[]
-  private recycledSearchNodes: SearchNode[] = []
   private heap!: MinHeap
   private seqCounter = 0
 
@@ -366,6 +367,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
+    this.enableEmptyHistoryOpenPruning =
+      props.enableEmptyHistoryOpenPruning ?? false
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
@@ -395,6 +398,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
+        enableEmptyHistoryOpenPruning: this.enableEmptyHistoryOpenPruning,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
       },
@@ -484,6 +488,10 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
+    if (this.enableEmptyHistoryOpenPruning) {
+      this.emptyHistoryPriorityStamp = new Uint32Array(totalCells)
+      this.emptyHistoryBestPriority = new Float64Array(totalCells)
+    }
     this.stamp = 0
 
     // Existing traces already occupy their traceMargin halo, so a prospective
@@ -564,50 +572,9 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) break
+      if (this.solved || this.failed) return
       this.stepOnce()
     }
-    if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
-      this.recycledSearchNodes.length = 0
-    }
-  }
-
-  private resetNodePool(): void {
-    const retainedCount = Math.min(
-      this.nodePool.length,
-      MAX_RECYCLED_SEARCH_NODES - this.recycledSearchNodes.length,
-    )
-    for (let i = 0; i < retainedCount; i++) {
-      const node = this.nodePool[i]!
-      // Completed routes own copied cells; spare nodes must not retain rip chains.
-      node.ripped = null
-      this.recycledSearchNodes.push(node)
-    }
-    this.nodePool = []
-  }
-
-  private pushSearchNode(
-    z: number,
-    row: number,
-    col: number,
-    g: number,
-    parentIdx: number,
-    ripped: RippedNode | null,
-  ): number {
-    const nodeIdx = this.nodePool.length
-    const node = this.recycledSearchNodes.pop()
-    if (node) {
-      node.z = z
-      node.row = row
-      node.col = col
-      node.g = g
-      node.parentIdx = parentIdx
-      node.ripped = ripped
-      this.nodePool.push(node)
-    } else {
-      this.nodePool.push({ z, row, col, g, parentIdx, ripped })
-    }
-    return nodeIdx
   }
 
   private stepOnce(): void {
@@ -627,7 +594,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.viaOccupantsByCell.clear()
 
       // Reset A* state for this connection
-      this.resetNodePool()
+      this.nodePool = []
       this.heap.clear()
       this.seqCounter = 0
       this.searchIterations = 0
@@ -643,14 +610,20 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endCol,
       )
       const f = h * this.hyperParameters.greedyMultiplier
-      this.pushSearchNode(
-        next.startZ,
-        next.startRow,
-        next.startCol,
-        0,
-        -1,
-        null,
-      )
+      if (this.enableEmptyHistoryOpenPruning) {
+        const startIdx =
+          (next.startZ * this.rows + next.startRow) * this.cols + next.startCol
+        this.emptyHistoryPriorityStamp[startIdx] = this.stamp
+        this.emptyHistoryBestPriority[startIdx] = f
+      }
+      this.nodePool.push({
+        z: next.startZ,
+        row: next.startRow,
+        col: next.startCol,
+        g: 0,
+        parentIdx: -1,
+        ripped: null,
+      })
       this.heap.push(f, this.seqCounter++, 0)
       return
     }
@@ -672,7 +645,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.activeConnSeg = null
       this.activeConnId = -1
       this.heap.clear()
-      this.resetNodePool()
+      this.nodePool = []
       this.consecutiveSkips++
       if (this.consecutiveSkips >= this.unsolvedSegs.length * 3) {
         this.error = `Convergence failure: ${this.unsolvedSegs.length} connections stuck`
@@ -735,14 +708,29 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
           this.hyperParameters.greedyMultiplier
 
-      const newNodeIdx = this.pushSearchNode(
+      // Empty paid-owner histories are the same state. Keep exact priority
+      // ties and every nonempty history, including differently paid owners.
+      if (this.enableEmptyHistoryOpenPruning && this._moveRipped === null) {
+        if (
+          this.emptyHistoryPriorityStamp[nIdx] === stamp &&
+          f2 > this.emptyHistoryBestPriority[nIdx]!
+        ) {
+          this.seqCounter++
+          continue
+        }
+        this.emptyHistoryPriorityStamp[nIdx] = stamp
+        this.emptyHistoryBestPriority[nIdx] = f2
+      }
+
+      const newNodeIdx = this.nodePool.length
+      this.nodePool.push({
         z,
-        nr,
-        nc,
-        g2,
-        nodeIdx,
-        this._moveRipped,
-      )
+        row: nr,
+        col: nc,
+        g: g2,
+        parentIdx: nodeIdx,
+        ripped: this._moveRipped,
+      })
       this.heap.push(f2, this.seqCounter++, newNodeIdx)
     }
 
@@ -777,14 +765,27 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.computeH(nz, row, col, endZ, endRow, endCol) *
             this.hyperParameters.greedyMultiplier
 
-        const newNodeIdx = this.pushSearchNode(
-          nz,
+        if (this.enableEmptyHistoryOpenPruning && this._moveRipped === null) {
+          if (
+            this.emptyHistoryPriorityStamp[nIdx] === stamp &&
+            f2 > this.emptyHistoryBestPriority[nIdx]!
+          ) {
+            this.seqCounter++
+            continue
+          }
+          this.emptyHistoryPriorityStamp[nIdx] = stamp
+          this.emptyHistoryBestPriority[nIdx] = f2
+        }
+
+        const newNodeIdx = this.nodePool.length
+        this.nodePool.push({
+          z: nz,
           row,
           col,
-          g2,
-          nodeIdx,
-          this._moveRipped,
-        )
+          g: g2,
+          parentIdx: nodeIdx,
+          ripped: this._moveRipped,
+        })
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
@@ -1088,6 +1089,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
+      if (this.enableEmptyHistoryOpenPruning) {
+        this.emptyHistoryPriorityStamp.fill(0)
+      }
       this.stamp = 1
     }
   }
