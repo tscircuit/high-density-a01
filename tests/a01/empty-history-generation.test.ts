@@ -11,8 +11,12 @@ test("A01 invalidates empty-history priorities across searches and stamp wrap", 
   })
   const priorityBuffer = solver["emptyHistoryBestPriority"].buffer
   const stampBuffer = solver["emptyHistoryPriorityStamp"].buffer
-  expect(solver["emptyHistoryBestPriority"].length).toBe(solver.gridStats.states)
-  expect(solver["emptyHistoryPriorityStamp"].length).toBe(solver.gridStats.states)
+  expect(solver["emptyHistoryBestPriority"].length).toBe(
+    solver.gridStats.states,
+  )
+  expect(solver["emptyHistoryPriorityStamp"].length).toBe(
+    solver.gridStats.states,
+  )
 
   solver["heap"].clear()
   solver["nodePool"].length = 1
@@ -32,7 +36,9 @@ test("A01 invalidates empty-history priorities across searches and stamp wrap", 
   solver["nextStamp"]()
   expect(solver["stamp"]).toBe(1)
   expect(solver["visitedStamp"].every((stamp) => stamp === 0)).toBeTrue()
-  expect(solver["emptyHistoryPriorityStamp"].every((stamp) => stamp === 0)).toBeTrue()
+  expect(
+    solver["emptyHistoryPriorityStamp"].every((stamp) => stamp === 0),
+  ).toBeTrue()
   expect(solver["emptyHistoryBestPriority"].buffer).toBe(priorityBuffer)
   expect(solver["emptyHistoryPriorityStamp"].buffer).toBe(stampBuffer)
 })

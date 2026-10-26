@@ -48,7 +48,9 @@ test("A01 screening preserves completed fixture geometry and terminal coverage",
       savedSteps += original.iterations - screened.iterations
       for (const route of screened.getOutput()) {
         for (const point of route.route) {
-          expect(Number.isFinite(point.x) && Number.isFinite(point.y)).toBeTrue()
+          expect(
+            Number.isFinite(point.x) && Number.isFinite(point.y),
+          ).toBeTrue()
           expect(Math.abs(point.x)).toBeLessThanOrEqual(node.width / 2 + 1e-9)
           expect(Math.abs(point.y)).toBeLessThanOrEqual(node.height / 2 + 1e-9)
           expect(node.availableZ!.includes(point.z)).toBeTrue()
