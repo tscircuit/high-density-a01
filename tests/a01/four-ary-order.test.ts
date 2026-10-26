@@ -37,9 +37,7 @@ test("four-ary A01 extraction matches an independent stable priority oracle", ()
     }
     expect(actual.size).toBe(expected.length)
   }
-  expected.sort((a, b) =>
-    a.f !== b.f ? (a.f < b.f ? -1 : 1) : a.seq - b.seq,
-  )
+  expected.sort((a, b) => (a.f !== b.f ? (a.f < b.f ? -1 : 1) : a.seq - b.seq))
   for (const item of expected) expect(actual.pop()).toBe(item.id)
   expect(actual.size).toBe(0)
 })
