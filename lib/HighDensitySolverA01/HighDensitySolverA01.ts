@@ -110,10 +110,10 @@ function createCircularGridOffsets(params: {
 
 // --- Min-heap for A* open set ---
 class MinHeap {
-  private f: number[] = []
-  private seq: number[] = []
-  private id: number[] = []
-  private n = 0
+  protected f: number[] = []
+  protected seq: number[] = []
+  protected id: number[] = []
+  protected n = 0
 
   push(f: number, seq: number, id: number) {
     let i = this.n++
@@ -174,11 +174,58 @@ class MinHeap {
     this.id[i] = id
   }
 
-  private less(i: number, j: number) {
+  protected less(i: number, j: number) {
     const fi = this.f[i]!
     const fj = this.f[j]!
     if (fi !== fj) return fi < fj
     return this.seq[i]! < this.seq[j]!
+  }
+}
+
+class FourAryMinHeap extends MinHeap {
+  override push(f: number, seq: number, id: number): void {
+    let i = this.n++
+    while (i > 0) {
+      const p = (i - 1) >> 2
+      const parentF = this.f[p]!
+      const parentSeq = this.seq[p]!
+      if (parentF !== f ? parentF < f : parentSeq < seq) break
+      this.f[i] = parentF
+      this.seq[i] = parentSeq
+      this.id[i] = this.id[p]!
+      i = p
+    }
+    this.f[i] = f
+    this.seq[i] = seq
+    this.id[i] = id
+  }
+
+  override pop(): number {
+    const out = this.id[0]!
+    this.n--
+    if (this.n === 0) return out
+    const f = this.f[this.n]!
+    const seq = this.seq[this.n]!
+    const id = this.id[this.n]!
+    let i = 0
+    while (true) {
+      const first = i * 4 + 1
+      if (first >= this.n) break
+      let m = first
+      if (first + 1 < this.n && !this.less(m, first + 1)) m = first + 1
+      if (first + 2 < this.n && !this.less(m, first + 2)) m = first + 2
+      if (first + 3 < this.n && !this.less(m, first + 3)) m = first + 3
+      const childF = this.f[m]!
+      if (f !== childF ? f < childF : seq < this.seq[m]!) break
+      this.f[i] = childF
+      this.seq[i] = this.seq[m]!
+      this.id[i] = this.id[m]!
+      i = m
+    }
+    this.f[i] = f
+    this.seq[i] = seq
+    this.id[i] = id
+    return out
   }
 }
 
@@ -211,7 +258,8 @@ export interface HighDensitySolverA01Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
-  enableEmptyHistoryOpenPruning?: boolean
+  /** Four-ary layout for finite priorities with distinct sequence numbers. */
+  enableFourAryHeap?: boolean
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -243,7 +291,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   showPenaltyMap: boolean
   showUsedCellMap: boolean
   effort: number
-  readonly enableEmptyHistoryOpenPruning: boolean
+  readonly enableFourAryHeap: boolean
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
@@ -275,8 +323,6 @@ export class HighDensitySolverA01 extends BaseSolver {
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
-  private emptyHistoryPriorityStamp!: Uint32Array
-  private emptyHistoryBestPriority!: Float64Array
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -367,8 +413,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
-    this.enableEmptyHistoryOpenPruning =
-      props.enableEmptyHistoryOpenPruning ?? false
+    this.enableFourAryHeap = props.enableFourAryHeap ?? false
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
@@ -398,7 +443,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
-        enableEmptyHistoryOpenPruning: this.enableEmptyHistoryOpenPruning,
+        ...(this.enableFourAryHeap ? { enableFourAryHeap: true } : {}),
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
       },
@@ -488,10 +533,6 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
-    if (this.enableEmptyHistoryOpenPruning) {
-      this.emptyHistoryPriorityStamp = new Uint32Array(totalCells)
-      this.emptyHistoryBestPriority = new Float64Array(totalCells)
-    }
     this.stamp = 0
 
     // Existing traces already occupy their traceMargin halo, so a prospective
@@ -566,7 +607,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.activeConnSeg = null
     this.activeConnId = -1
     this.nodePool = []
-    this.heap = new MinHeap()
+    this.heap = this.enableFourAryHeap ? new FourAryMinHeap() : new MinHeap()
     this.seqCounter = 0
   }
 
@@ -610,12 +651,6 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endCol,
       )
       const f = h * this.hyperParameters.greedyMultiplier
-      if (this.enableEmptyHistoryOpenPruning) {
-        const startIdx =
-          (next.startZ * this.rows + next.startRow) * this.cols + next.startCol
-        this.emptyHistoryPriorityStamp[startIdx] = this.stamp
-        this.emptyHistoryBestPriority[startIdx] = f
-      }
       this.nodePool.push({
         z: next.startZ,
         row: next.startRow,
@@ -708,20 +743,6 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
           this.hyperParameters.greedyMultiplier
 
-      // Empty paid-owner histories are the same state. Keep exact priority
-      // ties and every nonempty history, including differently paid owners.
-      if (this.enableEmptyHistoryOpenPruning && this._moveRipped === null) {
-        if (
-          this.emptyHistoryPriorityStamp[nIdx] === stamp &&
-          f2 > this.emptyHistoryBestPriority[nIdx]!
-        ) {
-          this.seqCounter++
-          continue
-        }
-        this.emptyHistoryPriorityStamp[nIdx] = stamp
-        this.emptyHistoryBestPriority[nIdx] = f2
-      }
-
       const newNodeIdx = this.nodePool.length
       this.nodePool.push({
         z,
@@ -764,18 +785,6 @@ export class HighDensitySolverA01 extends BaseSolver {
           g2 +
           this.computeH(nz, row, col, endZ, endRow, endCol) *
             this.hyperParameters.greedyMultiplier
-
-        if (this.enableEmptyHistoryOpenPruning && this._moveRipped === null) {
-          if (
-            this.emptyHistoryPriorityStamp[nIdx] === stamp &&
-            f2 > this.emptyHistoryBestPriority[nIdx]!
-          ) {
-            this.seqCounter++
-            continue
-          }
-          this.emptyHistoryPriorityStamp[nIdx] = stamp
-          this.emptyHistoryBestPriority[nIdx] = f2
-        }
 
         const newNodeIdx = this.nodePool.length
         this.nodePool.push({
@@ -1089,9 +1098,6 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
-      if (this.enableEmptyHistoryOpenPruning) {
-        this.emptyHistoryPriorityStamp.fill(0)
-      }
       this.stamp = 1
     }
   }
