@@ -1,8 +1,8 @@
 import type { SearchInputs } from "./SearchInputs"
 
 /** Close translation of kernel.c: same topology flags, cost arithmetic,
- * versioned heap entries, tie comparisons, and queue-pop chunk boundaries.
- * Heap fields use separate typed arrays (16 bytes total per entry).
+ * indexed heap entries, tie comparisons, and queue-pop chunk boundaries.
+ * Each state has at most one active entry (12 bytes in separate typed arrays).
  * Scalars live in the constructor closure, like the C module's private globals.
  */
 export class JavascriptSearchKernel {
@@ -29,7 +29,7 @@ export class JavascriptSearchKernel {
       states = plane * layers
     const distance = new Float64Array(states),
       parent = new Int32Array(states)
-    const versions = new Uint32Array(states)
+    const positions = new Uint32Array(states)
     const stateXY = new Int32Array(states),
       stateFlags = new Uint8Array(states)
     let goal = 0,
@@ -37,8 +37,7 @@ export class JavascriptSearchKernel {
       heapSize = 0,
       heapCapacity = 1024
     let heapF = new Float64Array(heapCapacity),
-      heapIndex = new Int32Array(heapCapacity),
-      heapVersion = new Uint32Array(heapCapacity)
+      heapIndex = new Int32Array(heapCapacity)
     let traceCost: Uint16Array,
       viaCost: Uint16Array,
       fixed: Uint8Array,
@@ -61,30 +60,28 @@ export class JavascriptSearchKernel {
         ((z % 2) << 4)
     }
     function push(index: number, f: number) {
-      let i = heapSize++
+      // Positions are one-based; zero permits a popped state to reopen.
+      let i = positions[index] ? positions[index]! - 1 : heapSize++
       while (i > 0) {
         const p = (i - 1) >> 1
         if (heapF[p]! <= f) break
         heapF[i] = heapF[p]!
         heapIndex[i] = heapIndex[p]!
-        heapVersion[i] = heapVersion[p]!
+        positions[heapIndex[i]!] = i + 1
         i = p
       }
       heapF[i] = f
       heapIndex[i] = index
-      versions[index] = (versions[index]! + 1) >>> 0
-      heapVersion[i] = versions[index]!
+      positions[index] = i + 1
     }
     // Scalar results avoid allocating a JS object for each C struct return.
-    let poppedIndex = 0,
-      poppedVersion = 0
+    let poppedIndex = 0
     function pop() {
       poppedIndex = heapIndex[0]!
-      poppedVersion = heapVersion[0]!
+      positions[poppedIndex] = 0
       const last = --heapSize
       if (!last) return
       const index = heapIndex[last]!,
-        version = heapVersion[last]!,
         f = heapF[last]!
       let i = 0
       while (i * 2 + 1 < heapSize) {
@@ -93,12 +90,12 @@ export class JavascriptSearchKernel {
         if (f <= heapF[child]!) break
         heapF[i] = heapF[child]!
         heapIndex[i] = heapIndex[child]!
-        heapVersion[i] = heapVersion[child]!
+        positions[heapIndex[i]!] = i + 1
         i = child
       }
       heapF[i] = f
       heapIndex[i] = index
-      heapVersion[i] = version
+      positions[index] = i + 1
     }
     function visit(
       next: number,
@@ -138,7 +135,7 @@ export class JavascriptSearchKernel {
       heapSize = 0
       distance.fill(Infinity)
       parent.fill(-1)
-      versions.fill(0)
+      positions.fill(0)
       distance[start] = 0
       push(start, heuristic[start]!)
     }
@@ -152,20 +149,16 @@ export class JavascriptSearchKernel {
         if (heapSize + 4 + layers > heapCapacity) {
           heapCapacity *= 2
           const f = new Float64Array(heapCapacity),
-            indices = new Int32Array(heapCapacity),
-            stamps = new Uint32Array(heapCapacity)
+            indices = new Int32Array(heapCapacity)
           f.set(heapF)
           indices.set(heapIndex)
-          stamps.set(heapVersion)
           heapF = f
           heapIndex = indices
-          heapVersion = stamps
           continue
         }
         pop()
         pops++
         const currentIndex = poppedIndex
-        if (poppedVersion !== versions[currentIndex]) continue
         const currentG = distance[currentIndex]!
         expansions++
         if (currentIndex === goal) return { status: 1, expansions }

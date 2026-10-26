@@ -2,12 +2,11 @@
 // ordering deliberately match the TypeScript implementation.
 typedef unsigned char u8;
 typedef unsigned short u16;
-// A per-state version identifies stale entries just like comparing saved g
-// against distance[index], but makes each heap entry fit in one 16-byte copy.
+// The C entry remains 16-byte aligned; the per-state position replaces the
+// former version stamp and permits at most one queued entry per state.
 typedef struct {
   double f;
   int index;
-  unsigned int version;
 } Entry;
 _Static_assert(sizeof(Entry) == 16,
                "Heap entry ABI must match the TS allocator");
@@ -22,7 +21,7 @@ static u16 *trace_cost, *via_cost;
 static u8 *fixed, *fixed_via, *via_allowed;
 static double *history, *via_history, *heuristic, *distance;
 static int *parent, *state_xy, *state_flags;
-static unsigned int *versions;
+static unsigned int *positions;
 static Entry *heap;
 
 void configure(int c, int r, int l, double px, double py, int *addresses,
@@ -47,7 +46,7 @@ void configure(int c, int r, int l, double px, double py, int *addresses,
   parent = (int *)addresses[9];
   state_xy = (int *)addresses[10];
   state_flags = (int *)addresses[11];
-  versions = (unsigned int *)addresses[12];
+  positions = (unsigned int *)addresses[12];
   heap = (Entry *)addresses[13];
   for (int i = 0; i < states; i++) {
     int xy = i % plane, col = xy % cols, row = xy / cols, z = i / plane;
@@ -61,18 +60,21 @@ int get_expansions(void) { return expansions; }
 int get_pops(void) { return pops; }
 
 static void push(int index, double f) {
-  int i = heap_size++;
+  int i = positions[index] ? positions[index] - 1 : heap_size++;
   while (i > 0) {
     int p = (i - 1) >> 1;
     if (heap[p].f <= f)
       break;
     heap[i] = heap[p];
+    positions[heap[i].index] = i + 1;
     i = p;
   }
-  heap[i] = (Entry){f, index, ++versions[index]};
+  heap[i] = (Entry){f, index};
+  positions[index] = i + 1;
 }
 static Entry pop(void) {
   Entry first = heap[0], last = heap[--heap_size];
+  positions[first.index] = 0;
   if (!heap_size)
     return first;
   int i = 0;
@@ -83,9 +85,11 @@ static Entry pop(void) {
     if (last.f <= heap[child].f)
       break;
     heap[i] = heap[child];
+    positions[heap[i].index] = i + 1;
     i = child;
   }
   heap[i] = last;
+  positions[last.index] = i + 1;
   return first;
 }
 void begin_search(int start, int end, double present) {
@@ -95,7 +99,7 @@ void begin_search(int start, int end, double present) {
   for (int i = 0; i < states; i++) {
     distance[i] = __builtin_inf();
     parent[i] = -1;
-    versions[i] = 0;
+    positions[i] = 0;
   }
   distance[start] = 0;
   push(start, heuristic[start]);
@@ -133,8 +137,6 @@ int run(int steps, int budget) {
       return 4;
     Entry entry = pop();
     pops++;
-    if (entry.version != versions[entry.index])
-      continue;
     Candidate current = {entry.index, distance[entry.index]};
     expansions++;
     if (current.index == goal)
