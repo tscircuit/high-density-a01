@@ -333,6 +333,8 @@ export interface HighDensitySolverA03Props {
   enableDiagonalMoves?: boolean
   hyperParameters?: Partial<HyperParameters>
   staticSegmentValidator?: StaticSegmentValidator
+  /** Local XY units per physical unit; metal sizes remain physical. */
+  coordinateScale?: number
   initialPenaltyFn?: (params: {
     x: number
     y: number
@@ -368,6 +370,8 @@ export class HighDensitySolverA03 extends BaseSolver {
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
   readonly staticSegmentValidator?: StaticSegmentValidator
+  readonly coordinateScale: number
+  private readonly useEmittedCoordinateBounds: boolean
 
   boundsMinX!: number
   boundsMaxX!: number
@@ -515,6 +519,10 @@ export class HighDensitySolverA03 extends BaseSolver {
   constructor(props: HighDensitySolverA03Props) {
     super()
     this.nodeWithPortPoints = props.nodeWithPortPoints
+    this.coordinateScale = props.coordinateScale ?? 1
+    this.useEmittedCoordinateBounds = props.coordinateScale !== undefined
+    if (!Number.isFinite(this.coordinateScale) || this.coordinateScale <= 0)
+      throw new Error("A03 coordinateScale must be finite and positive")
     this.highResolutionCellSize = props.highResolutionCellSize ?? 0.1
     this.highResolutionCellThickness = Math.max(
       1,
@@ -566,6 +574,9 @@ export class HighDensitySolverA03 extends BaseSolver {
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
         staticSegmentValidator: this.staticSegmentValidator,
+        coordinateScale: this.useEmittedCoordinateBounds
+          ? this.coordinateScale
+          : undefined,
       },
     ]
   }
@@ -608,11 +619,30 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.boundsMinY = center.y - height / 2
     this.boundsMaxY = center.y + height / 2
 
-    this.traceKeepoutRadius = this.traceMargin + this.traceThickness / 2
-    this.viaKeepoutRadius = this.viaDiameter / 2 + this.traceKeepoutRadius
+    this.traceKeepoutRadius =
+      (this.traceMargin + this.traceThickness / 2) * this.coordinateScale
+    this.viaKeepoutRadius =
+      (this.viaDiameter / 2 + (this.traceMargin + this.traceThickness / 2)) *
+      this.coordinateScale
 
     this.buildFiveRegionGrid(width, height)
     this.gridToBoundsTransform = this.computeGridToBoundsTransform()
+    if (this.useEmittedCoordinateBounds) {
+      const viaInset = this.viaMinDistFromBorder * this.coordinateScale
+      for (let cell = 0; cell < this.planeSize; cell++) {
+        const point = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+          x: this.cellCenterX[cell]!,
+          y: this.cellCenterY[cell]!,
+        })
+        const borderDistance = Math.min(
+          point.x - this.boundsMinX,
+          this.boundsMaxX - point.x,
+          point.y - this.boundsMinY,
+          this.boundsMaxY - point.y,
+        )
+        this.viaAllowed[cell] = borderDistance >= viaInset ? 1 : 0
+      }
+    }
 
     const totalCells = this.layers * this.planeSize
     if (this.maxCellCount !== undefined && totalCells > this.maxCellCount) {
@@ -860,7 +890,9 @@ export class HighDensitySolverA03 extends BaseSolver {
             this.boundsMaxY - this.cellCenterY[cellId]!,
           )
           this.viaAllowed[cellId] =
-            minBorderDist >= this.viaMinDistFromBorder ? 1 : 0
+            minBorderDist >= this.viaMinDistFromBorder * this.coordinateScale
+              ? 1
+              : 0
         }
       }
     }
