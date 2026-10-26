@@ -32,7 +32,15 @@ test("the via identity retains binary64 values at wide integer grid limits", ():
               expect(
                 Object.is(
                   computeH.call(context, 0, row, col, 1, toRow, toCol),
-                  frozenA01Heuristic.call(context, 0, row, col, 1, toRow, toCol),
+                  frozenA01Heuristic.call(
+                    context,
+                    0,
+                    row,
+                    col,
+                    1,
+                    toRow,
+                    toCol,
+                  ),
                 ),
               ).toBe(true)
               comparisons++
