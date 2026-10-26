@@ -9,6 +9,7 @@ import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
   PortPoint,
+  StaticSegmentValidator,
 } from "../types"
 
 type ConnId = number
@@ -331,6 +332,9 @@ export interface HighDensitySolverA03Props {
   /** Enable diagonal edges within each of the five grid regions. */
   enableDiagonalMoves?: boolean
   hyperParameters?: Partial<HyperParameters>
+  staticSegmentValidator?: StaticSegmentValidator
+  /** Local XY units per physical unit; metal sizes remain physical. */
+  coordinateScale?: number
   initialPenaltyFn?: (params: {
     x: number
     y: number
@@ -365,6 +369,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
+  readonly staticSegmentValidator?: StaticSegmentValidator
+  readonly coordinateScale: number
+  private readonly useEmittedCoordinateBounds: boolean
 
   boundsMinX!: number
   boundsMaxX!: number
@@ -512,6 +519,10 @@ export class HighDensitySolverA03 extends BaseSolver {
   constructor(props: HighDensitySolverA03Props) {
     super()
     this.nodeWithPortPoints = props.nodeWithPortPoints
+    this.coordinateScale = props.coordinateScale ?? 1
+    this.useEmittedCoordinateBounds = props.coordinateScale !== undefined
+    if (!Number.isFinite(this.coordinateScale) || this.coordinateScale <= 0)
+      throw new Error("A03 coordinateScale must be finite and positive")
     this.highResolutionCellSize = props.highResolutionCellSize ?? 0.1
     this.highResolutionCellThickness = Math.max(
       1,
@@ -540,6 +551,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.MAX_ITERATIONS = 100e6
     this.MAX_RIPS = 200
     this.initialPenaltyFn = props.initialPenaltyFn
+    this.staticSegmentValidator = props.staticSegmentValidator
   }
 
   override getConstructorParams(): [HighDensitySolverA03Props] {
@@ -561,6 +573,10 @@ export class HighDensitySolverA03 extends BaseSolver {
         enableDiagonalMoves: this.enableDiagonalMoves,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
+        staticSegmentValidator: this.staticSegmentValidator,
+        coordinateScale: this.useEmittedCoordinateBounds
+          ? this.coordinateScale
+          : undefined,
       },
     ]
   }
@@ -603,11 +619,30 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.boundsMinY = center.y - height / 2
     this.boundsMaxY = center.y + height / 2
 
-    this.traceKeepoutRadius = this.traceMargin + this.traceThickness / 2
-    this.viaKeepoutRadius = this.viaDiameter / 2 + this.traceKeepoutRadius
+    this.traceKeepoutRadius =
+      (this.traceMargin + this.traceThickness / 2) * this.coordinateScale
+    this.viaKeepoutRadius =
+      (this.viaDiameter / 2 + (this.traceMargin + this.traceThickness / 2)) *
+      this.coordinateScale
 
     this.buildFiveRegionGrid(width, height)
     this.gridToBoundsTransform = this.computeGridToBoundsTransform()
+    if (this.useEmittedCoordinateBounds) {
+      const viaInset = this.viaMinDistFromBorder * this.coordinateScale
+      for (let cell = 0; cell < this.planeSize; cell++) {
+        const point = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+          x: this.cellCenterX[cell]!,
+          y: this.cellCenterY[cell]!,
+        })
+        const borderDistance = Math.min(
+          point.x - this.boundsMinX,
+          this.boundsMaxX - point.x,
+          point.y - this.boundsMinY,
+          this.boundsMaxY - point.y,
+        )
+        this.viaAllowed[cell] = borderDistance >= viaInset ? 1 : 0
+      }
+    }
 
     const totalCells = this.layers * this.planeSize
     if (this.maxCellCount !== undefined && totalCells > this.maxCellCount) {
@@ -855,7 +890,9 @@ export class HighDensitySolverA03 extends BaseSolver {
             this.boundsMaxY - this.cellCenterY[cellId]!,
           )
           this.viaAllowed[cellId] =
-            minBorderDist >= this.viaMinDistFromBorder ? 1 : 0
+            minBorderDist >= this.viaMinDistFromBorder * this.coordinateScale
+              ? 1
+              : 0
         }
       }
     }
@@ -1160,6 +1197,11 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     const seg = this.activeConnSeg
     if (z === seg.endZ && cellId === seg.endCellId) {
+      if (
+        this.nodePool.parent[nodeIdx] === -1 &&
+        !this.isStaticMoveAllowed(cellId, z, cellId, z, true)
+      )
+        return
       this.finalizeRoute(nodeIdx)
       this.activeConnSeg = null
       this.activeConnId = -1
@@ -1177,6 +1219,16 @@ export class HighDensitySolverA03 extends BaseSolver {
     for (let i = neighborStart; i < neighborEnd; i++) {
       const neighborCellId = this.neighborIds[i]!
       const nextFlatIdx = z * this.planeSize + neighborCellId
+      if (
+        !this.isStaticMoveAllowed(
+          cellId,
+          z,
+          neighborCellId,
+          z,
+          this.nodePool.parent[nodeIdx] === -1,
+        )
+      )
+        continue
 
       this.computeMoveCostAndRips(
         activeConn,
@@ -1224,6 +1276,16 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+        if (
+          !this.isStaticMoveAllowed(
+            cellId,
+            z,
+            cellId,
+            nz,
+            this.nodePool.parent[nodeIdx] === -1,
+          )
+        )
+          continue
 
         this.computeMoveCostAndRips(
           activeConn,
@@ -1267,6 +1329,65 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
+  }
+
+  private isStaticMoveAllowed(
+    fromCellId: number,
+    fromZ: number,
+    toCellId: number,
+    toZ: number,
+    firstMove: boolean,
+  ): boolean {
+    if (!this.staticSegmentValidator) return true
+    const seg = this.activeConnSeg!
+    const start = firstMove
+      ? seg.startPoint
+      : {
+          ...applyAffineTransformToPoint(this.gridToBoundsTransform, {
+            x: this.cellCenterX[fromCellId]!,
+            y: this.cellCenterY[fromCellId]!,
+          }),
+          z: this.layerToZ.get(fromZ)!,
+        }
+    const end =
+      toCellId === seg.endCellId && toZ === seg.endZ
+        ? seg.endPoint
+        : {
+            ...applyAffineTransformToPoint(this.gridToBoundsTransform, {
+              x: this.cellCenterX[toCellId]!,
+              y: this.cellCenterY[toCellId]!,
+            }),
+            z: this.layerToZ.get(toZ)!,
+          }
+    const segment = {
+      connectionName: this.connIdToName[seg.connId]!,
+      rootConnectionName: this.connIdToRootNet[seg.connId],
+      traceThickness: this.traceThickness,
+      viaDiameter: this.viaDiameter,
+      start,
+      end,
+    }
+    if (!this.staticSegmentValidator(segment)) return false
+    if (fromZ === toZ) return true
+
+    // getOutput retains the grid landing in vias[] even when a terminal
+    // replaces the corresponding route point. Check that emitted copper too.
+    const via = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+      x: this.cellCenterX[fromCellId]!,
+      y: this.cellCenterY[fromCellId]!,
+    })
+    if (
+      start.x === via.x &&
+      start.y === via.y &&
+      end.x === via.x &&
+      end.y === via.y
+    )
+      return true
+    return this.staticSegmentValidator({
+      ...segment,
+      start: { ...via, z: this.layerToZ.get(fromZ)! },
+      end: { ...via, z: this.layerToZ.get(toZ)! },
+    })
   }
 
   private computeMoveCostAndRips(
