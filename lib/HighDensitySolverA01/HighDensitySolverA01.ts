@@ -225,6 +225,8 @@ export interface HighDensitySolverA01Props {
 // Static direction offsets for 8-connected neighbor expansion
 const DIRS_DR = [-1, -1, -1, 0, 0, 1, 1, 1] as const
 const DIRS_DC = [-1, 0, 1, -1, 1, -1, 0, 1] as const
+// Bound spare storage independently of the active search's unchanged budget.
+const MAX_RECYCLED_SEARCH_NODES = 16_384
 
 export class HighDensitySolverA01 extends BaseSolver {
   override getSolverName(): string {
@@ -305,6 +307,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private activeConnId: ConnId = -1
   private crossLayerSearch = false
   private nodePool!: SearchNode[]
+  private recycledSearchNodes: SearchNode[] = []
   private heap!: MinHeap
   private seqCounter = 0
 
@@ -561,9 +564,50 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   override _step(): void {
     for (let i = 0; i < this.stepMultiplier; i++) {
-      if (this.solved || this.failed) return
+      if (this.solved || this.failed) break
       this.stepOnce()
     }
+    if (this.solved || this.failed || this.iterations >= this.MAX_ITERATIONS) {
+      this.recycledSearchNodes.length = 0
+    }
+  }
+
+  private resetNodePool(): void {
+    const retainedCount = Math.min(
+      this.nodePool.length,
+      MAX_RECYCLED_SEARCH_NODES - this.recycledSearchNodes.length,
+    )
+    for (let i = 0; i < retainedCount; i++) {
+      const node = this.nodePool[i]!
+      // Completed routes own copied cells; spare nodes must not retain rip chains.
+      node.ripped = null
+      this.recycledSearchNodes.push(node)
+    }
+    this.nodePool = []
+  }
+
+  private pushSearchNode(
+    z: number,
+    row: number,
+    col: number,
+    g: number,
+    parentIdx: number,
+    ripped: RippedNode | null,
+  ): number {
+    const nodeIdx = this.nodePool.length
+    const node = this.recycledSearchNodes.pop()
+    if (node) {
+      node.z = z
+      node.row = row
+      node.col = col
+      node.g = g
+      node.parentIdx = parentIdx
+      node.ripped = ripped
+      this.nodePool.push(node)
+    } else {
+      this.nodePool.push({ z, row, col, g, parentIdx, ripped })
+    }
+    return nodeIdx
   }
 
   private stepOnce(): void {
@@ -583,7 +627,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.viaOccupantsByCell.clear()
 
       // Reset A* state for this connection
-      this.nodePool = []
+      this.resetNodePool()
       this.heap.clear()
       this.seqCounter = 0
       this.searchIterations = 0
@@ -599,14 +643,14 @@ export class HighDensitySolverA01 extends BaseSolver {
         next.endCol,
       )
       const f = h * this.hyperParameters.greedyMultiplier
-      this.nodePool.push({
-        z: next.startZ,
-        row: next.startRow,
-        col: next.startCol,
-        g: 0,
-        parentIdx: -1,
-        ripped: null,
-      })
+      this.pushSearchNode(
+        next.startZ,
+        next.startRow,
+        next.startCol,
+        0,
+        -1,
+        null,
+      )
       this.heap.push(f, this.seqCounter++, 0)
       return
     }
@@ -628,7 +672,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.activeConnSeg = null
       this.activeConnId = -1
       this.heap.clear()
-      this.nodePool = []
+      this.resetNodePool()
       this.consecutiveSkips++
       if (this.consecutiveSkips >= this.unsolvedSegs.length * 3) {
         this.error = `Convergence failure: ${this.unsolvedSegs.length} connections stuck`
@@ -691,15 +735,14 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
           this.hyperParameters.greedyMultiplier
 
-      const newNodeIdx = this.nodePool.length
-      this.nodePool.push({
+      const newNodeIdx = this.pushSearchNode(
         z,
-        row: nr,
-        col: nc,
-        g: g2,
-        parentIdx: nodeIdx,
-        ripped: this._moveRipped,
-      })
+        nr,
+        nc,
+        g2,
+        nodeIdx,
+        this._moveRipped,
+      )
       this.heap.push(f2, this.seqCounter++, newNodeIdx)
     }
 
@@ -734,15 +777,14 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.computeH(nz, row, col, endZ, endRow, endCol) *
             this.hyperParameters.greedyMultiplier
 
-        const newNodeIdx = this.nodePool.length
-        this.nodePool.push({
-          z: nz,
+        const newNodeIdx = this.pushSearchNode(
+          nz,
           row,
           col,
-          g: g2,
-          parentIdx: nodeIdx,
-          ripped: this._moveRipped,
-        })
+          g2,
+          nodeIdx,
+          this._moveRipped,
+        )
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
