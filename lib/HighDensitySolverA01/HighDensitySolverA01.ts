@@ -110,10 +110,10 @@ function createCircularGridOffsets(params: {
 
 // --- Min-heap for A* open set ---
 class MinHeap {
-  private f: number[] = []
-  private seq: number[] = []
-  private id: number[] = []
-  private n = 0
+  protected f: number[] = []
+  protected seq: number[] = []
+  protected id: number[] = []
+  protected n = 0
 
   push(f: number, seq: number, id: number) {
     let i = this.n++
@@ -174,11 +174,58 @@ class MinHeap {
     this.id[i] = id
   }
 
-  private less(i: number, j: number) {
+  protected less(i: number, j: number) {
     const fi = this.f[i]!
     const fj = this.f[j]!
     if (fi !== fj) return fi < fj
     return this.seq[i]! < this.seq[j]!
+  }
+}
+
+class FourAryMinHeap extends MinHeap {
+  override push(f: number, seq: number, id: number): void {
+    let i = this.n++
+    while (i > 0) {
+      const p = (i - 1) >> 2
+      const parentF = this.f[p]!
+      const parentSeq = this.seq[p]!
+      if (parentF !== f ? parentF < f : parentSeq < seq) break
+      this.f[i] = parentF
+      this.seq[i] = parentSeq
+      this.id[i] = this.id[p]!
+      i = p
+    }
+    this.f[i] = f
+    this.seq[i] = seq
+    this.id[i] = id
+  }
+
+  override pop(): number {
+    const out = this.id[0]!
+    this.n--
+    if (this.n === 0) return out
+    const f = this.f[this.n]!
+    const seq = this.seq[this.n]!
+    const id = this.id[this.n]!
+    let i = 0
+    while (true) {
+      const first = i * 4 + 1
+      if (first >= this.n) break
+      let m = first
+      if (first + 1 < this.n && !this.less(m, first + 1)) m = first + 1
+      if (first + 2 < this.n && !this.less(m, first + 2)) m = first + 2
+      if (first + 3 < this.n && !this.less(m, first + 3)) m = first + 3
+      const childF = this.f[m]!
+      if (f !== childF ? f < childF : seq < this.seq[m]!) break
+      this.f[i] = childF
+      this.seq[i] = this.seq[m]!
+      this.id[i] = this.id[m]!
+      i = m
+    }
+    this.f[i] = f
+    this.seq[i] = seq
+    this.id[i] = id
+    return out
   }
 }
 
@@ -211,6 +258,8 @@ export interface HighDensitySolverA01Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  /** Four-ary layout for finite priorities with distinct sequence numbers. */
+  enableFourAryHeap?: boolean
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -242,6 +291,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   showPenaltyMap: boolean
   showUsedCellMap: boolean
   effort: number
+  readonly enableFourAryHeap: boolean
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
@@ -363,6 +413,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
+    this.enableFourAryHeap = props.enableFourAryHeap ?? false
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
@@ -392,6 +443,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
+        ...(this.enableFourAryHeap ? { enableFourAryHeap: true } : {}),
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
       },
@@ -555,7 +607,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.activeConnSeg = null
     this.activeConnId = -1
     this.nodePool = []
-    this.heap = new MinHeap()
+    this.heap = this.enableFourAryHeap ? new FourAryMinHeap() : new MinHeap()
     this.seqCounter = 0
   }
 
