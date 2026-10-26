@@ -116,6 +116,8 @@ class MinHeap {
   private n = 0
 
   push(f: number, seq: number, id: number) {
+    if (Number.isNaN(f))
+      throw new Error("A01 cannot queue a NaN routing priority")
     let i = this.n++
     while (i > 0) {
       const p = (i - 1) >> 1
@@ -273,6 +275,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
+  private queuedStamp!: Uint32Array
+  private queuedF!: Float64Array
+  private queuedNodeIdx!: Uint32Array
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -304,7 +309,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private activeConnSeg: ConnectionSeg | null = null
   private activeConnId: ConnId = -1
   private crossLayerSearch = false
-  private nodePool!: SearchNode[]
+  private nodePool!: Array<SearchNode | null>
   private heap!: MinHeap
   private seqCounter = 0
 
@@ -481,6 +486,9 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
+    this.queuedStamp = new Uint32Array(totalCells)
+    this.queuedF = new Float64Array(totalCells)
+    this.queuedNodeIdx = new Uint32Array(totalCells)
     this.stamp = 0
 
     // Existing traces already occupy their traceMargin halo, so a prospective
@@ -647,6 +655,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     // 3. Pop best node (O(log n))
     const nodeIdx = this.heap.pop()
     const node = this.nodePool[nodeIdx]!
+    if (node === null) return
     const { z, row, col, g, ripped } = node
 
     // 4. Skip if already visited (stamp check)
@@ -692,14 +701,18 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.hyperParameters.greedyMultiplier
 
       const newNodeIdx = this.nodePool.length
-      this.nodePool.push({
-        z,
-        row: nr,
-        col: nc,
-        g: g2,
-        parentIdx: nodeIdx,
-        ripped: this._moveRipped,
-      })
+      this.nodePool.push(
+        this.keepQueuedPayload(nIdx, f2)
+          ? {
+              z,
+              row: nr,
+              col: nc,
+              g: g2,
+              parentIdx: nodeIdx,
+              ripped: this._moveRipped,
+            }
+          : null,
+      )
       this.heap.push(f2, this.seqCounter++, newNodeIdx)
     }
 
@@ -735,17 +748,34 @@ export class HighDensitySolverA01 extends BaseSolver {
             this.hyperParameters.greedyMultiplier
 
         const newNodeIdx = this.nodePool.length
-        this.nodePool.push({
-          z: nz,
-          row,
-          col,
-          g: g2,
-          parentIdx: nodeIdx,
-          ripped: this._moveRipped,
-        })
+        this.nodePool.push(
+          this.keepQueuedPayload(nIdx, f2)
+            ? {
+                z: nz,
+                row,
+                col,
+                g: g2,
+                parentIdx: nodeIdx,
+                ripped: this._moveRipped,
+              }
+            : null,
+        )
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
+  }
+
+  private keepQueuedPayload(cellIdx: number, f: number): boolean {
+    if (this.queuedStamp[cellIdx] === this.stamp) {
+      if (f >= this.queuedF[cellIdx]!) return false
+      // A cheaper queued entry visits this cell first. Retain its original
+      // heap entry and pool index, but drop the payload that cannot expand.
+      this.nodePool[this.queuedNodeIdx[cellIdx]!] = null
+    }
+    this.queuedStamp[cellIdx] = this.stamp
+    this.queuedF[cellIdx] = f
+    this.queuedNodeIdx[cellIdx] = this.nodePool.length
+    return true
   }
 
   // --- Merged cost + rip computation (writes to _moveCost/_moveRipped) ---
@@ -1046,6 +1076,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.stamp = (this.stamp + 1) >>> 0
     if (this.stamp === 0) {
       this.visitedStamp.fill(0)
+      this.queuedStamp.fill(0)
       this.stamp = 1
     }
   }
