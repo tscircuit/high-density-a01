@@ -328,6 +328,8 @@ export interface HighDensitySolverA03Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  /** Declare a search limit without allocating the grid during construction. */
+  maxIterations?: number
   /** Enable diagonal edges within each of the five grid regions. */
   enableDiagonalMoves?: boolean
   hyperParameters?: Partial<HyperParameters>
@@ -361,6 +363,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   showPenaltyMap: boolean
   showUsedCellMap: boolean
   effort: number
+  readonly maxIterations?: number
   enableDiagonalMoves: boolean
   stepMultiplier: number
   hyperParameters: HyperParameters
@@ -420,7 +423,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   private usedIndicesByConn!: Array<number[] | undefined>
   private unsolvedSegs!: ConnectionSeg[]
-  private solvedRoutes!: Array<SolvedRouteInternal[] | undefined>
+  private solvedRoutes: Array<SolvedRouteInternal[] | undefined> = []
 
   private activeConnSeg: ConnectionSeg | null = null
   private activeConnId: ConnId = -1
@@ -526,6 +529,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
+    this.maxIterations = props.maxIterations
     this.enableDiagonalMoves = props.enableDiagonalMoves ?? false
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
@@ -537,7 +541,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       greedyMultiplier: 1.5,
       ...props.hyperParameters,
     }
-    this.MAX_ITERATIONS = 100e6
+    this.MAX_ITERATIONS = props.maxIterations ?? 100e6
     this.MAX_RIPS = 200
     this.initialPenaltyFn = props.initialPenaltyFn
   }
@@ -558,6 +562,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
+        maxIterations: this.maxIterations,
         enableDiagonalMoves: this.enableDiagonalMoves,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
@@ -566,6 +571,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   }
 
   override _setup(): void {
+    if (this.failed) return
     const { nodeWithPortPoints } = this
     const { width, height, center } = nodeWithPortPoints
 
