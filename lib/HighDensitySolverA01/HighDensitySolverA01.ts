@@ -10,6 +10,7 @@ import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
   PortPoint,
+  ViaPlacementValidator,
 } from "../types"
 
 // --- Interned connection ID ---
@@ -208,6 +209,7 @@ export interface HighDensitySolverA01Props {
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
+  viaPlacementValidator?: ViaPlacementValidator
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
@@ -239,6 +241,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   traceThickness: number
   traceMargin: number
   viaMinDistFromBorder: number
+  readonly viaPlacementValidator?: ViaPlacementValidator
   showPenaltyMap: boolean
   showUsedCellMap: boolean
   effort: number
@@ -360,6 +363,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.traceThickness = props.traceThickness ?? 0.1
     this.traceMargin = props.traceMargin ?? 0.15
     this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 0.15
+    this.viaPlacementValidator = props.viaPlacementValidator
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
@@ -389,6 +393,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         traceThickness: this.traceThickness,
         traceMargin: this.traceMargin,
         viaMinDistFromBorder: this.viaMinDistFromBorder,
+        viaPlacementValidator: this.viaPlacementValidator,
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
@@ -716,6 +721,21 @@ export class HighDensitySolverA01 extends BaseSolver {
 
         const nIdx = (nz * rows + row) * cols + col
         if (visited[nIdx] === stamp) continue
+
+        if (this.viaPlacementValidator) {
+          // Search centers are stretched when emitted. Validate that exact
+          // output-space center so the callback sees the manufactured site.
+          const point = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+            x: this.gridOrigin.x + (col + 0.5) * this.cellSizeMm,
+            y: this.gridOrigin.y + (row + 0.5) * this.cellSizeMm,
+          })
+          if (!this.viaPlacementValidator({
+            ...point,
+            zStart: this.layerToZ.get(z)!,
+            zEnd: this.layerToZ.get(nz)!,
+            viaDiameter: this.viaDiameter,
+          }, this.connIdToName[activeConn]!)) continue
+        }
 
         this.computeMoveCostAndRips(
           activeConn,
