@@ -1,3 +1,17 @@
+/** A candidate via expressed in the solver's output coordinates and millimetres. */
+export type ViaPlacement = {
+  x: number
+  y: number
+  zStart: number
+  zEnd: number
+  viaDiameter: number
+}
+
+export type ViaPlacementValidator = (
+  placement: ViaPlacement,
+  connectionName: string,
+) => boolean
+
 export type PortPoint = {
   connectionName: string
   rootConnectionName?: string

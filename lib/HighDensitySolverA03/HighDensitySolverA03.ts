@@ -10,6 +10,7 @@ import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
   PortPoint,
+  ViaPlacementValidator,
 } from "../types"
 
 type ConnId = number
@@ -326,6 +327,7 @@ export interface HighDensitySolverA03Props {
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
+  viaPlacementValidator?: ViaPlacementValidator
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
@@ -359,6 +361,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   traceThickness: number
   traceMargin: number
   viaMinDistFromBorder: number
+  readonly viaPlacementValidator?: ViaPlacementValidator
   showPenaltyMap: boolean
   showUsedCellMap: boolean
   effort: number
@@ -524,6 +527,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.traceThickness = props.traceThickness ?? 0.1
     this.traceMargin = props.traceMargin ?? 0.15
     this.viaMinDistFromBorder = props.viaMinDistFromBorder ?? 0.15
+    this.viaPlacementValidator = props.viaPlacementValidator
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
@@ -556,6 +560,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         traceThickness: this.traceThickness,
         traceMargin: this.traceMargin,
         viaMinDistFromBorder: this.viaMinDistFromBorder,
+        viaPlacementValidator: this.viaPlacementValidator,
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
@@ -1225,6 +1230,21 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+
+        if (this.viaPlacementValidator) {
+          // Mixed-resolution search centers use the same affine emission map
+          // as getOutput; raw centers can have different boundary clearance.
+          const point = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+            x: this.cellCenterX[cellId]!,
+            y: this.cellCenterY[cellId]!,
+          })
+          if (!this.viaPlacementValidator({
+            ...point,
+            zStart: this.layerToZ.get(z)!,
+            zEnd: this.layerToZ.get(nz)!,
+            viaDiameter: this.viaDiameter,
+          }, this.connIdToName[activeConn]!)) continue
+        }
 
         this.computeMoveCostAndRips(
           activeConn,
