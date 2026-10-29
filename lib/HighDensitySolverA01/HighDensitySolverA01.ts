@@ -319,6 +319,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private consecutiveSkips = 0
   private penaltyCap!: number
   private baseSearchBudgetIters!: number
+  private searchBudgetPrepared = false
 
   // --- Reusable scratch for computeMoveCostAndRips ---
   private _moveCost = 0
@@ -398,7 +399,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     ]
   }
 
-  override _setup(): void {
+  private prepareGridGeometry(): boolean {
     const { nodeWithPortPoints, cellSizeMm } = this
     const { width, height, center } = nodeWithPortPoints
 
@@ -417,11 +418,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     if (this.maxCellCount !== undefined && totalCells > this.maxCellCount) {
       this.error = `Cell count ${totalCells} exceeds maxCellCount ${this.maxCellCount}`
       this.failed = true
-      return
+      return false
     }
-    const totalDiags =
-      this.layers * Math.max(0, this.rows - 1) * Math.max(0, this.cols - 1) * 2
-
     this.zToLayer = new Map()
     this.layerToZ = new Map()
     for (let i = 0; i < this.availableZ.length; i++) {
@@ -446,11 +444,66 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.outputCellStepX = this.cols > 1 ? width / (this.cols - 1) : width
     this.outputCellStepY = this.rows > 1 ? height / (this.rows - 1) : height
 
+    return true
+  }
+
+  private prepareIterationBudget(): void {
+    this.shuffleConnections()
+    const budget = computeMaxIterationsByNodeSizeAndConnectionCount({
+      planeSize: this.planeSize,
+      layers: this.layers,
+      connectionCount: this.unsolvedSegs.length,
+      effort: this.effort,
+      maxIterations: this.MAX_ITERATIONS,
+    })
+    this.baseSearchBudgetIters = budget.baseSearchBudgetIters
+    this.MAX_ITERATIONS = budget.maxIterationsIters
+  }
+
+  /**
+   * Prepares the exact search budget without allocating dense search grids.
+   * The problem must remain fixed until setup. Penalty callbacks require the
+   * ordinary setup path because their side effects precede connection setup.
+   */
+  prepareSearchBudget(): void {
+    if (this.searchBudgetPrepared || this._setupDone) return
+    if (this.initialPenaltyFn !== undefined) {
+      throw new Error(
+        "Search budget preparation does not support initialPenaltyFn",
+      )
+    }
+    if (!this.prepareGridGeometry()) {
+      this.searchBudgetPrepared = true
+      return
+    }
     // Intern connections
     this.connNameToId = new Map()
     this.connIdToName = []
     this.connIdToRootNet = []
     this.overlapFriendlyRootNets = new Set()
+
+    this.unsolvedSegs = this.buildConnectionSegs()
+    this.solvedRoutes = new Map()
+    this.prepareIterationBudget()
+
+    this.searchBudgetPrepared = true
+  }
+
+  override _setup(): void {
+    if (this.searchBudgetPrepared && this.failed) return
+    if (!this.searchBudgetPrepared && !this.prepareGridGeometry()) return
+    const cellSizeMm = this.cellSizeMm
+    const totalCells = this.layers * this.planeSize
+    const totalDiags =
+      this.layers * Math.max(0, this.rows - 1) * Math.max(0, this.cols - 1) * 2
+
+    if (!this.searchBudgetPrepared) {
+      // Intern connections
+      this.connNameToId = new Map()
+      this.connIdToName = []
+      this.connIdToRootNet = []
+      this.overlapFriendlyRootNets = new Set()
+    }
 
     // Flat penalty map (Float64Array is zero-initialized)
     this.penalty2d = new Float64Array(this.planeSize)
@@ -511,7 +564,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
 
     // Build and shuffle connections
-    this.unsolvedSegs = this.buildConnectionSegs()
+    if (!this.searchBudgetPrepared) {
+      this.unsolvedSegs = this.buildConnectionSegs()
+    }
 
     this.sharedCrossRootPortCells = new Set()
     const rootByPortFlat = new Map<number, string>()
@@ -540,16 +595,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.ripCount = []
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
-    this.shuffleConnections()
-    const budget = computeMaxIterationsByNodeSizeAndConnectionCount({
-      planeSize: this.planeSize,
-      layers: this.layers,
-      connectionCount: this.unsolvedSegs.length,
-      effort: this.effort,
-      maxIterations: this.MAX_ITERATIONS,
-    })
-    this.baseSearchBudgetIters = budget.baseSearchBudgetIters
-    this.MAX_ITERATIONS = budget.maxIterationsIters
+    if (!this.searchBudgetPrepared) {
+      this.prepareIterationBudget()
+    }
 
     // A* state
     this.activeConnSeg = null

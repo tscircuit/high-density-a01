@@ -439,6 +439,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   private consecutiveSkips = 0
   private penaltyCap!: number
   private baseSearchBudgetIters!: number
+  private searchBudgetPrepared = false
+  private gridWidth!: number
+  private gridHeight!: number
 
   private _moveCost = 0
   private _moveRippedHead = -1
@@ -565,9 +568,58 @@ export class HighDensitySolverA03 extends BaseSolver {
     ]
   }
 
-  override _setup(): void {
+  /**
+   * Prepares the exact search limit without allocating geometry or search grids.
+   * Keep constructor inputs fixed until setup. Penalty callbacks require normal
+   * setup because their side effects are part of that setup's ordering.
+   */
+  prepareSearchBudget(): void {
+    if (this.searchBudgetPrepared || this._setupDone) return
+    if (this.initialPenaltyFn) {
+      throw new Error(
+        "Search budget preparation does not support initialPenaltyFn",
+      )
+    }
+    this.searchBudgetPrepared = true
+    if (!this.prepareGridDimensions()) return
+    const totalCells = this.layers * this.planeSize
+    if (this.maxCellCount !== undefined && totalCells > this.maxCellCount) {
+      this.error = `Cell count ${totalCells} exceeds maxCellCount ${this.maxCellCount}`
+      this.failed = true
+      return
+    }
+    this.prepareConnections()
+    this.solvedRoutes = []
+    this.prepareIterationBudget()
+  }
+
+  private prepareConnections(): void {
+    this.connNameToId = new Map()
+    this.connIdToName = []
+    this.connIdToRootNet = []
+    this.overlapFriendlyRootNets = new Set()
+
+    this.unsolvedSegs = this.buildConnectionSegs()
+  }
+
+  private prepareIterationBudget(): void {
+    this.shuffleConnections()
+    const budget = computeMaxIterationsByNodeSizeAndConnectionCount({
+      planeSize: this.planeSize,
+      layers: this.layers,
+      connectionCount: this.unsolvedSegs.length,
+      effort: this.effort,
+      maxIterations: this.MAX_ITERATIONS,
+    })
+    this.baseSearchBudgetIters = budget.baseSearchBudgetIters
+    this.MAX_ITERATIONS = budget.maxIterationsIters
+  }
+
+  private prepareGridDimensions(): boolean {
     const { nodeWithPortPoints } = this
     const { width, height, center } = nodeWithPortPoints
+    this.gridWidth = width
+    this.gridHeight = height
 
     const rawScale = this.lowResolutionCellSize / this.highResolutionCellSize
     const roundedScale = Math.round(rawScale)
@@ -579,7 +631,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.error =
         "lowResolutionCellSize must be a positive integer multiple of highResolutionCellSize"
       this.failed = true
-      return
+      return false
     }
     this.lowScale = Math.max(1, roundedScale)
 
@@ -606,7 +658,15 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.traceKeepoutRadius = this.traceMargin + this.traceThickness / 2
     this.viaKeepoutRadius = this.viaDiameter / 2 + this.traceKeepoutRadius
 
-    this.buildFiveRegionGrid(width, height)
+    this.prepareGridRegions(width, height)
+    return true
+  }
+
+  override _setup(): void {
+    if (this.searchBudgetPrepared && this.failed) return
+    if (!this.searchBudgetPrepared && !this.prepareGridDimensions()) return
+
+    this.buildFiveRegionGrid()
     this.gridToBoundsTransform = this.computeGridToBoundsTransform()
 
     const totalCells = this.layers * this.planeSize
@@ -616,16 +676,11 @@ export class HighDensitySolverA03 extends BaseSolver {
       return
     }
 
-    this.connNameToId = new Map()
-    this.connIdToName = []
-    this.connIdToRootNet = []
-    this.overlapFriendlyRootNets = new Set()
-
-    this.unsolvedSegs = this.buildConnectionSegs()
+    if (!this.searchBudgetPrepared) this.prepareConnections()
 
     this.penalty2d = new Float64Array(this.planeSize)
-    const widthInv = width > 0 ? 1 / width : 0
-    const heightInv = height > 0 ? 1 / height : 0
+    const widthInv = this.gridWidth > 0 ? 1 / this.gridWidth : 0
+    const heightInv = this.gridHeight > 0 ? 1 / this.gridHeight : 0
     for (let cellId = 0; cellId < this.planeSize; cellId++) {
       let penalty = 0
       if (this.initialPenaltyFn) {
@@ -682,16 +737,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.ripCount = []
     this.consecutiveSkips = 0
     this.penaltyCap = this.hyperParameters.ripCost * 0.5
-    this.shuffleConnections()
-    const budget = computeMaxIterationsByNodeSizeAndConnectionCount({
-      planeSize: this.planeSize,
-      layers: this.layers,
-      connectionCount: this.unsolvedSegs.length,
-      effort: this.effort,
-      maxIterations: this.MAX_ITERATIONS,
-    })
-    this.baseSearchBudgetIters = budget.baseSearchBudgetIters
-    this.MAX_ITERATIONS = budget.maxIterationsIters
+    if (!this.searchBudgetPrepared) this.prepareIterationBudget()
 
     this.activeConnSeg = null
     this.activeConnId = -1
@@ -708,7 +754,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
   }
 
-  private buildFiveRegionGrid(width: number, height: number) {
+  private prepareGridRegions(width: number, height: number): void {
     this.fineCols = Math.max(1, Math.ceil(width / this.highResolutionCellSize))
     this.fineRows = Math.max(1, Math.ceil(height / this.highResolutionCellSize))
 
@@ -797,7 +843,9 @@ export class HighDensitySolverA03 extends BaseSolver {
       offset += this.regions[i]!.rows * this.regions[i]!.cols
     }
     this.planeSize = offset
+  }
 
+  private buildFiveRegionGrid(): void {
     this.cellCenterX = new Float64Array(this.planeSize)
     this.cellCenterY = new Float64Array(this.planeSize)
     this.cellMinX = new Float64Array(this.planeSize)
