@@ -9,6 +9,12 @@ import {
 test("paged occupancy preserves typed owners and complete routing across page boundaries", (): void => {
   const length = 4099
   const paged = new PagedOwnerStorage(length)
+  const other = new PagedOwnerStorage(length)
+  const emptyPage = paged["pages"][0]!
+  expect(paged["pages"][1]).toBe(emptyPage)
+  expect(other["pages"][0]).toBe(emptyPage)
+  expect(other["pages"][1]).toBe(emptyPage)
+  expect(emptyPage.every((owner): boolean => owner === -1)).toBeTrue()
   const original = new Int32Array(length).fill(-1)
   const outside = [
     -1,
@@ -29,9 +35,20 @@ test("paged occupancy preserves typed owners and complete routing across page bo
   ]
   for (const index of [...outside, -0, 4095, 4096, length - 1]) {
     paged.set(index, -1)
+    paged.set(index, 4_294_967_295)
     expect(paged.get(index)).toBe(original[index])
   }
-  expect(Object.keys(paged["pages"])).toHaveLength(0)
+  expect(paged["pages"][0]).toBe(emptyPage)
+  expect(paged["pages"][1]).toBe(emptyPage)
+  paged.set(4096, 7)
+  expect(paged["pages"][1]).not.toBe(emptyPage)
+  expect(paged["pages"][0]).toBe(emptyPage)
+  expect(paged.get(4097)).toBe(-1)
+  expect(other.get(4096)).toBe(-1)
+  const allocatedTail = paged["pages"][1]
+  paged.set(4096, -1)
+  expect(paged["pages"][1]).toBe(allocatedTail)
+  expect(paged.get(4096)).toBe(-1)
   for (const owner of [
     -2_147_483_649,
     -2_147_483_648,
@@ -58,6 +75,20 @@ test("paged occupancy preserves typed owners and complete routing across page bo
   paged.set(4096, -1)
   expect(paged.get(4096)).toBe(-1)
   expect(paged.get(4095)).toBe(original[4095])
+  expect(paged["pages"][0]).not.toBe(paged["pages"][1])
+  expect(other["pages"][0]).toBe(emptyPage)
+  expect(other["pages"][1]).toBe(emptyPage)
+  other.set(0, 9)
+  expect(other.get(0)).toBe(9)
+  expect(paged.get(0)).toBe(original[0])
+  expect(other["pages"][0]).not.toBe(emptyPage)
+  expect(other["pages"][1]).toBe(emptyPage)
+  expect(emptyPage.every((owner): boolean => owner === -1)).toBeTrue()
+  const coerced = new PagedOwnerStorage(length)
+  coerced.set(0, NaN)
+  expect(coerced.get(0)).toBe(0)
+  expect(coerced["pages"][0]).not.toBe(emptyPage)
+  expect(coerced["pages"][1]).toBe(emptyPage)
 
   const dense = createOwnerStorage(262_143)
   const automatic = createOwnerStorage(262_144)
@@ -90,6 +121,8 @@ test("paged occupancy preserves typed owners and complete routing across page bo
   expect(large.get(1)).toBe(-1)
   expect(large["pages"][0]?.length).toBe(4096)
   expect(large["pages"][524287]?.length).toBe(4095)
+  expect(large["pages"][1]).toBe(emptyPage)
+  expect(emptyPage.every((owner): boolean => owner === -1)).toBeTrue()
 
   const props = {
     nodeWithPortPoints: {
@@ -118,6 +151,7 @@ test("paged occupancy preserves typed owners and complete routing across page bo
   for (const key of ["usedCellsFlat", "portOwnerFlat", "usedDiagFlat"] as const) {
     const storage = reference[key]
     expect(actual[key]).toBeInstanceOf(PagedOwnerStorage)
+    expect((actual[key] as PagedOwnerStorage)["pages"][0]).toBe(emptyPage)
     const denseReference = new Int32Array(storage.length).fill(-1)
     for (let index = 0; index < storage.length; index++) {
       denseReference[index] = readOwner(storage, index)!
