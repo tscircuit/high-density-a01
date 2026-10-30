@@ -4,6 +4,7 @@ import {
   createOwnerStorage,
   PagedOwnerStorage,
   readOwner,
+  writeOwner,
 } from "../../lib/HighDensitySolverA01/OwnerStorage"
 
 test("paged occupancy preserves typed owners and complete routing across page boundaries", (): void => {
@@ -59,12 +60,24 @@ test("paged occupancy preserves typed owners and complete routing across page bo
   expect(paged.get(4096)).toBe(-1)
   expect(paged.get(4095)).toBe(original[4095])
 
-  const dense = createOwnerStorage(262_143)
-  const automatic = createOwnerStorage(262_144)
+  const dense = createOwnerStorage(4_194_303)
+  const automatic = createOwnerStorage(4_194_304)
+  const automaticTail = createOwnerStorage(4_194_305)
   expect(dense).toBeInstanceOf(Int32Array)
+  expect(createOwnerStorage(262_144)).toBeInstanceOf(Int32Array)
   expect(automatic).toBeInstanceOf(PagedOwnerStorage)
+  expect(automaticTail).toBeInstanceOf(PagedOwnerStorage)
   expect(readOwner(dense, dense.length - 1)).toBe(-1)
   expect(readOwner(automatic, automatic.length - 1)).toBe(-1)
+  expect(readOwner(automaticTail, automaticTail.length - 1)).toBe(-1)
+  writeOwner(automatic, automatic.length - 1, 0)
+  writeOwner(automaticTail, automaticTail.length - 1, 2_147_483_647)
+  expect(readOwner(automatic, automatic.length - 1)).toBe(0)
+  expect(readOwner(automaticTail, automaticTail.length - 1)).toBe(2_147_483_647)
+  if (automaticTail instanceof PagedOwnerStorage) {
+    expect(automaticTail["pages"][1024]?.length).toBe(1)
+    expect(Object.keys(automaticTail["pages"])).toHaveLength(1)
+  }
   expect(createOwnerStorage(NaN).length).toBe(0)
   expect(createOwnerStorage(1.5).length).toBe(1)
   expect((): void => {
@@ -95,8 +108,8 @@ test("paged occupancy preserves typed owners and complete routing across page bo
     nodeWithPortPoints: {
       capacityMeshNodeId: "paged-routing",
       center: { x: 0, y: 0 },
-      width: 51.2,
-      height: 51.2,
+      width: 145,
+      height: 145,
       availableZ: [0, 1],
       portPoints: [
         { connectionName: "diagonal", x: -0.3, y: -0.3, z: 0 },
@@ -119,8 +132,16 @@ test("paged occupancy preserves typed owners and complete routing across page bo
     const storage = reference[key]
     expect(actual[key]).toBeInstanceOf(PagedOwnerStorage)
     const denseReference = new Int32Array(storage.length).fill(-1)
-    for (let index = 0; index < storage.length; index++) {
-      denseReference[index] = readOwner(storage, index)!
+    if (storage instanceof Int32Array) {
+      denseReference.set(storage)
+    } else {
+      for (const pageIndex of Object.keys(storage["pages"])) {
+        const page = storage["pages"][Number(pageIndex)]!
+        const start = Number(pageIndex) * 4096
+        for (let offset = 0; offset < page.length; offset++) {
+          denseReference[start + offset] = (page[offset]! - 1) | 0
+        }
+      }
     }
     reference[key] = denseReference
   }
@@ -139,9 +160,22 @@ test("paged occupancy preserves typed owners and complete routing across page bo
     expect(actual["visitedStamp"]).toEqual(reference["visitedStamp"])
   }
   expect(actual.solved).toBeTrue()
+  const block: Int32Array = new Int32Array(4096)
   for (const key of ["usedCellsFlat", "portOwnerFlat", "usedDiagFlat"] as const) {
-    for (let index = 0; index < actual[key].length; index++) {
-      expect(readOwner(actual[key], index)).toBe(readOwner(reference[key], index))
+    const storage = actual[key]
+    const denseReference = reference[key]
+    expect(denseReference).toBeInstanceOf(Int32Array)
+    if (!(denseReference instanceof Int32Array)) {
+      throw new Error("Expected native reference owners")
+    }
+    for (let start = 0; start < storage.length; start += block.length) {
+      const count = Math.min(block.length, storage.length - start)
+      for (let offset = 0; offset < count; offset++) {
+        block[offset] = readOwner(storage, start + offset)!
+      }
+      expect(block.subarray(0, count)).toEqual(
+        denseReference.subarray(start, start + count),
+      )
     }
   }
 })

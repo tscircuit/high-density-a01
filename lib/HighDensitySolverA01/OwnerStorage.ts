@@ -1,6 +1,6 @@
 const PAGE_SHIFT = 12
 const PAGE_LENGTH = 1 << PAGE_SHIFT
-const PAGED_MIN_LENGTH = (1024 * 1024) / Int32Array.BYTES_PER_ELEMENT
+const PAGED_MIN_LENGTH = (16 * 1024 * 1024) / Int32Array.BYTES_PER_ELEMENT
 
 export class PagedOwnerStorage {
   // Store owner + 1 so unallocated pages and untouched cells both mean empty.
