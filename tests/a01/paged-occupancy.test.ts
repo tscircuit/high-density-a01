@@ -178,4 +178,50 @@ test("paged occupancy preserves typed owners and complete routing across page bo
       )
     }
   }
+
+  const scanRow = Math.floor(actual.rows / 2)
+  const scanCol = Math.floor(actual.cols / 2)
+  for (let z = 0; z < actual.layers; z++) {
+    for (let i = 0; i < actual["viaOccupantScanOffsetsLen"]; i++) {
+      const row = scanRow + actual["viaOccupantScanOffsetsDr"][i]!
+      const col = scanCol + actual["viaOccupantScanOffsetsDc"][i]!
+      const index = (z * actual.rows + row) * actual.cols + col
+      writeOwner(actual["usedCellsFlat"], index, -1)
+      writeOwner(reference["usedCellsFlat"], index, -1)
+    }
+    const center = (z * actual.rows + scanRow) * actual.cols + scanCol
+    writeOwner(actual["usedCellsFlat"], center, z)
+    writeOwner(reference["usedCellsFlat"], center, z)
+  }
+  for (const solver of [actual, reference]) {
+    const cache = solver["viaOccupantsByCell"]
+    const key = scanRow * solver.cols + scanCol
+    cache.clear()
+    solver["fillViaOccupants"](scanRow, scanCol, -1)
+    expect(solver["_viaOccs"]).toEqual([0, 1])
+    const cached = cache.get(key)!
+    expect(cached).not.toBe(solver["_viaOccs"])
+    solver["_viaOccs"].push(99)
+    solver["fillViaOccupants"](scanRow, scanCol, -1)
+    expect(solver["_viaOccs"]).toEqual([0, 1])
+    expect(cached).toEqual([0, 1])
+    cache.set(key, [])
+    const descriptor = Object.getOwnPropertyDescriptor(solver, "usedCellsFlat")!
+    Object.defineProperty(solver, "usedCellsFlat", {
+      configurable: true,
+      get(): never {
+        throw new Error("A cache hit must not inspect owner storage")
+      },
+    })
+    try {
+      solver["fillViaOccupants"](scanRow, scanCol, -1)
+      expect(solver["_viaOccs"]).toEqual([])
+      cache.delete(key)
+      expect((): void => {
+        solver["fillViaOccupants"](scanRow, scanCol, -1)
+      }).toThrow("A cache hit must not inspect owner storage")
+    } finally {
+      Object.defineProperty(solver, "usedCellsFlat", descriptor)
+    }
+  }
 })

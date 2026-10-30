@@ -938,31 +938,61 @@ export class HighDensitySolverA01 extends BaseSolver {
     const offLen = this.viaOccupantScanOffsetsLen
     const used = this.usedCellsFlat
 
-    for (let z = 0; z < this.layers; z++) {
-      const zBase = z * this.planeSize
-      for (let i = 0; i < offLen; i++) {
-        const r = row + offDr[i]!
-        const c = col + offDc[i]!
-        if (r < 0 || c < 0 || r >= rows || c >= cols) continue
-        const occ = readOwner(used, zBase + r * cols + c)!
-        if (occ === -1 || occ === activeConn) continue
-        const sameRoot =
-          this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
-        if (
-          sameRoot &&
-          this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
-        ) {
-          continue
-        }
-        // Small unique check (typically very few occupants)
-        let seen = false
-        for (let j = 0; j < occs.length; j++) {
-          if (occs[j] === occ) {
-            seen = true
-            break
+    if (used instanceof Int32Array) {
+      for (let z = 0; z < this.layers; z++) {
+        const zBase = z * this.planeSize
+        for (let i = 0; i < offLen; i++) {
+          const r = row + offDr[i]!
+          const c = col + offDc[i]!
+          if (r < 0 || c < 0 || r >= rows || c >= cols) continue
+          const occ = used[zBase + r * cols + c]!
+          if (occ === -1 || occ === activeConn) continue
+          const sameRoot =
+            this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
+          if (
+            sameRoot &&
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          ) {
+            continue
           }
+          // Small unique check (typically very few occupants)
+          let seen = false
+          for (let j = 0; j < occs.length; j++) {
+            if (occs[j] === occ) {
+              seen = true
+              break
+            }
+          }
+          if (!seen) occs.push(occ)
         }
-        if (!seen) occs.push(occ)
+      }
+    } else {
+      for (let z = 0; z < this.layers; z++) {
+        const zBase = z * this.planeSize
+        for (let i = 0; i < offLen; i++) {
+          const r = row + offDr[i]!
+          const c = col + offDc[i]!
+          if (r < 0 || c < 0 || r >= rows || c >= cols) continue
+          const occ = used.get(zBase + r * cols + c)!
+          if (occ === -1 || occ === activeConn) continue
+          const sameRoot =
+            this.connIdToRootNet[occ] === this.connIdToRootNet[activeConn]
+          if (
+            sameRoot &&
+            this.overlapFriendlyRootNets.has(this.connIdToRootNet[activeConn]!)
+          ) {
+            continue
+          }
+          // Small unique check (typically very few occupants)
+          let seen = false
+          for (let j = 0; j < occs.length; j++) {
+            if (occs[j] === occ) {
+              seen = true
+              break
+            }
+          }
+          if (!seen) occs.push(occ)
+        }
       }
     }
     // Keep the cached list separate from the mutable scratch array.
