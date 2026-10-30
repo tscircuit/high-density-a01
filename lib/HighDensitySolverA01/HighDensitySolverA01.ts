@@ -205,6 +205,12 @@ export interface HighDensitySolverA01Props {
   viaDiameter: number
   maxCellCount?: number
   stepMultiplier?: number
+  /**
+   * Omit dominated queue entries instead of charging no-op iteration slots.
+   * Defaults to false. Enabling this spends the same budget on more useful
+   * candidates and can change bounded search outcomes and selected routes.
+   */
+  skipDominatedCandidates?: boolean
   traceThickness?: number
   traceMargin?: number
   viaMinDistFromBorder?: number
@@ -243,6 +249,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   showUsedCellMap: boolean
   effort: number
   stepMultiplier: number
+  readonly skipDominatedCandidates: boolean
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
@@ -365,6 +372,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
+    this.skipDominatedCandidates = props.skipDominatedCandidates ?? false
     this.hyperParameters = {
       shuffleSeed: 0,
       ripCost: 10,
@@ -387,6 +395,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         viaDiameter: this.viaDiameter,
         maxCellCount: this.maxCellCount,
         stepMultiplier: this.stepMultiplier,
+        skipDominatedCandidates: this.skipDominatedCandidates,
         traceThickness: this.traceThickness,
         traceMargin: this.traceMargin,
         viaMinDistFromBorder: this.viaMinDistFromBorder,
@@ -701,7 +710,9 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.hyperParameters.greedyMultiplier
 
       if (f2 >= this.bestQueuedCost[nIdx]!) {
-        this.heap.push(f2, this.seqCounter++, -1)
+        if (!this.skipDominatedCandidates) {
+          this.heap.push(f2, this.seqCounter++, -1)
+        }
         continue
       }
       this.bestQueuedCost[nIdx] = f2
@@ -749,7 +760,9 @@ export class HighDensitySolverA01 extends BaseSolver {
             this.hyperParameters.greedyMultiplier
 
         if (f2 >= this.bestQueuedCost[nIdx]!) {
-          this.heap.push(f2, this.seqCounter++, -1)
+          if (!this.skipDominatedCandidates) {
+            this.heap.push(f2, this.seqCounter++, -1)
+          }
           continue
         }
         this.bestQueuedCost[nIdx] = f2
