@@ -205,6 +205,7 @@ class GroupedMinHeap {
   private active = new MinHeap()
   private groups = new Map<number, { sequences: number[]; cursor: number }>()
   private priorities: number[] = []
+  private groupPool: { sequences: number[]; cursor: number }[] = []
   private placeholderCount = 0
 
   push(f: number, seq: number, id: number) {
@@ -218,7 +219,9 @@ class GroupedMinHeap {
       group.sequences.push(seq)
       return
     }
-    this.groups.set(f, { sequences: [seq], cursor: 0 })
+    const nextGroup = this.groupPool.pop() ?? { sequences: [], cursor: 0 }
+    nextGroup.sequences.push(seq)
+    this.groups.set(f, nextGroup)
     let i = this.priorities.length
     this.priorities.push(f)
     while (i > 0) {
@@ -262,6 +265,9 @@ class GroupedMinHeap {
       group.cursor += count
       if (group.cursor === group.sequences.length) {
         this.groups.delete(f)
+        group.sequences.length = 0
+        group.cursor = 0
+        this.groupPool.push(group)
         this.removeFirstPriority()
       }
     }
@@ -293,6 +299,11 @@ class GroupedMinHeap {
 
   clear() {
     this.active.clear()
+    for (const group of this.groups.values()) {
+      group.sequences.length = 0
+      group.cursor = 0
+      this.groupPool.push(group)
+    }
     this.groups.clear()
     this.priorities.length = 0
     this.placeholderCount = 0
