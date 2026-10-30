@@ -29,9 +29,7 @@ function rippedContains(r: RippedNode | null, id: ConnId): boolean {
 
 // --- A* search node (stored in a pool) ---
 interface SearchNode {
-  z: number
-  row: number
-  col: number
+  cellIdx: number
   g: number
   parentIdx: number // -1 = root
   ripped: RippedNode | null
@@ -600,9 +598,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       )
       const f = h * this.hyperParameters.greedyMultiplier
       this.nodePool.push({
-        z: next.startZ,
-        row: next.startRow,
-        col: next.startCol,
+        cellIdx:
+          (next.startZ * this.rows + next.startRow) * this.cols + next.startCol,
         g: 0,
         parentIdx: -1,
         ripped: null,
@@ -647,12 +644,16 @@ export class HighDensitySolverA01 extends BaseSolver {
     // 3. Pop best node (O(log n))
     const nodeIdx = this.heap.pop()
     const node = this.nodePool[nodeIdx]!
-    const { z, row, col, g, ripped } = node
-
-    // 4. Skip if already visited (stamp check)
-    const cellIdx = (z * this.rows + row) * this.cols + col
+    // Duplicate queued arrivals need only the cell index. Decode coordinates
+    // and read path state only when this cell will actually be expanded.
+    const cellIdx = node.cellIdx
     if (this.visitedStamp[cellIdx] === this.stamp) return
     this.visitedStamp[cellIdx] = this.stamp
+    const z = Math.floor(cellIdx / this.planeSize)
+    const planeIndex = cellIdx - z * this.planeSize
+    const row = Math.floor(planeIndex / this.cols)
+    const col = planeIndex - row * this.cols
+    const { g, ripped } = node
 
     // 5. Check end condition
     const seg = this.activeConnSeg
@@ -693,9 +694,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
       const newNodeIdx = this.nodePool.length
       this.nodePool.push({
-        z,
-        row: nr,
-        col: nc,
+        cellIdx: nIdx,
         g: g2,
         parentIdx: nodeIdx,
         ripped: this._moveRipped,
@@ -736,9 +735,7 @@ export class HighDensitySolverA01 extends BaseSolver {
 
         const newNodeIdx = this.nodePool.length
         this.nodePool.push({
-          z: nz,
-          row,
-          col,
+          cellIdx: nIdx,
           g: g2,
           parentIdx: nodeIdx,
           ripped: this._moveRipped,
@@ -1215,7 +1212,10 @@ export class HighDensitySolverA01 extends BaseSolver {
     let idx = goalNodeIdx
     while (idx >= 0) {
       const n = this.nodePool[idx]!
-      cells.push({ z: n.z, row: n.row, col: n.col })
+      const z = Math.floor(n.cellIdx / this.planeSize)
+      const planeIndex = n.cellIdx - z * this.planeSize
+      const row = Math.floor(planeIndex / this.cols)
+      cells.push({ z, row, col: planeIndex - row * this.cols })
       idx = n.parentIdx
     }
     cells.reverse()
