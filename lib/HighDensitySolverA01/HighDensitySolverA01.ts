@@ -132,6 +132,24 @@ class MinHeap {
     this.id[i] = id
   }
 
+  get priority(): number {
+    return this.f[0]!
+  }
+
+  get sequence(): number {
+    return this.seq[0]!
+  }
+
+  toGrouped(): GroupedMinHeap {
+    const result = new GroupedMinHeap()
+    // Heap order is not sequence order. Sort once when joining an in-flight
+    // search so each placeholder bucket retains FIFO sequence order.
+    const entries = Array.from({ length: this.n }, (_, i) => i)
+    entries.sort((a, b) => this.seq[a]! - this.seq[b]!)
+    for (const i of entries) result.push(this.f[i]!, this.seq[i]!, this.id[i]!)
+    return result
+  }
+
   pop(): number {
     const out = this.id[0]!
     this.n--
@@ -179,6 +197,105 @@ class MinHeap {
     const fj = this.f[j]!
     if (fi !== fj) return fi < fj
     return this.seq[i]! < this.seq[j]!
+  }
+}
+
+// Equal-priority placeholders need sequence order, but carry no path state.
+class GroupedMinHeap {
+  private active = new MinHeap()
+  private groups = new Map<number, { sequences: number[]; cursor: number }>()
+  private priorities: number[] = []
+  private placeholderCount = 0
+
+  push(f: number, seq: number, id: number) {
+    if (id !== -1) {
+      this.active.push(f, seq, id)
+      return
+    }
+    this.placeholderCount++
+    const group = this.groups.get(f)
+    if (group) {
+      group.sequences.push(seq)
+      return
+    }
+    this.groups.set(f, { sequences: [seq], cursor: 0 })
+    let i = this.priorities.length
+    this.priorities.push(f)
+    while (i > 0) {
+      const parent = (i - 1) >> 1
+      const value = this.priorities[parent]!
+      if (value <= f) break
+      this.priorities[i] = value
+      i = parent
+    }
+    this.priorities[i] = f
+  }
+
+  pop(): number {
+    return this.skipDominated(1) > 0 ? -1 : this.active.pop()
+  }
+
+  skipDominated(limit: number): number {
+    let skipped = 0
+    while (skipped < limit && this.placeholderCount > 0) {
+      const f = this.priorities[0]!
+      const group = this.groups.get(f)!
+      let end = group.sequences.length
+      if (this.active.size > 0) {
+        if (this.active.priority < f) break
+        if (this.active.priority === f) {
+          let low = group.cursor
+          let high = end
+          const sequence = this.active.sequence
+          while (low < high) {
+            const middle = (low + high) >>> 1
+            if (group.sequences[middle]! < sequence) low = middle + 1
+            else high = middle
+          }
+          end = low
+        }
+      }
+      const count = Math.min(limit - skipped, end - group.cursor)
+      if (count === 0) break
+      skipped += count
+      this.placeholderCount -= count
+      group.cursor += count
+      if (group.cursor === group.sequences.length) {
+        this.groups.delete(f)
+        this.removeFirstPriority()
+      }
+    }
+    return skipped
+  }
+
+  private removeFirstPriority(): void {
+    const last = this.priorities.pop()!
+    if (this.priorities.length === 0) return
+    let i = 0
+    while (i * 2 + 1 < this.priorities.length) {
+      let child = i * 2 + 1
+      if (
+        child + 1 < this.priorities.length &&
+        this.priorities[child + 1]! < this.priorities[child]!
+      ) {
+        child++
+      }
+      if (last <= this.priorities[child]!) break
+      this.priorities[i] = this.priorities[child]!
+      i = child
+    }
+    this.priorities[i] = last
+  }
+
+  get size() {
+    return this.active.size + this.placeholderCount
+  }
+
+  clear() {
+    this.active.clear()
+    this.groups.clear()
+    this.priorities.length = 0
+    this.placeholderCount = 0
   }
 }
 
@@ -306,7 +423,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private activeConnId: ConnId = -1
   private crossLayerSearch = false
   private nodePool!: SearchNode[]
-  private heap!: MinHeap
+  private heap!: MinHeap | GroupedMinHeap
   private seqCounter = 0
 
   // --- Reusable scratch for via occupant scan ---
@@ -559,6 +676,46 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.nodePool = []
     this.heap = new MinHeap()
     this.seqCounter = 0
+  }
+
+  /** Advance exactly as many public steps as requested, including no-op arrivals. */
+  stepBatch(limit: number): void {
+    if (!Number.isSafeInteger(limit) || limit < 0) {
+      throw new Error("Step batch size must be a non-negative safe integer")
+    }
+    if (limit === 0) return
+    this.setup()
+    if (this.heap instanceof MinHeap) this.heap = this.heap.toGrouped()
+    let remaining = limit
+    while (remaining > 0 && !this.solved && !this.failed) {
+      if (
+        this.stepMultiplier === 1 &&
+        this._step === HighDensitySolverA01.prototype._step &&
+        this.activeConnSeg &&
+        !("computeProgress" in this)
+      ) {
+        const budget = Math.round(
+          this.baseSearchBudgetIters *
+            (1 + Math.min(this.ripCount[this.activeConnId] ?? 0, 10) * 0.25),
+        )
+        // Leave the boundary step to BaseSolver so final acceptance, failure,
+        // and per-search penalty decay happen at exactly the original step.
+        const allowance = Math.min(
+          remaining,
+          budget - this.searchIterations,
+          Math.ceil(this.MAX_ITERATIONS - this.iterations) - 1,
+        )
+        if (allowance > 0) {
+          const skipped = this.heap.skipDominated(allowance)
+          this.iterations += skipped
+          this.searchIterations += skipped
+          remaining -= skipped
+          if (remaining === 0) break
+        }
+      }
+      this.step()
+      remaining--
+    }
   }
 
   override _step(): void {
