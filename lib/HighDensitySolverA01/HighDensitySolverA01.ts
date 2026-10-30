@@ -200,25 +200,21 @@ class MinHeap {
   }
 }
 
-// Equal-priority placeholders need sequence order, but carry no path state.
+// Equal-priority entries arrive in sequence order, so a bucket is FIFO.
 class GroupedMinHeap {
-  private active = new MinHeap()
-  private groups = new Map<number, { sequences: number[]; cursor: number }>()
+  private groups = new Map<number, { ids: number[]; cursor: number; realCount: number }>()
   private priorities: number[] = []
-  private placeholderCount = 0
+  private count = 0
 
-  push(f: number, seq: number, id: number) {
-    if (id !== -1) {
-      this.active.push(f, seq, id)
-      return
-    }
-    this.placeholderCount++
+  push(f: number, _seq: number, id: number) {
+    this.count++
     const group = this.groups.get(f)
     if (group) {
-      group.sequences.push(seq)
+      group.ids.push(id)
+      if (id !== -1) group.realCount++
       return
     }
-    this.groups.set(f, { sequences: [seq], cursor: 0 })
+    this.groups.set(f, { ids: [id], cursor: 0, realCount: id === -1 ? 0 : 1 })
     let i = this.priorities.length
     this.priorities.push(f)
     while (i > 0) {
@@ -232,35 +228,37 @@ class GroupedMinHeap {
   }
 
   pop(): number {
-    return this.skipDominated(1) > 0 ? -1 : this.active.pop()
+    const f = this.priorities[0]!
+    const group = this.groups.get(f)!
+    const id = group.ids[group.cursor++]!
+    this.count--
+    if (id !== -1) group.realCount--
+    if (group.cursor === group.ids.length) {
+      this.groups.delete(f)
+      this.removeFirstPriority()
+    }
+    return id
   }
 
   skipDominated(limit: number): number {
     let skipped = 0
-    while (skipped < limit && this.placeholderCount > 0) {
+    while (skipped < limit && this.count > 0) {
       const f = this.priorities[0]!
       const group = this.groups.get(f)!
-      let end = group.sequences.length
-      if (this.active.size > 0) {
-        if (this.active.priority < f) break
-        if (this.active.priority === f) {
-          let low = group.cursor
-          let high = end
-          const sequence = this.active.sequence
-          while (low < high) {
-            const middle = (low + high) >>> 1
-            if (group.sequences[middle]! < sequence) low = middle + 1
-            else high = middle
-          }
-          end = low
+      if (group.realCount === 0) {
+        const count = Math.min(limit - skipped, group.ids.length - group.cursor)
+        skipped += count
+        this.count -= count
+        group.cursor += count
+      } else {
+        while (skipped < limit && group.ids[group.cursor] === -1) {
+          skipped++
+          this.count--
+          group.cursor++
         }
+        break
       }
-      const count = Math.min(limit - skipped, end - group.cursor)
-      if (count === 0) break
-      skipped += count
-      this.placeholderCount -= count
-      group.cursor += count
-      if (group.cursor === group.sequences.length) {
+      if (group.cursor === group.ids.length) {
         this.groups.delete(f)
         this.removeFirstPriority()
       }
@@ -274,12 +272,7 @@ class GroupedMinHeap {
     let i = 0
     while (i * 2 + 1 < this.priorities.length) {
       let child = i * 2 + 1
-      if (
-        child + 1 < this.priorities.length &&
-        this.priorities[child + 1]! < this.priorities[child]!
-      ) {
-        child++
-      }
+      if (child + 1 < this.priorities.length && this.priorities[child + 1]! < this.priorities[child]!) child++
       if (last <= this.priorities[child]!) break
       this.priorities[i] = this.priorities[child]!
       i = child
@@ -287,15 +280,11 @@ class GroupedMinHeap {
     this.priorities[i] = last
   }
 
-  get size() {
-    return this.active.size + this.placeholderCount
-  }
-
+  get size() { return this.count }
   clear() {
-    this.active.clear()
     this.groups.clear()
     this.priorities.length = 0
-    this.placeholderCount = 0
+    this.count = 0
   }
 }
 
