@@ -10,7 +10,23 @@ test("paged occupancy preserves typed owners and complete routing across page bo
   const length = 4099
   const paged = new PagedOwnerStorage(length)
   const original = new Int32Array(length).fill(-1)
-  const outside = [-1, 0.5, length, length + 1, NaN, Infinity, -Infinity]
+  const outside = [
+    -1,
+    -0.5,
+    0.5,
+    length,
+    length + 1,
+    -(2 ** 31),
+    2 ** 31 - 1,
+    2 ** 31,
+    2 ** 32 - 1,
+    2 ** 32,
+    2 ** 32 + 1,
+    Number.MAX_SAFE_INTEGER,
+    NaN,
+    Infinity,
+    -Infinity,
+  ]
   for (const index of [...outside, -0, 4095, 4096, length - 1]) {
     paged.set(index, -1)
     expect(paged.get(index)).toBe(original[index])
@@ -57,6 +73,23 @@ test("paged occupancy preserves typed owners and complete routing across page bo
   expect((): void => {
     createOwnerStorage(Infinity)
   }).toThrow(RangeError)
+  for (const invalidLength of [-1, 0.5, NaN, Infinity, 2 ** 31, 2 ** 32]) {
+    expect((): void => {
+      new PagedOwnerStorage(invalidLength)
+    }).toThrow(RangeError)
+  }
+  const large = new PagedOwnerStorage(0x7fff_ffff)
+  for (const index of [0, -0, 2 ** 30, 0x7fff_fffe]) {
+    large.set(index, 2_147_483_647)
+    expect(large.get(index)).toBe(2_147_483_647)
+  }
+  for (const index of [0x7fff_ffff, 2 ** 31, 2 ** 32, 2 ** 32 + 1]) {
+    large.set(index, 0)
+    expect(large.get(index)).toBeUndefined()
+  }
+  expect(large.get(1)).toBe(-1)
+  expect(large["pages"][0]?.length).toBe(4096)
+  expect(large["pages"][524287]?.length).toBe(4095)
 
   const props = {
     nodeWithPortPoints: {

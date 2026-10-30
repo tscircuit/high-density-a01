@@ -1,4 +1,5 @@
-const PAGE_LENGTH = 4096
+const PAGE_SHIFT = 12
+const PAGE_LENGTH = 1 << PAGE_SHIFT
 const PAGED_MIN_LENGTH = (1024 * 1024) / Int32Array.BYTES_PER_ELEMENT
 
 export class PagedOwnerStorage {
@@ -6,21 +7,24 @@ export class PagedOwnerStorage {
   private readonly pages: Array<Int32Array | undefined>
 
   constructor(readonly length: number) {
+    if (!Number.isInteger(length) || length < 0 || length > 0x7fff_ffff) {
+      throw new RangeError("Invalid paged owner storage length")
+    }
     this.pages = new Array(Math.ceil(length / PAGE_LENGTH))
   }
 
   get(index: number): number | undefined {
-    if (index < 0 || index >= this.length || !Number.isInteger(index)) {
+    if ((index >>> 0) !== index || index >= this.length) {
       return undefined
     }
-    const page = this.pages[Math.floor(index / PAGE_LENGTH)]
-    return page === undefined ? -1 : (page[index % PAGE_LENGTH]! - 1) | 0
+    const page = this.pages[index >>> PAGE_SHIFT]
+    return page === undefined ? -1 : (page[index & (PAGE_LENGTH - 1)]! - 1) | 0
   }
 
   set(index: number, owner: number): void {
-    if (index < 0 || index >= this.length || !Number.isInteger(index)) return
+    if ((index >>> 0) !== index || index >= this.length) return
     const encoded = ((owner | 0) + 1) | 0
-    const pageIndex = Math.floor(index / PAGE_LENGTH)
+    const pageIndex = index >>> PAGE_SHIFT
     let page = this.pages[pageIndex]
     if (page === undefined) {
       if (encoded === 0) return
@@ -29,7 +33,7 @@ export class PagedOwnerStorage {
       )
       this.pages[pageIndex] = page
     }
-    page[index % PAGE_LENGTH] = encoded
+    page[index & (PAGE_LENGTH - 1)] = encoded
   }
 }
 
