@@ -118,7 +118,7 @@ class MinHeap {
   push(f: number, seq: number, id: number) {
     let i = this.n++
     while (i > 0) {
-      const p = (i - 1) >> 1
+      const p = (i - 1) >> 2
       const parentF = this.f[p]!
       const parentSeq = this.seq[p]!
       if (parentF !== f ? parentF < f : parentSeq < seq) break
@@ -157,11 +157,13 @@ class MinHeap {
     const seq = this.seq[i]!
     const id = this.id[i]!
     while (true) {
-      const l = i * 2 + 1
-      const r = l + 1
-      if (l >= this.n) break
-      let m = l
-      if (r < this.n && !this.less(l, r)) m = r
+      const first = i * 4 + 1
+      if (first >= this.n) break
+      let m = first
+      const end = Math.min(first + 4, this.n)
+      for (let child = first + 1; child < end; child++) {
+        if (this.less(child, m)) m = child
+      }
       const childF = this.f[m]!
       if (f !== childF ? f < childF : seq < this.seq[m]!) break
       this.f[i] = childF
