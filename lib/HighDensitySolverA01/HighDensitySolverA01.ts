@@ -200,6 +200,8 @@ function toRootNetName(
 }
 
 export interface HighDensitySolverA01Props {
+  /** Connections whose terminal anchors are restored by the consuming adapter. */
+  implicitEndpointConnectionNames?: readonly string[]
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   viaDiameter: number
@@ -235,6 +237,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   cellSizeMm: number
   viaDiameter: number
   MAX_RIPS: number
+  readonly implicitEndpointConnectionNames: ReadonlySet<string>
   maxCellCount?: number
   traceThickness: number
   traceMargin: number
@@ -355,6 +358,9 @@ export class HighDensitySolverA01 extends BaseSolver {
   constructor(props: HighDensitySolverA01Props) {
     super()
     this.nodeWithPortPoints = props.nodeWithPortPoints
+    this.implicitEndpointConnectionNames = new Set(
+      props.implicitEndpointConnectionNames,
+    )
     this.cellSizeMm = props.cellSizeMm
     this.viaDiameter = props.viaDiameter
     this.maxCellCount = props.maxCellCount
@@ -383,6 +389,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     return [
       {
         nodeWithPortPoints: this.nodeWithPortPoints,
+        implicitEndpointConnectionNames: [
+          ...this.implicitEndpointConnectionNames,
+        ],
         cellSizeMm: this.cellSizeMm,
         viaDiameter: this.viaDiameter,
         maxCellCount: this.maxCellCount,
@@ -1757,6 +1766,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           points[0] = { ...route.startPoint }
           if (points.length > 1) {
             points[points.length - 1] = { ...route.endPoint }
+          } else if (!this.implicitEndpointConnectionNames.has(connName)) {
+            points.push({ ...route.endPoint })
           }
         }
         result.push({
