@@ -1088,24 +1088,15 @@ export class HighDensitySolverA01 extends BaseSolver {
     // Clamp each endpoint to the via zone to estimate via detour.
     const vr1 = Math.max(this.minViaRow, Math.min(this.maxViaRow, row))
     const vc1 = Math.max(this.minViaCol, Math.min(this.maxViaCol, col))
-    const vr2 = Math.max(this.minViaRow, Math.min(this.maxViaRow, toRow))
-    const vc2 = Math.max(this.minViaCol, Math.min(this.maxViaCol, toCol))
 
     const via1 =
       Math.abs(row - vr1) +
       Math.abs(col - vc1) +
       Math.abs(vr1 - toRow) +
       Math.abs(vc1 - toCol)
-    const via2 =
-      Math.abs(row - vr2) +
-      Math.abs(col - vc2) +
-      Math.abs(vr2 - toRow) +
-      Math.abs(vc2 - toCol)
-
-    return (
-      Math.max(Math.min(via1, via2), manhattan) * this.cellSizeMm +
-      this.hyperParameters.viaBaseCost
-    )
+    // Clamping either endpoint to the same interval gives the same detour
+    // length, and that detour cannot be shorter than Manhattan distance.
+    return via1 * this.cellSizeMm + this.hyperParameters.viaBaseCost
   }
 
   // --- Connection interning ---
