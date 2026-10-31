@@ -24,11 +24,10 @@ test("keeps implicit fixed-route anchors separate from ordinary route endpoints"
   expect(solver.solved).toBe(true)
   expect(solver.failed).toBe(false)
   const routes = solver.getOutput()
-  expect(routes.find((route) => route.connectionName === "fixed")?.route).toEqual([
-    start,
-  ])
-  expect(routes.find((route) => route.connectionName === "wire")?.route).toEqual([
-    wireStart,
-    wireEnd,
-  ])
+  expect(
+    routes.find((route) => route.connectionName === "fixed")?.route,
+  ).toEqual([start])
+  expect(
+    routes.find((route) => route.connectionName === "wire")?.route,
+  ).toEqual([wireStart, wireEnd])
 })

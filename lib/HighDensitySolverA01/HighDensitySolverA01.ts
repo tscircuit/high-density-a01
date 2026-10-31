@@ -389,7 +389,9 @@ export class HighDensitySolverA01 extends BaseSolver {
     return [
       {
         nodeWithPortPoints: this.nodeWithPortPoints,
-        implicitEndpointConnectionNames: [...this.implicitEndpointConnectionNames],
+        implicitEndpointConnectionNames: [
+          ...this.implicitEndpointConnectionNames,
+        ],
         cellSizeMm: this.cellSizeMm,
         viaDiameter: this.viaDiameter,
         maxCellCount: this.maxCellCount,
