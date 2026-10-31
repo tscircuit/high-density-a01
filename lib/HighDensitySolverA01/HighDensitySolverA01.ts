@@ -1757,6 +1757,8 @@ export class HighDensitySolverA01 extends BaseSolver {
           points[0] = { ...route.startPoint }
           if (points.length > 1) {
             points[points.length - 1] = { ...route.endPoint }
+          } else {
+            points.push({ ...route.endPoint })
           }
         }
         result.push({
