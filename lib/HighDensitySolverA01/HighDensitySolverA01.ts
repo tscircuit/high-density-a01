@@ -410,8 +410,8 @@ export class HighDensitySolverA01 extends BaseSolver {
         (a, b) => a - b,
       )
 
-    this.rows = Math.floor(height / cellSizeMm)
-    this.cols = Math.floor(width / cellSizeMm)
+    this.rows = Math.max(2, Math.floor(height / cellSizeMm))
+    this.cols = Math.max(2, Math.floor(width / cellSizeMm))
     this.layers = this.availableZ.length
     this.planeSize = this.rows * this.cols
     const totalCells = this.layers * this.planeSize
@@ -1757,8 +1757,6 @@ export class HighDensitySolverA01 extends BaseSolver {
           points[0] = { ...route.startPoint }
           if (points.length > 1) {
             points[points.length - 1] = { ...route.endPoint }
-          } else {
-            points.push({ ...route.endPoint })
           }
         }
         result.push({
