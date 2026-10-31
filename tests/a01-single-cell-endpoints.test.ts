@@ -21,5 +21,6 @@ test("preserves both terminals when a route occupies one grid cell", () => {
   expect(solver.solved).toBe(true)
   expect(solver.failed).toBe(false)
   const [route] = solver.getOutput()
+  if (!route) throw new Error("Missing solved route")
   expect(route.route).toEqual([start, end])
 })
