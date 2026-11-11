@@ -128,6 +128,26 @@ export class HighDensitySolverA13 extends BaseSolver {
     }
     if (!Number.isFinite(this.traceMargin) || this.traceMargin < 0)
       throw new Error("traceMargin must be nonnegative")
+    const policies = this.nodeWithPortPoints.allowedZByConnectionName
+    if (policies !== undefined) {
+      for (const point of this.nodeWithPortPoints.portPoints) {
+        const allowedZ = policies[point.connectionName]
+        if (allowedZ === undefined) continue
+        if (
+          allowedZ.length === 0 ||
+          allowedZ.some((z) => !Number.isInteger(z) || z < 0)
+        ) {
+          throw new Error(
+            `A13 connection "${point.connectionName}" has invalid allowed wire layers`,
+          )
+        }
+        if (!allowedZ.includes(point.z)) {
+          throw new Error(
+            `A13 connection "${point.connectionName}" has a terminal outside its allowed wire layers`,
+          )
+        }
+      }
+    }
     this.MAX_ITERATIONS = 100_000_000
   }
   override getSolverName() {
@@ -283,6 +303,20 @@ export class HighDensitySolverA13 extends BaseSolver {
     this.viaCost.fill(0)
     this.fixed.fill(0)
     this.fixedVia.fill(0)
+    const allowedZ =
+      this.nodeWithPortPoints.allowedZByConnectionName?.[
+        conn.start.connectionName
+      ]
+    if (allowedZ !== undefined) {
+      for (let layerIndex = 0; layerIndex < this.layers.length; layerIndex++) {
+        if (allowedZ.includes(this.layers[layerIndex]!)) continue
+        this.fixed.fill(
+          1,
+          layerIndex * this.plane,
+          (layerIndex + 1) * this.plane,
+        )
+      }
+    }
     // No route is deleted. Exclude just this net when searching its replacement.
     for (const [other, route] of this.routes) {
       if (this.connections[other]!.root === conn.root) continue

@@ -16,6 +16,8 @@ export type NodeWithPortPoints = {
   height: number
   portPoints: PortPoint[]
   availableZ?: number[]
+  /** Wire-layer permissions by exact connection name; vias keep their full span. */
+  allowedZByConnectionName?: Record<string, number[]>
 }
 
 export type HighDensityRoutePoint = {
