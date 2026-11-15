@@ -27,12 +27,75 @@ The package exports the solver classes directly:
 
 ```ts
 import {
+  HighDensitySolverA01,
   HighDensitySolverA03,
   HighDensitySolverA05,
   HighDensitySolverA11,
   HighDensitySolverA12,
 } from "@tscircuit/high-density-a01"
 ```
+
+### A01 and A03 via search options
+
+A01 and A03 provide two independent options for reducing repeated work in via
+search. Direct construction defaults to dense occupancy queries and a separate
+transition calculation for each destination layer.
+
+| Solver | `viaOccupantQuery` | `viaExpansion` |
+| --- | --- | --- |
+| A01 | `"dense"` (default), `"row-runs"` | `"per-layer"` (default), `"physical"` |
+| A03 | `"dense"` (default), `"owner-runs"` | `"per-layer"` (default), `"physical"` |
+
+Configure the options before setup or the first call to `solve()`:
+
+```ts
+const a01 = new HighDensitySolverA01({
+  nodeWithPortPoints,
+  cellSizeMm: 0.1,
+  viaDiameter: 0.3,
+  viaOccupantQuery: "row-runs",
+  viaExpansion: "physical",
+})
+
+const a03 = new HighDensitySolverA03({
+  nodeWithPortPoints,
+  viaDiameter: 0.3,
+  viaOccupantQuery: "owner-runs",
+  viaExpansion: "physical",
+})
+```
+
+A01 row queries maintain sorted occupied intervals as the solver marks and
+removes routes. A03 owner queries rebuild ordered intervals at each search
+start, grouping consecutive cells with the same complete primary/shared-owner
+sequence on every layer. Both intersect intervals with the original circular
+via footprint and preserve the first encounter order of owners. Empty cells
+and repeated owner sequences can be skipped without storing answers to queries.
+
+These row-query modes require fixed grid and footprint geometry and the
+solver's own occupancy updates. Consumers that directly edit occupancy arrays
+or replace occupancy-writing methods should keep `viaOccupantQuery: "dense"`.
+Initial setup selects the row-query strategy and builds the grid; A03 builds
+its owner intervals when the next search starts.
+
+On graphs with more than two layers, physical expansion evaluates one
+through-via transition, then emits the eligible destination states in their
+original order. The via crosses the same occupied geometry regardless of its
+destination layer. Each destination still receives its own heuristic, fixed-port
+and endpoint checks, visited-state checks, and queue position. A03 also retains
+its existing best-cost bounds. One- and two-layer graphs retain the per-layer
+implementation.
+
+Physical expansion requires canonical transition and heuristic methods, with
+geometry, occupancy, numeric costs, and destination eligibility fixed throughout
+each expansion. A01's `getRipCost` must be pure. Stateful cost or heuristic hooks,
+including accessor callbacks that change these inputs during expansion, require
+`viaExpansion: "per-layer"`. Cost parameters may change between expansions.
+Immutable rip histories can share backing entries across destination states;
+consumers must not mutate those private histories.
+
+The options do not change search priorities, cost formulas, routing budgets, or
+iteration limits, and do not retain a query result for another expansion.
 
 ### A11
 
