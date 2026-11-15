@@ -1,4 +1,5 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import { BucketHeap } from "./BucketHeap"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
@@ -212,6 +213,12 @@ export interface HighDensitySolverA01Props {
   showUsedCellMap?: boolean
   effort?: number
   hyperParameters?: Partial<HyperParameters>
+  /**
+   * Bucketed search preserves the original (f, insertion order) expansion sequence for
+   * non-NaN priorities. This opt-in requires ordered numeric search inputs and
+   * rejects a generated NaN explicitly. Binary retains the legacy IEEE behavior.
+   */
+  priorityQueue?: "binary" | "bucketed"
   initialPenaltyFn?: (params: {
     x: number
     y: number
@@ -244,6 +251,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   effort: number
   stepMultiplier: number
   hyperParameters: HyperParameters
+  priorityQueue: "binary" | "bucketed"
   initialPenaltyFn?: HighDensitySolverA01Props["initialPenaltyFn"]
   protected useExactViaTraceClearance = false
   protected ripHistoryCostMultiplier = 0
@@ -306,7 +314,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   private activeConnId: ConnId = -1
   private crossLayerSearch = false
   private nodePool!: SearchNode[]
-  private heap!: MinHeap
+  private heap!: MinHeap | BucketHeap
   private seqCounter = 0
 
   // --- Reusable scratch for via occupant scan ---
@@ -377,6 +385,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.MAX_ITERATIONS = 100e6
     this.MAX_RIPS = 200
     this.initialPenaltyFn = props.initialPenaltyFn
+    this.priorityQueue = props.priorityQueue ?? "binary"
   }
 
   override getConstructorParams(): [HighDensitySolverA01Props] {
@@ -395,6 +404,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         effort: this.effort,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
+        priorityQueue: this.priorityQueue,
       },
     ]
   }
@@ -557,7 +567,8 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.activeConnSeg = null
     this.activeConnId = -1
     this.nodePool = []
-    this.heap = new MinHeap()
+    this.heap =
+      this.priorityQueue === "bucketed" ? new BucketHeap() : new MinHeap()
     this.seqCounter = 0
   }
 
