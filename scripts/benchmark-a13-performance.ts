@@ -9,12 +9,16 @@ const { values } = parseArgs({
   args: process.argv.slice(2),
   options: {
     baseline: { type: "string" },
+    greedy: { type: "string", default: "1.1" },
     repeats: { type: "string", default: "3" },
     output: { type: "string" },
   },
 })
 if (!values.baseline)
   throw new Error("Pass --baseline /path/to/baseline/HighDensitySolverA13.ts")
+const greedyMultiplier = Number(values.greedy)
+if (!Number.isFinite(greedyMultiplier) || greedyMultiplier <= 0)
+  throw new Error("greedy must be positive and finite")
 const repeats = Number(values.repeats)
 if (!Number.isInteger(repeats) || repeats < 1)
   throw new Error("repeats must be a positive integer")
@@ -24,7 +28,7 @@ function run(Solver: typeof HighDensitySolverA13, seed: number) {
   const start = performance.now()
   const s = new Solver({
     nodeWithPortPoints: node,
-    hyperParameters: { shuffleSeed: seed },
+    hyperParameters: { shuffleSeed: seed, greedyMultiplier },
   })
   s.solve()
   const ms = performance.now() - start
@@ -92,6 +96,7 @@ const seeds = [0, 1, 2, 3, 4].map((seed) => {
 })
 const result = {
   runtime: Bun.version,
+  greedyMultiplier,
   repeats,
   seeds,
   aggregateSpeedup:
