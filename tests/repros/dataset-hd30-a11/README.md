@@ -2,8 +2,11 @@
 
 These native-bound `NodeWithPortPoints` fixtures come from
 [`tscircuit/dataset-hd30`](https://github.com/tscircuit/dataset-hd30) at
-commit `996571b00d51fa635a1410d38268fc4b18bf4d82`.
+commit `0ad7fe36c3da67469a053cfa98f709f751f844b1`.
 
-They are the six dataset-hd30 nodes solved by
+They are the nine regular Pipeline 9 nodes solved by
 `HighDensitySolverA11` with Pipeline 9 copper dimensions, shuffle seed
-0, and no node growth.
+0, and no node growth. The `sample002-cmn_36` and `sample011-cmn_108`
+fixtures cover topology-aware connection scheduling for independent pairs and
+multi-segment physical roots, respectively. `sample008-cmn_447` protects the
+bounded seeded order used for smaller independent problems.
