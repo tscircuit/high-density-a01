@@ -1,8 +1,8 @@
 import type { SearchInputs } from "./SearchInputs"
 
-/** Close translation of kernel.c: same topology flags, cost arithmetic,
- * versioned heap entries, tie comparisons, and queue-pop chunk boundaries.
- * Heap fields use separate typed arrays (16 bytes total per entry).
+/** Same topology, cost arithmetic, priorities and pop boundaries as kernel.c.
+ * Replaced entries remain in the heap as stale sentinels, preserving its shape
+ * and chunk work with two typed arrays (12 bytes per entry).
  * Scalars live in the constructor closure, like the C module's private globals.
  */
 export class JavascriptSearchKernel {
@@ -29,7 +29,8 @@ export class JavascriptSearchKernel {
       states = plane * layers
     const distance = new Float64Array(states),
       parent = new Int32Array(states)
-    const versions = new Uint32Array(states)
+    const positions = new Uint32Array(states)
+    const noPosition = 0xffffffff
     const stateXY = new Int32Array(states),
       stateFlags = new Uint8Array(states)
     let goal = 0,
@@ -37,8 +38,7 @@ export class JavascriptSearchKernel {
       heapSize = 0,
       heapCapacity = 1024
     let heapF = new Float64Array(heapCapacity),
-      heapIndex = new Int32Array(heapCapacity),
-      heapVersion = new Uint32Array(heapCapacity)
+      heapIndex = new Int32Array(heapCapacity)
     let traceCost: Uint16Array,
       viaCost: Uint16Array,
       fixed: Uint8Array,
@@ -61,30 +61,32 @@ export class JavascriptSearchKernel {
         ((z % 2) << 4)
     }
     function push(index: number, f: number) {
+      const previous = positions[index]!
+      // Invalidate the old slot without removing its priority or its pop work.
+      // Unlike a wrapping generation counter, this cannot revive an old entry.
+      if (previous !== noPosition) heapIndex[previous] = -1
       let i = heapSize++
       while (i > 0) {
         const p = (i - 1) >> 1
         if (heapF[p]! <= f) break
         heapF[i] = heapF[p]!
-        heapIndex[i] = heapIndex[p]!
-        heapVersion[i] = heapVersion[p]!
+        const movedIndex = heapIndex[p]!
+        heapIndex[i] = movedIndex
+        if (movedIndex >= 0) positions[movedIndex] = i
         i = p
       }
       heapF[i] = f
       heapIndex[i] = index
-      versions[index] = (versions[index]! + 1) >>> 0
-      heapVersion[i] = versions[index]!
+      positions[index] = i
     }
     // Scalar results avoid allocating a JS object for each C struct return.
-    let poppedIndex = 0,
-      poppedVersion = 0
+    let poppedIndex = 0
     function pop() {
       poppedIndex = heapIndex[0]!
-      poppedVersion = heapVersion[0]!
+      if (poppedIndex >= 0) positions[poppedIndex] = noPosition
       const last = --heapSize
       if (!last) return
       const index = heapIndex[last]!,
-        version = heapVersion[last]!,
         f = heapF[last]!
       let i = 0
       while (i * 2 + 1 < heapSize) {
@@ -92,13 +94,14 @@ export class JavascriptSearchKernel {
         if (child + 1 < heapSize && heapF[child + 1]! < heapF[child]!) child++
         if (f <= heapF[child]!) break
         heapF[i] = heapF[child]!
-        heapIndex[i] = heapIndex[child]!
-        heapVersion[i] = heapVersion[child]!
+        const movedIndex = heapIndex[child]!
+        heapIndex[i] = movedIndex
+        if (movedIndex >= 0) positions[movedIndex] = i
         i = child
       }
       heapF[i] = f
       heapIndex[i] = index
-      heapVersion[i] = version
+      if (index >= 0) positions[index] = i
     }
     function visit(
       next: number,
@@ -138,7 +141,7 @@ export class JavascriptSearchKernel {
       heapSize = 0
       distance.fill(Infinity)
       parent.fill(-1)
-      versions.fill(0)
+      positions.fill(noPosition)
       distance[start] = 0
       push(start, heuristic[start]!)
     }
@@ -152,20 +155,17 @@ export class JavascriptSearchKernel {
         if (heapSize + 4 + layers > heapCapacity) {
           heapCapacity *= 2
           const f = new Float64Array(heapCapacity),
-            indices = new Int32Array(heapCapacity),
-            stamps = new Uint32Array(heapCapacity)
+            indices = new Int32Array(heapCapacity)
           f.set(heapF)
           indices.set(heapIndex)
-          stamps.set(heapVersion)
           heapF = f
           heapIndex = indices
-          heapVersion = stamps
           continue
         }
         pop()
         pops++
         const currentIndex = poppedIndex
-        if (poppedVersion !== versions[currentIndex]) continue
+        if (currentIndex < 0) continue
         const currentG = distance[currentIndex]!
         expansions++
         if (currentIndex === goal) return { status: 1, expansions }
