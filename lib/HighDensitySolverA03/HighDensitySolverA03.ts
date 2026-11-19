@@ -9,6 +9,7 @@ import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
   PortPoint,
+  StaticSegmentValidator,
 } from "../types"
 
 type ConnId = number
@@ -327,6 +328,7 @@ export interface HighDensitySolverA03Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  staticSegmentValidator?: StaticSegmentValidator
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -358,6 +360,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   showPenaltyMap: boolean
   showUsedCellMap: boolean
   effort: number
+  readonly staticSegmentValidator?: StaticSegmentValidator
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
@@ -506,6 +509,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   constructor(props: HighDensitySolverA03Props) {
     super()
+    this.staticSegmentValidator = props.staticSegmentValidator
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.highResolutionCellSize = props.highResolutionCellSize ?? 0.1
     this.highResolutionCellThickness = Math.max(
@@ -554,6 +558,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         effort: this.effort,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
+        staticSegmentValidator: this.staticSegmentValidator,
       },
     ]
   }
@@ -1135,6 +1140,19 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     const seg = this.activeConnSeg
     if (z === seg.endZ && cellId === seg.endCellId) {
+      if (
+        this.staticSegmentValidator &&
+        this.nodePool.parent[nodeIdx] === -1 &&
+        !this.isStaticMoveAllowed({
+          fromCellId: cellId,
+          fromZ: z,
+          toCellId: cellId,
+          toZ: z,
+          firstMove: true,
+        })
+      ) {
+        return
+      }
       this.finalizeRoute(nodeIdx)
       this.activeConnSeg = null
       this.activeConnId = -1
@@ -1152,6 +1170,18 @@ export class HighDensitySolverA03 extends BaseSolver {
     for (let i = neighborStart; i < neighborEnd; i++) {
       const neighborCellId = this.neighborIds[i]!
       const nextFlatIdx = z * this.planeSize + neighborCellId
+      if (
+        this.staticSegmentValidator &&
+        !this.isStaticMoveAllowed({
+          fromCellId: cellId,
+          fromZ: z,
+          toCellId: neighborCellId,
+          toZ: z,
+          firstMove: this.nodePool.parent[nodeIdx] === -1,
+        })
+      ) {
+        continue
+      }
 
       this.computeMoveCostAndRips(
         activeConn,
@@ -1199,6 +1229,18 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+        if (
+          this.staticSegmentValidator &&
+          !this.isStaticMoveAllowed({
+            fromCellId: cellId,
+            fromZ: z,
+            toCellId: cellId,
+            toZ: nz,
+            firstMove: this.nodePool.parent[nodeIdx] === -1,
+          })
+        ) {
+          continue
+        }
 
         this.computeMoveCostAndRips(
           activeConn,
@@ -1242,6 +1284,61 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
+  }
+
+  private isStaticMoveAllowed({
+    fromCellId,
+    fromZ,
+    toCellId,
+    toZ,
+    firstMove,
+  }: {
+    fromCellId: number
+    fromZ: number
+    toCellId: number
+    toZ: number
+    firstMove: boolean
+  }): boolean {
+    if (!this.staticSegmentValidator) return true
+    const seg = this.activeConnSeg!
+    const gridStart = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+      x: this.cellCenterX[fromCellId]!,
+      y: this.cellCenterY[fromCellId]!,
+    })
+    let start = { ...gridStart, z: this.layerToZ.get(fromZ)! }
+    if (firstMove) start = seg.startPoint
+
+    const gridEnd = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+      x: this.cellCenterX[toCellId]!,
+      y: this.cellCenterY[toCellId]!,
+    })
+    let end = { ...gridEnd, z: this.layerToZ.get(toZ)! }
+    if (toCellId === seg.endCellId && toZ === seg.endZ) end = seg.endPoint
+
+    const segment = {
+      connectionName: this.connIdToName[seg.connId]!,
+      rootConnectionName: this.connIdToRootNet[seg.connId],
+      traceThickness: this.traceThickness,
+      viaDiameter: this.viaDiameter,
+      start,
+      end,
+    }
+    if (!this.staticSegmentValidator(segment)) return false
+    if (fromZ === toZ) return true
+
+    // A terminal can replace a route point while vias[] retains the grid landing.
+    const terminalMatchesLanding =
+      start.x === gridStart.x &&
+      start.y === gridStart.y &&
+      end.x === gridStart.x &&
+      end.y === gridStart.y
+    if (terminalMatchesLanding) return true
+
+    return this.staticSegmentValidator({
+      ...segment,
+      start: { ...gridStart, z: this.layerToZ.get(fromZ)! },
+      end: { ...gridStart, z: this.layerToZ.get(toZ)! },
+    })
   }
 
   private computeMoveCostAndRips(
