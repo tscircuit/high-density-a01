@@ -1642,10 +1642,16 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     while (states.length > 1) {
       if (!this.sharedCrossRootPortFlat[states[0]!]!) break
+      const startZ = Math.floor(states[0]! / this.planeSize)
+      const nextZ = Math.floor(states[1]! / this.planeSize)
+      if (startZ !== nextZ) break
       states.shift()
     }
     while (states.length > 1) {
       if (!this.sharedCrossRootPortFlat[states[states.length - 1]!]!) break
+      const previousZ = Math.floor(states[states.length - 2]! / this.planeSize)
+      const endZ = Math.floor(states[states.length - 1]! / this.planeSize)
+      if (previousZ !== endZ) break
       states.pop()
     }
 
@@ -2159,8 +2165,27 @@ export class HighDensitySolverA03 extends BaseSolver {
           points[0] = { ...route.startPoint }
           points.push({ ...route.endPoint })
         } else if (points.length > 1) {
-          points[0] = { ...route.startPoint }
-          points[points.length - 1] = { ...route.endPoint }
+          const startWouldMoveVia =
+            points.length > 1 &&
+            points[0]!.z !== points[1]!.z &&
+            (points[0]!.x !== route.startPoint.x ||
+              points[0]!.y !== route.startPoint.y)
+          if (startWouldMoveVia) {
+            points.unshift({ ...route.startPoint })
+          } else {
+            points[0] = { ...route.startPoint }
+          }
+          const lastIndex = points.length - 1
+          const endWouldMoveVia =
+            lastIndex > 0 &&
+            points[lastIndex]!.z !== points[lastIndex - 1]!.z &&
+            (points[lastIndex]!.x !== route.endPoint.x ||
+              points[lastIndex]!.y !== route.endPoint.y)
+          if (endWouldMoveVia) {
+            points.push({ ...route.endPoint })
+          } else if (lastIndex > 0) {
+            points[lastIndex] = { ...route.endPoint }
+          }
         }
         result.push({
           connectionName: connName,
