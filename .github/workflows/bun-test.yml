@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - main
-      - '!version-bumps/**'
+      - "!version-bumps/**"
 
 jobs:
   test:
