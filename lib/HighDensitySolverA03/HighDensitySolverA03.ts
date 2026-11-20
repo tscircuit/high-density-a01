@@ -666,6 +666,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         rootByPortFlat.set(flatIdx, rootNet)
       } else if (existingRoot !== rootNet) {
         this.sharedCrossRootPortFlat[flatIdx] = 1
+        this.viaAllowed[cell.cellId] = 0
       }
 
       const existing = this.portOwnerFlat[flatIdx]!
