@@ -9,7 +9,23 @@ import input from "./orangecrab-terminal-via.json"
 test("A01 routes the OrangeCrab shared terminal sample", async (): Promise<void> => {
   const solver = new HighDensitySolverA01(input)
   solver.solve()
-  expect(solver.solved).toBeTrue()
+  // Reject the unroutable sample instead of emitting a transition without copper.
+  expect(solver.solved).toBeFalse()
+  expect(solver.failed).toBeTrue()
+  for (const route of solver.getOutput()) {
+    for (let index = 1; index < route.route.length; index++) {
+      const start = route.route[index - 1]!
+      const end = route.route[index]!
+      if (start.z === end.z) continue
+      expect(
+        route.vias.some((via) =>
+          [start, end].some(
+            (point) => Math.hypot(via.x - point.x, via.y - point.y) < 1e-6,
+          ),
+        ),
+      ).toBeTrue()
+    }
+  }
   const graphics = solver.visualize()
   // Show the routed sample without the expanded search box or visited cells.
   await expect(

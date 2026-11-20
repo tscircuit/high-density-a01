@@ -1239,12 +1239,14 @@ export class HighDensitySolverA01 extends BaseSolver {
       const firstFlat =
         (first.z * this.rows + first.row) * this.cols + first.col
       if (!this.sharedCrossRootPortCells.has(firstFlat)) break
+      if (first.z !== cells[1]!.z) break
       cells.shift()
     }
     while (cells.length > 1) {
       const last = cells[cells.length - 1]!
       const lastFlat = (last.z * this.rows + last.row) * this.cols + last.col
       if (!this.sharedCrossRootPortCells.has(lastFlat)) break
+      if (last.z !== cells[cells.length - 2]!.z) break
       cells.pop()
     }
 
