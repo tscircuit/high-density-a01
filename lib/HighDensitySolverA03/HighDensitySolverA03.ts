@@ -1060,6 +1060,9 @@ export class HighDensitySolverA03 extends BaseSolver {
   private stepOnce(): void {
     if (!this.activeConnSeg) {
       if (this.unsolvedSegs.length === 0) {
+        this.nodePool = new TypedNodePool()
+        this.ripChain = new TypedRipChain()
+        this.heap = new TypedMinHeap()
         this.solved = true
         return
       }
