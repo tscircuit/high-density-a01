@@ -1,0 +1,154 @@
+{
+  "nodeWithPortPoints": {
+    "capacityMeshNodeId": "topology_merge_13976__sub_0_0",
+    "center": {
+      "x": 18.507499999999997,
+      "y": 4.4533333333333305
+    },
+    "width": 10.720000000000027,
+    "height": 60.24533333333315,
+    "portPoints": [
+      {
+        "portPointId": "ce47261_pp0_z0::0",
+        "x": 18.172499999999996,
+        "y": 4.646666666666635,
+        "z": 0,
+        "connectionName": "source_net_121",
+        "rootConnectionName": "connectivity_net28",
+        "nextPortPointId": "ce47559_pp3_z0::0"
+      },
+      {
+        "portPointId": "ce47559_pp3_z0::0",
+        "x": 18.842499999999998,
+        "y": 4.453333333333323,
+        "z": 0,
+        "connectionName": "source_net_121",
+        "rootConnectionName": "connectivity_net28",
+        "prevPortPointId": "ce47261_pp0_z0::0"
+      },
+      {
+        "portPointId": "ce47271_preloadgap0_z5::5",
+        "x": 18.172499999999996,
+        "y": 4.646666666666635,
+        "z": 5,
+        "connectionName": "source_net_67",
+        "rootConnectionName": "connectivity_net70",
+        "nextPortPointId": "ce47237_preloadgap0_z0::0"
+      },
+      {
+        "portPointId": "ce47237_preloadgap0_z0::0",
+        "x": 18.172499999999996,
+        "y": 3.046666666666635,
+        "z": 0,
+        "connectionName": "source_net_67",
+        "rootConnectionName": "connectivity_net70",
+        "prevPortPointId": "ce47271_preloadgap0_z5::5"
+      },
+      {
+        "x": 18.172499999999996,
+        "y": 3.0679752102398927,
+        "z": 0,
+        "portPointId": "pipeline9_fallback:source_net_46_fixed_34_1:start",
+        "nextPortPointId": "pipeline9_fallback:source_net_46_fixed_34_1:end",
+        "connectionName": "source_net_46_fixed_34_1",
+        "rootConnectionName": "connectivity_net132"
+      },
+      {
+        "x": 18.172499999999996,
+        "y": 4.7175474235253185,
+        "z": 5,
+        "portPointId": "pipeline9_fallback:source_net_46_fixed_34_1:end",
+        "prevPortPointId": "pipeline9_fallback:source_net_46_fixed_34_1:start",
+        "connectionName": "source_net_46_fixed_34_1",
+        "rootConnectionName": "connectivity_net132"
+      }
+    ],
+    "portPointsInPairs": [
+      [
+        {
+          "portPointId": "ce47261_pp0_z0::0",
+          "x": 18.172499999999996,
+          "y": 4.646666666666635,
+          "z": 0,
+          "connectionName": "source_net_121",
+          "rootConnectionName": "connectivity_net28",
+          "nextPortPointId": "ce47559_pp3_z0::0"
+        },
+        {
+          "portPointId": "ce47559_pp3_z0::0",
+          "x": 18.842499999999998,
+          "y": 4.453333333333323,
+          "z": 0,
+          "connectionName": "source_net_121",
+          "rootConnectionName": "connectivity_net28",
+          "prevPortPointId": "ce47261_pp0_z0::0"
+        }
+      ],
+      [
+        {
+          "portPointId": "ce47271_preloadgap0_z5::5",
+          "x": 18.172499999999996,
+          "y": 4.646666666666635,
+          "z": 5,
+          "connectionName": "source_net_67",
+          "rootConnectionName": "connectivity_net70",
+          "nextPortPointId": "ce47237_preloadgap0_z0::0"
+        },
+        {
+          "portPointId": "ce47237_preloadgap0_z0::0",
+          "x": 18.172499999999996,
+          "y": 3.046666666666635,
+          "z": 0,
+          "connectionName": "source_net_67",
+          "rootConnectionName": "connectivity_net70",
+          "prevPortPointId": "ce47271_preloadgap0_z5::5"
+        }
+      ],
+      [
+        {
+          "x": 18.172499999999996,
+          "y": 3.0679752102398927,
+          "z": 0,
+          "portPointId": "pipeline9_fallback:source_net_46_fixed_34_1:start",
+          "nextPortPointId": "pipeline9_fallback:source_net_46_fixed_34_1:end",
+          "connectionName": "source_net_46_fixed_34_1",
+          "rootConnectionName": "connectivity_net132"
+        },
+        {
+          "x": 18.172499999999996,
+          "y": 4.7175474235253185,
+          "z": 5,
+          "portPointId": "pipeline9_fallback:source_net_46_fixed_34_1:end",
+          "prevPortPointId": "pipeline9_fallback:source_net_46_fixed_34_1:start",
+          "connectionName": "source_net_46_fixed_34_1",
+          "rootConnectionName": "connectivity_net132"
+        }
+      ]
+    ],
+    "availableZ": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "cellSizeMm": 0.1,
+  "viaDiameter": 0.56,
+  "stepMultiplier": 1,
+  "traceThickness": 0.1778,
+  "traceMargin": 0.178,
+  "viaMinDistFromBorder": 0.28,
+  "showPenaltyMap": false,
+  "showUsedCellMap": false,
+  "effort": 1,
+  "hyperParameters": {
+    "shuffleSeed": 0,
+    "ripCost": 10,
+    "ripTracePenalty": 0.5,
+    "ripViaPenalty": 0.75,
+    "viaBaseCost": 0.1,
+    "greedyMultiplier": 1.5
+  }
+}
