@@ -2312,6 +2312,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         }
         result.push({
           connectionName: connName,
+          rootConnectionName: this.connIdToRootNet[connId],
           regionId: this.nodeWithPortPoints.capacityMeshNodeId,
           traceThickness: this.traceThickness,
           viaDiameter: this.viaDiameter,
