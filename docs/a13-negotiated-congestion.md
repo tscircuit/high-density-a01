@@ -32,12 +32,12 @@ The unchanged SRJ18 sample 2 node `cmn_4__sub_2_0` has 26 connections in 12.7425
 Five independent ordering seeds all completed at 1× with zero physical geometry violations at the configured clearance:
 
 | Seed | Rounds | Search expansions | Local standalone time |
-| --- | ---: | ---: | ---: |
-| 0 | 34 | 4,079,934 | 2.51 s |
-| 1 | 11 | 2,801,118 | 1.44 s |
-| 2 | 25 | 3,768,696 | 2.18 s |
-| 3 | 71 | 7,452,422 | 5.09 s |
-| 4 | 127 | 9,473,422 | 6.89 s |
+| ---- | -----: | ----------------: | --------------------: |
+| 0    |     34 |         4,079,934 |                2.51 s |
+| 1    |     11 |         2,801,118 |                1.44 s |
+| 2    |     25 |         3,768,696 |                2.18 s |
+| 3    |     71 |         7,452,422 |                5.09 s |
+| 4    |    127 |         9,473,422 |                6.89 s |
 
 Times are one sequential local Bun run, not a same-machine CI benchmark or guaranteed runtime. The browser independently completed seed 0 in 2.645 s. Existing dataset01 sample008 also completed its ten connections at 1× in two rounds.
 
@@ -59,12 +59,12 @@ Compared with the original A13 implementation (`1a4a391`, merged unchanged as `0
 Sequential local Bun 1.4.1 comparison: warm both implementations, alternate before/after order, and take the median of three trials per seed. Every paired trial checks output SHA-256, search expansions, and round count for exact equality. All 15 comparisons matched.
 
 | Seed | Before median | After median | Speedup |
-| --- | ---: | ---: | ---: |
-| 0 | 2.414 s | 1.127 s | 2.14× |
-| 1 | 1.376 s | 0.648 s | 2.13× |
-| 2 | 2.115 s | 0.954 s | 2.22× |
-| 3 | 4.666 s | 2.068 s | 2.26× |
-| 4 | 7.467 s | 3.096 s | 2.41× |
+| ---- | ------------: | -----------: | ------: |
+| 0    |       2.414 s |      1.127 s |   2.14× |
+| 1    |       1.376 s |      0.648 s |   2.13× |
+| 2    |       2.115 s |      0.954 s |   2.22× |
+| 3    |       4.666 s |      2.068 s |   2.26× |
+| 4    |       7.467 s |      3.096 s |   2.41× |
 
 The ratio of summed per-seed medians is **2.29×**. These are local isolated-node measurements, not full-board or CI performance claims. Raw measurements are in [a13-performance.json](./a13-performance.json).
 
@@ -86,12 +86,12 @@ The TypeScript router caches unchanged route-pair findings and per-goal heuristi
 Against `cdfd68a` (merged PR #115), three warmed, alternating, sequential local Bun 1.4.1 trials per seed gave:
 
 | Seed | PR #115 median | New median | Speedup |
-| --- | ---: | ---: | ---: |
-| 0 | 1.071 s | 0.527 s | 2.03× |
-| 1 | 0.614 s | 0.316 s | 1.95× |
-| 2 | 0.901 s | 0.451 s | 2.00× |
-| 3 | 1.940 s | 0.948 s | 2.05× |
-| 4 | 2.892 s | 1.283 s | 2.25× |
+| ---- | -------------: | ---------: | ------: |
+| 0    |        1.071 s |    0.527 s |   2.03× |
+| 1    |        0.614 s |    0.316 s |   1.95× |
+| 2    |        0.901 s |    0.451 s |   2.00× |
+| 3    |        1.940 s |    0.948 s |   2.05× |
+| 4    |        2.892 s |    1.283 s |   2.25× |
 
 The ratio of summed medians is **2.10×**, on top of the previous optimization. Every paired run had identical output SHA-256, negotiation rounds, and search expansions. All five seeds still route at 1× with zero configured-clearance violations. Raw measurements are in [a13-performance-v2.json](./a13-performance-v2.json). These results describe this isolated node on this machine, not a guaranteed speedup on every input or runtime.
 
@@ -129,12 +129,12 @@ The translation preserves `configure` topology flags, `push`/`pop` comparisons, 
 **The full WASM gain is not retained.** Two separate warmed, alternating, sequential comparisons on Bun 1.4.1, each with three trials per seed:
 
 | Seed | WASM median | JS median (vs WASM) | Pre-WASM PR #115 median | JS median (vs PR #115) |
-| --- | ---: | ---: | ---: | ---: |
-| 0 | 0.570 s | 0.944 s | 1.231 s | 1.007 s |
-| 1 | 0.341 s | 0.623 s | 0.756 s | 0.661 s |
-| 2 | 0.496 s | 0.863 s | 1.035 s | 0.893 s |
-| 3 | 1.026 s | 1.752 s | 2.238 s | 1.855 s |
-| 4 | 1.435 s | 2.302 s | 3.322 s | 2.378 s |
+| ---- | ----------: | ------------------: | ----------------------: | ---------------------: |
+| 0    |     0.570 s |             0.944 s |                 1.231 s |                1.007 s |
+| 1    |     0.341 s |             0.623 s |                 0.756 s |                0.661 s |
+| 2    |     0.496 s |             0.863 s |                 1.035 s |                0.893 s |
+| 3    |     1.026 s |             1.752 s |                 2.238 s |                1.855 s |
+| 4    |     1.435 s |             2.302 s |                 3.322 s |                2.378 s |
 
 The summed-median ratios show **1.68× the WASM runtime** (about 68% longer) and **1.26× faster than pre-WASM PR #115**. All 30 paired runs retained identical geometry SHA-256, rounds, and expansions, with all five seeds routing at 1× and zero configured-clearance violations. These are local isolated-node measurements, not a guarantee for other engines or inputs. The two comparisons ran separately, so their JS times are reported separately rather than mixing measurements across runs.
 

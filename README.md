@@ -68,14 +68,14 @@ At Pipeline 9 copper dimensions, seed 0, and a 100,000-iteration cap, it solves
 six of the 27 native-bound problems in
 [`tscircuit/dataset-hd30`](https://github.com/tscircuit/dataset-hd30):
 
-| Node | Iterations |
-| --- | ---: |
-| `sample002-cmn_279` | 303 |
-| `sample004-cmn_117` | 2,794 |
-| `sample007-cmn_345__sub_0_2` | 245 |
-| `sample007-cmn_345__sub_0_0` | 79 |
-| `sample008-cmn_447` | 4,884 |
-| `sample008-cmn_438` | 1,828 |
+| Node                         | Iterations |
+| ---------------------------- | ---------: |
+| `sample002-cmn_279`          |        303 |
+| `sample004-cmn_117`          |      2,794 |
+| `sample007-cmn_345__sub_0_2` |        245 |
+| `sample007-cmn_345__sub_0_0` |         79 |
+| `sample008-cmn_447`          |      4,884 |
+| `sample008-cmn_438`          |      1,828 |
 
 All six outputs pass exact route-geometry validation without growing the input
 node. They are covered by native-bounds regressions under
@@ -109,16 +109,16 @@ A12 preserves the exact supplied endpoints and rejects completed routes that
 fail exact geometry validation. At Pipeline 9 dimensions, seed 0, and a
 100,000-iteration cap, it solves eight native-bound dataset-hd30 problems:
 
-| Node | Iterations |
-| --- | ---: |
-| `sample003-cmn_70` | 265 |
-| `sample004-topology_merge_639` | 14,478 |
-| `sample005-cmn_45` | 373 |
-| `sample007-cmn_345__sub_0_0` | 49 |
-| `sample007-cmn_345__sub_0_2` | 149 |
-| `sample008-cmn_251` | 1,067 |
-| `sample008-cmn_438` | 38,206 |
-| `sample016-cmn_31` | 306 |
+| Node                           | Iterations |
+| ------------------------------ | ---------: |
+| `sample003-cmn_70`             |        265 |
+| `sample004-topology_merge_639` |     14,478 |
+| `sample005-cmn_45`             |        373 |
+| `sample007-cmn_345__sub_0_0`   |         49 |
+| `sample007-cmn_345__sub_0_2`   |        149 |
+| `sample008-cmn_251`            |      1,067 |
+| `sample008-cmn_438`            |     38,206 |
+| `sample016-cmn_31`             |        306 |
 
 Five of these are new beyond A11, giving the two-solver portfolio 11
 native-bounds solves.
