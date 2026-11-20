@@ -9,6 +9,16 @@ export type PortPoint = {
   nextPortPointId?: string
 }
 
+export type StaticRouteSegment = {
+  start: { x: number; y: number; z: number }
+  end: { x: number; y: number; z: number }
+  connectionName: string
+  rootConnectionName?: string
+  traceThickness: number
+  viaDiameter: number
+}
+export type StaticSegmentValidator = (segment: StaticRouteSegment) => boolean
+
 export type NodeWithPortPoints = {
   capacityMeshNodeId: string
   center: { x: number; y: number }
