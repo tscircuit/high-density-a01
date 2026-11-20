@@ -30,7 +30,7 @@
     "lib"
   ],
   "devDependencies": {
-    "@biomejs/biome": "^2.4.4",
+    "@biomejs/biome": "2.5.15",
     "@tscircuit/hypergraph": "https://github.com/tscircuit/hypergraph",
     "@tscircuit/solver-utils": "^0.0.16",
     "@types/bun": "latest",

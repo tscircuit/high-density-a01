@@ -16,6 +16,10 @@ export interface SameLayerIntersection {
 }
 
 interface SegmentOnLayer {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
   z: number
   a: Point
   b: Point
@@ -106,6 +110,10 @@ function getAllSegments(route: HighDensityIntraNodeRoute): SegmentOnLayer[] {
     const b = route.route[i + 1]!
     if (a.z !== b.z) continue
     segments.push({
+      minX: Math.min(a.x, b.x),
+      maxX: Math.max(a.x, b.x),
+      minY: Math.min(a.y, b.y),
+      maxY: Math.max(a.y, b.y),
       z: a.z,
       a: { x: a.x, y: a.y },
       b: { x: b.x, y: b.y },
@@ -242,18 +250,19 @@ export function findSameLayerIntersections(
   }
 
   for (const z of zLayers) {
+    const layerInfo = routes.map((route) => ({
+      points: getPointsOnLayer(route, z),
+      segments: getSegmentsOnLayer(route, z),
+      root: toRootNetName(route),
+    }))
     for (let i = 0; i < routes.length; i++) {
       const route1 = routes[i]!
-      const pts1 = getPointsOnLayer(route1, z)
-      const segs1 = getSegmentsOnLayer(route1, z)
-      const rootNet1 = toRootNetName(route1)
+      const { points: pts1, segments: segs1, root: rootNet1 } = layerInfo[i]!
 
       for (let j = i + 1; j < routes.length; j++) {
         const route2 = routes[j]!
-        if (rootNet1 === toRootNetName(route2)) continue
-
-        const pts2 = getPointsOnLayer(route2, z)
-        const segs2 = getSegmentsOnLayer(route2, z)
+        const { points: pts2, segments: segs2, root: rootNet2 } = layerInfo[j]!
+        if (rootNet1 === rootNet2) continue
 
         const seen = new Set<string>()
         for (const p1 of pts1) {
@@ -387,6 +396,15 @@ export function findRouteGeometryViolations(
 
         for (const seg1 of segs1) {
           for (const seg2 of segs2) {
+            // A separating axis proves these segments cannot violate clearance.
+            // Keep the exact distance calculation (and its tolerances) for candidates.
+            if (
+              seg1.minX - seg2.maxX >= traceClearance ||
+              seg2.minX - seg1.maxX >= traceClearance ||
+              seg1.minY - seg2.maxY >= traceClearance ||
+              seg2.minY - seg1.maxY >= traceClearance
+            )
+              continue
             const distance = segmentDistance(seg1.a, seg1.b, seg2.a, seg2.b)
             if (distance + CLEARANCE_TOLERANCE >= traceClearance) continue
             if (
@@ -418,6 +436,11 @@ export function findRouteGeometryViolations(
 
         for (const p1 of points1) {
           for (const p2 of points2) {
+            if (
+              Math.abs(p1.x - p2.x) >= traceClearance ||
+              Math.abs(p1.y - p2.y) >= traceClearance
+            )
+              continue
             const distance = pointDistance(p1, p2)
             if (distance + CLEARANCE_TOLERANCE >= traceClearance) continue
             if (
@@ -446,6 +469,11 @@ export function findRouteGeometryViolations(
       const viaToViaClearance = route1.viaRadius + route2.viaRadius
       for (const via1 of route1.vias) {
         for (const via2 of route2.vias) {
+          if (
+            Math.abs(via1.x - via2.x) >= viaToViaClearance ||
+            Math.abs(via1.y - via2.y) >= viaToViaClearance
+          )
+            continue
           const distance = pointDistance(via1, via2)
           if (distance + CLEARANCE_TOLERANCE >= viaToViaClearance) continue
           pushViolation(violations, {
@@ -464,6 +492,13 @@ export function findRouteGeometryViolations(
       for (const via1 of route1.vias) {
         const requiredDistance = route1.viaRadius + route2.traceRadius
         for (const seg2 of route2.segments) {
+          if (
+            via1.x - seg2.maxX >= requiredDistance ||
+            seg2.minX - via1.x >= requiredDistance ||
+            via1.y - seg2.maxY >= requiredDistance ||
+            seg2.minY - via1.y >= requiredDistance
+          )
+            continue
           const distance = pointToSegmentDistance(via1, seg2.a, seg2.b)
           if (distance + CLEARANCE_TOLERANCE >= requiredDistance) continue
           pushViolation(violations, {
@@ -482,6 +517,13 @@ export function findRouteGeometryViolations(
       for (const via2 of route2.vias) {
         const requiredDistance = route2.viaRadius + route1.traceRadius
         for (const seg1 of route1.segments) {
+          if (
+            via2.x - seg1.maxX >= requiredDistance ||
+            seg1.minX - via2.x >= requiredDistance ||
+            via2.y - seg1.maxY >= requiredDistance ||
+            seg1.minY - via2.y >= requiredDistance
+          )
+            continue
           const distance = pointToSegmentDistance(via2, seg1.a, seg1.b)
           if (distance + CLEARANCE_TOLERANCE >= requiredDistance) continue
           pushViolation(violations, {
