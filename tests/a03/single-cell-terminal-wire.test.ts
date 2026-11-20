@@ -7,6 +7,7 @@ test("restoring via landings preserves both terminals of a single-cell wire", ()
     { x: -0.21, y: -0.16, z: 0, connectionName: "signal" },
   ]
   const solver = new HighDensitySolverA03({
+    viaDiameter: 0.3,
     nodeWithPortPoints: {
       capacityMeshNodeId: "single-cell-wire",
       center: { x: 0, y: 0 },
