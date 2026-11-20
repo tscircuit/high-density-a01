@@ -127,3 +127,40 @@ test("route geometry validator ignores declared shared endpoints", () => {
   expect(() => validateNoIntersections(routes)).not.toThrow()
   expect(() => validateRouteGeometry(routes)).not.toThrow()
 })
+
+for (const axis of ["x", "y"] as const)
+  for (const kind of [
+    "trace_clearance",
+    "via_trace_clearance",
+    "via_via_clearance",
+  ] as const)
+    test(`clearance broad phase preserves ${kind} at the ${axis} tolerance boundary`, () => {
+      const point = (value: number) => ({
+        x: axis === "x" ? value : 0,
+        y: axis === "y" ? value : 0,
+        z: 0,
+      })
+      for (const gap of [0.19, 0.2 - 2e-6, 0.2 - 5e-7, 0.2, 0.21]) {
+        const a: HighDensityIntraNodeRoute = {
+          connectionName: "a",
+          traceThickness: 0.2,
+          viaDiameter: 0.2,
+          route: kind === "trace_clearance" ? [point(-2), point(0)] : [],
+          vias: kind === "trace_clearance" ? [] : [point(0)],
+        }
+        const b: HighDensityIntraNodeRoute = {
+          connectionName: "b",
+          traceThickness: 0.2,
+          viaDiameter: 0.2,
+          route:
+            kind === "via_via_clearance" ? [] : [point(gap), point(gap + 2)],
+          vias: kind === "via_via_clearance" ? [point(gap)] : [],
+        }
+        expect(
+          findRouteGeometryViolations([a, b]).some((v) => v.type === kind),
+        ).toBe(gap + 1e-6 < 0.2)
+        expect(
+          findRouteGeometryViolations([b, a]).some((v) => v.type === kind),
+        ).toBe(gap + 1e-6 < 0.2)
+      }
+    })

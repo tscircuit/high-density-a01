@@ -1,5 +1,6 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
+import { getVectorLength } from "../getVectorLength"
 import {
   type AffineTransform,
   applyAffineTransformToPoint,
@@ -12,6 +13,7 @@ import type {
 } from "../types"
 
 type ConnId = number
+type GridCellIndex = number
 
 type RegionName = "left" | "top" | "right" | "bottom" | "middle"
 
@@ -40,18 +42,18 @@ interface ConnectionSeg {
   connId: ConnId
   startZ: number
   startCellId: number
-  startPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
   endZ: number
   endCellId: number
-  endPoint: { x: number; y: number; z: number }
+  endPoint: PortPoint
 }
 
 interface SolvedRouteInternal {
   connId: ConnId
   states: Int32Array
   viaCellIds: Int32Array
-  startPoint: { x: number; y: number; z: number }
-  endPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
+  endPoint: PortPoint
 }
 
 interface HyperParameters {
@@ -327,6 +329,8 @@ export interface HighDensitySolverA03Props {
   showPenaltyMap?: boolean
   showUsedCellMap?: boolean
   effort?: number
+  /** Enable diagonal edges within each of the five grid regions. */
+  enableDiagonalMoves?: boolean
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -358,6 +362,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   showPenaltyMap: boolean
   showUsedCellMap: boolean
   effort: number
+  enableDiagonalMoves: boolean
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
@@ -426,6 +431,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   private seqCounter = 0
 
   private _viaOccs: ConnId[] = []
+  private viaOccupantsByCell = new Map<GridCellIndex, readonly ConnId[]>()
   private _cellOccs: ConnId[] = []
   private _rippedIds: ConnId[] = []
   private ripCount!: number[]
@@ -521,6 +527,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
+    this.enableDiagonalMoves = props.enableDiagonalMoves ?? false
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
@@ -552,6 +559,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
+        enableDiagonalMoves: this.enableDiagonalMoves,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
       },
@@ -861,7 +869,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       if (a === b || a < 0 || b < 0) return
       const dx = this.cellCenterX[a]! - this.cellCenterX[b]!
       const dy = this.cellCenterY[a]! - this.cellCenterY[b]!
-      const cost = Math.hypot(dx, dy)
+      const cost = getVectorLength(dx, dy)
       pushUniqueNeighbor(neighbors[a]!, { cellId: b, cost })
       pushUniqueNeighbor(neighbors[b]!, { cellId: a, cost })
     }
@@ -882,6 +890,20 @@ export class HighDensitySolverA03 extends BaseSolver {
               cellId,
               this.cellIdFor(region.id, row, col + 1),
             )
+          }
+          if (this.enableDiagonalMoves && row + 1 < region.rows) {
+            if (col + 1 < region.cols) {
+              addBidirectionalEdge(
+                cellId,
+                this.cellIdFor(region.id, row + 1, col + 1),
+              )
+            }
+            if (col > 0) {
+              addBidirectionalEdge(
+                cellId,
+                this.cellIdFor(region.id, row + 1, col - 1),
+              )
+            }
           }
         }
       }
@@ -1060,6 +1082,10 @@ export class HighDensitySolverA03 extends BaseSolver {
       const next = this.unsolvedSegs.shift()!
       this.activeConnSeg = next
       this.activeConnId = next.connId
+
+      // Via occupants are independent of the search layer and ripped path.
+      // A new connection must see copper changes made by the previous search.
+      this.viaOccupantsByCell.clear()
 
       this.nodePool.clear()
       this.ripChain.clear()
@@ -1327,6 +1353,11 @@ export class HighDensitySolverA03 extends BaseSolver {
   private fillViaOccupants(cellId: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
+    const cachedOccupants = this.viaOccupantsByCell.get(cellId)
+    if (cachedOccupants) {
+      for (const connId of cachedOccupants) occs.push(connId)
+      return
+    }
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
@@ -1347,6 +1378,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.pushFlatOccupants(z * this.planeSize + occCellId, activeConn, occs)
       }
     })
+    this.viaOccupantsByCell.set(cellId, occs.slice())
   }
 
   private fillTraceOccupants(
@@ -1457,7 +1489,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     toZ: number,
     toCellId: number,
   ): number {
-    const dist = Math.hypot(
+    const dist = getVectorLength(
       this.cellCenterX[cellId]! - this.cellCenterX[toCellId]!,
       this.cellCenterY[cellId]! - this.cellCenterY[toCellId]!,
     )
@@ -2105,7 +2137,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       circles,
       rects,
       coordinateSystem: "cartesian" as const,
-      title: `HighDensityA03 [${this.getSolvedRouteCount()} solved, ${this.unsolvedSegs?.length ?? 0} remaining]`,
+      title: `${this.getSolverName()} [${this.getSolvedRouteCount()} solved, ${this.unsolvedSegs?.length ?? 0} remaining]`,
     }
   }
 
@@ -2131,9 +2163,11 @@ export class HighDensitySolverA03 extends BaseSolver {
             z: this.layerToZ.get(z) ?? z,
           }
         })
-        if (points.length > 0) {
+        if (points.length === 1) {
+          points[0] = { ...route.startPoint }
+          points.push({ ...route.endPoint })
+        } else if (points.length > 1) {
           const startWouldMoveVia =
-            points.length > 1 &&
             points[0]!.z !== points[1]!.z &&
             (points[0]!.x !== route.startPoint.x ||
               points[0]!.y !== route.startPoint.y)
@@ -2156,6 +2190,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         }
         result.push({
           connectionName: connName,
+          rootConnectionName: this.connIdToRootNet[connId],
           regionId: this.nodeWithPortPoints.capacityMeshNodeId,
           traceThickness: this.traceThickness,
           viaDiameter: this.viaDiameter,
@@ -2226,3 +2261,4 @@ export class HighDensitySolverA03 extends BaseSolver {
 }
 
 export { HighDensitySolverA03 as HighDensityA03Solver }
+
