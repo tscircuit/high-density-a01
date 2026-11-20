@@ -2287,7 +2287,10 @@ export class HighDensitySolverA03 extends BaseSolver {
             z: this.layerToZ.get(z) ?? z,
           }
         })
-        if (points.length > 0) {
+        if (points.length === 1) {
+          points[0] = { ...route.startPoint }
+          points.push({ ...route.endPoint })
+        } else if (points.length > 1) {
           const startWouldMoveVia =
             points.length > 1 &&
             points[0]!.z !== points[1]!.z &&
