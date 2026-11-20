@@ -10,6 +10,7 @@ import type {
   HighDensityIntraNodeRoute,
   NodeWithPortPoints,
   PortPoint,
+  StaticSegmentValidator,
 } from "../types"
 
 type ConnId = number
@@ -331,6 +332,7 @@ export interface HighDensitySolverA03Props {
   effort?: number
   /** Enable diagonal edges within each of the five grid regions. */
   enableDiagonalMoves?: boolean
+  staticSegmentValidator?: StaticSegmentValidator
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -363,6 +365,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   showUsedCellMap: boolean
   effort: number
   enableDiagonalMoves: boolean
+  readonly staticSegmentValidator?: StaticSegmentValidator
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
@@ -512,6 +515,7 @@ export class HighDensitySolverA03 extends BaseSolver {
 
   constructor(props: HighDensitySolverA03Props) {
     super()
+    this.staticSegmentValidator = props.staticSegmentValidator
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.highResolutionCellSize = props.highResolutionCellSize ?? 0.1
     this.highResolutionCellThickness = Math.max(
@@ -562,6 +566,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         enableDiagonalMoves: this.enableDiagonalMoves,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
+        staticSegmentValidator: this.staticSegmentValidator,
       },
     ]
   }
@@ -1161,6 +1166,19 @@ export class HighDensitySolverA03 extends BaseSolver {
 
     const seg = this.activeConnSeg
     if (z === seg.endZ && cellId === seg.endCellId) {
+      if (
+        this.staticSegmentValidator &&
+        this.nodePool.parent[nodeIdx] === -1 &&
+        !this.isStaticMoveAllowed({
+          fromCellId: cellId,
+          fromZ: z,
+          toCellId: cellId,
+          toZ: z,
+          firstMove: true,
+        })
+      ) {
+        return
+      }
       this.finalizeRoute(nodeIdx)
       this.activeConnSeg = null
       this.activeConnId = -1
@@ -1174,10 +1192,48 @@ export class HighDensitySolverA03 extends BaseSolver {
     const endCellId = seg.endCellId
     const neighborStart = this.neighborOffset[cellId]!
     const neighborEnd = this.neighborOffset[cellId + 1]!
+    // Occupant penalties can only increase the move's base cost in this
+    // domain. Its base cost therefore proves some OPEN labels unbeatable
+    // before collecting occupants or constructing their rip histories.
+    const canBoundMoveCost =
+      Number.isFinite(g) &&
+      Number.isFinite(this.hyperParameters.ripCost) &&
+      this.hyperParameters.ripCost >= 0 &&
+      Number.isFinite(this.hyperParameters.ripTracePenalty) &&
+      this.hyperParameters.ripTracePenalty >= 0 &&
+      Number.isFinite(this.hyperParameters.ripViaPenalty) &&
+      this.hyperParameters.ripViaPenalty >= 0
 
     for (let i = neighborStart; i < neighborEnd; i++) {
       const neighborCellId = this.neighborIds[i]!
       const nextFlatIdx = z * this.planeSize + neighborCellId
+      // Search states are keyed only by layer and cell. A closed destination
+      // cannot be expanded again, regardless of its move cost or rip history.
+      if (visited[nextFlatIdx] === stamp) continue
+      if (canBoundMoveCost && this.bestGStamp[nextFlatIdx] === stamp) {
+        const baseCost =
+          0 +
+          this.neighborCosts[i]! +
+          Math.min(this.penalty2d[neighborCellId]!, this.penaltyCap)
+        if (
+          Number.isFinite(baseCost) &&
+          g + baseCost >= this.bestGValue[nextFlatIdx]!
+        ) {
+          continue
+        }
+      }
+      if (
+        this.staticSegmentValidator &&
+        !this.isStaticMoveAllowed({
+          fromCellId: cellId,
+          fromZ: z,
+          toCellId: neighborCellId,
+          toZ: z,
+          firstMove: this.nodePool.parent[nodeIdx] === -1,
+        })
+      ) {
+        continue
+      }
 
       this.computeMoveCostAndRips(
         activeConn,
@@ -1225,6 +1281,31 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let nz = 0; nz < this.layers; nz++) {
         if (nz === z) continue
         const nextFlatIdx = nz * this.planeSize + cellId
+        if (visited[nextFlatIdx] === stamp) continue
+        if (canBoundMoveCost && this.bestGStamp[nextFlatIdx] === stamp) {
+          const baseCost =
+            0 +
+            this.hyperParameters.viaBaseCost +
+            Math.min(this.penalty2d[cellId]!, this.penaltyCap)
+          if (
+            Number.isFinite(baseCost) &&
+            g + baseCost >= this.bestGValue[nextFlatIdx]!
+          ) {
+            continue
+          }
+        }
+        if (
+          this.staticSegmentValidator &&
+          !this.isStaticMoveAllowed({
+            fromCellId: cellId,
+            fromZ: z,
+            toCellId: cellId,
+            toZ: nz,
+            firstMove: this.nodePool.parent[nodeIdx] === -1,
+          })
+        ) {
+          continue
+        }
 
         this.computeMoveCostAndRips(
           activeConn,
@@ -1268,6 +1349,69 @@ export class HighDensitySolverA03 extends BaseSolver {
         this.heap.push(f2, this.seqCounter++, newNodeIdx)
       }
     }
+  }
+
+  private isStaticMoveAllowed({
+    fromCellId,
+    fromZ,
+    toCellId,
+    toZ,
+    firstMove,
+  }: {
+    fromCellId: number
+    fromZ: number
+    toCellId: number
+    toZ: number
+    firstMove: boolean
+  }): boolean {
+    if (!this.staticSegmentValidator) return true
+    const seg = this.activeConnSeg!
+    const gridStart = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+      x: this.cellCenterX[fromCellId]!,
+      y: this.cellCenterY[fromCellId]!,
+    })
+    let start = { ...gridStart, z: this.layerToZ.get(fromZ)! }
+    if (firstMove) start = seg.startPoint
+
+    const gridEnd = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+      x: this.cellCenterX[toCellId]!,
+      y: this.cellCenterY[toCellId]!,
+    })
+    let end = { ...gridEnd, z: this.layerToZ.get(toZ)! }
+    if (toCellId === seg.endCellId && toZ === seg.endZ) end = seg.endPoint
+
+    const segment = {
+      connectionName: this.connIdToName[seg.connId]!,
+      rootConnectionName: this.connIdToRootNet[seg.connId],
+      traceThickness: this.traceThickness,
+      viaDiameter: this.viaDiameter,
+      start,
+      end,
+    }
+    if (fromZ === toZ) return this.staticSegmentValidator(segment)
+
+    const viaStart = { ...gridStart, z: start.z }
+    const viaEnd = { ...gridStart, z: end.z }
+    const hasStartStub = start.x !== gridStart.x || start.y !== gridStart.y
+    if (
+      hasStartStub &&
+      !this.staticSegmentValidator({ ...segment, start, end: viaStart })
+    ) {
+      return false
+    }
+    const hasEndStub = end.x !== gridStart.x || end.y !== gridStart.y
+    if (
+      hasEndStub &&
+      !this.staticSegmentValidator({ ...segment, start: viaEnd, end })
+    ) {
+      return false
+    }
+
+    return this.staticSegmentValidator({
+      ...segment,
+      start: viaStart,
+      end: viaEnd,
+    })
   }
 
   private computeMoveCostAndRips(
