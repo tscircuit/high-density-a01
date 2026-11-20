@@ -5,7 +5,7 @@ import { defaultA03Params } from "../../lib/default-params"
 import cases from "./search-pruning-cases.json"
 
 test("A03 pruning preserves routes and completion across ordinary and unusual costs", () => {
-  // Captured from unoptimized 9b1a206 with the original iteration and rip limits.
+  // Captured from unoptimized 5345f64 with the original iteration and rip limits.
   // Include negative and nonfinite costs, where a nonnegative lower bound
   // cannot justify discarding an OPEN destination.
   for (const entry of cases) {

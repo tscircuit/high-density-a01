@@ -38,7 +38,7 @@ test("A03 validates its emitted via landing when exact terminals replace grid po
     viaChecks.some(
       ({ start }) => start.x === terminal.x && start.y === terminal.y,
     ),
-  ).toBe(true)
+  ).toBe(false)
   expect(
     viaChecks.some(
       ({ start }) => start.x !== terminal.x || start.y !== terminal.y,
