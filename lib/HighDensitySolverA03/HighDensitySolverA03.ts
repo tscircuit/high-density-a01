@@ -1323,21 +1323,29 @@ export class HighDensitySolverA03 extends BaseSolver {
       start,
       end,
     }
-    if (!this.staticSegmentValidator(segment)) return false
-    if (fromZ === toZ) return true
+    if (fromZ === toZ) return this.staticSegmentValidator(segment)
 
-    // A terminal can replace a route point while vias[] retains the grid landing.
-    const terminalMatchesLanding =
-      start.x === gridStart.x &&
-      start.y === gridStart.y &&
-      end.x === gridStart.x &&
-      end.y === gridStart.y
-    if (terminalMatchesLanding) return true
+    const viaStart = { ...gridStart, z: start.z }
+    const viaEnd = { ...gridStart, z: end.z }
+    const hasStartStub = start.x !== gridStart.x || start.y !== gridStart.y
+    if (
+      hasStartStub &&
+      !this.staticSegmentValidator({ ...segment, start, end: viaStart })
+    ) {
+      return false
+    }
+    const hasEndStub = end.x !== gridStart.x || end.y !== gridStart.y
+    if (
+      hasEndStub &&
+      !this.staticSegmentValidator({ ...segment, start: viaEnd, end })
+    ) {
+      return false
+    }
 
     return this.staticSegmentValidator({
       ...segment,
-      start: { ...gridStart, z: this.layerToZ.get(fromZ)! },
-      end: { ...gridStart, z: this.layerToZ.get(toZ)! },
+      start: viaStart,
+      end: viaEnd,
     })
   }
 
