@@ -2167,8 +2167,27 @@ export class HighDensitySolverA03 extends BaseSolver {
           points[0] = { ...route.startPoint }
           points.push({ ...route.endPoint })
         } else if (points.length > 1) {
-          points[0] = { ...route.startPoint }
-          points[points.length - 1] = { ...route.endPoint }
+          const startWouldMoveVia =
+            points.length > 1 &&
+            points[0]!.z !== points[1]!.z &&
+            (points[0]!.x !== route.startPoint.x ||
+              points[0]!.y !== route.startPoint.y)
+          if (startWouldMoveVia) {
+            points.unshift({ ...route.startPoint })
+          } else {
+            points[0] = { ...route.startPoint }
+          }
+          const lastIndex = points.length - 1
+          const endWouldMoveVia =
+            lastIndex > 0 &&
+            points[lastIndex]!.z !== points[lastIndex - 1]!.z &&
+            (points[lastIndex]!.x !== route.endPoint.x ||
+              points[lastIndex]!.y !== route.endPoint.y)
+          if (endWouldMoveVia) {
+            points.push({ ...route.endPoint })
+          } else if (lastIndex > 0) {
+            points[lastIndex] = { ...route.endPoint }
+          }
         }
         result.push({
           connectionName: connName,
