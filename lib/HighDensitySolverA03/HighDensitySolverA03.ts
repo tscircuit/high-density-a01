@@ -1112,6 +1112,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       for (let i = 0; i < pen.length; i++) {
         pen[i] = pen[i]! * 0.9
       }
+      this.viaOccupantsByCell.clear()
       this.unsolvedSegs.push(this.activeConnSeg)
       this.activeConnSeg = null
       this.activeConnId = -1
@@ -1126,6 +1127,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
 
     if (this.heap.size === 0) {
+      this.viaOccupantsByCell.clear()
       this.error = `No path found for ${this.connIdToName[this.activeConnId]}`
       this.failed = true
       return
@@ -1159,6 +1161,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       ) {
         return
       }
+      this.viaOccupantsByCell.clear()
       this.finalizeRoute(nodeIdx)
       this.activeConnSeg = null
       this.activeConnId = -1
