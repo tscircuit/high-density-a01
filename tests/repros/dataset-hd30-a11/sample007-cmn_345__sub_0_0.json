@@ -1,0 +1,90 @@
+{
+  "capacityMeshNodeId": "cmn_345__sub_0_0",
+  "center": {
+    "x": 7.938999999999998,
+    "y": 14.7514995
+  },
+  "width": 1.7839999999999998,
+  "height": 0.2990010000000005,
+  "portPoints": [
+    {
+      "portPointId": "ce5449_pp0_z3::3",
+      "x": 7.046999999999999,
+      "y": 14.710499500000001,
+      "z": 3,
+      "connectionName": "source_trace_17__source_net_17_mst55",
+      "rootConnectionName": "connectivity_net43",
+      "nextPortPointId": "ce7147_pp2_z3::3"
+    },
+    {
+      "portPointId": "ce7147_pp2_z3::3",
+      "x": 8.610624999999999,
+      "y": 14.901,
+      "z": 3,
+      "connectionName": "source_trace_17__source_net_17_mst55",
+      "rootConnectionName": "connectivity_net43",
+      "prevPortPointId": "ce5449_pp0_z3::3"
+    },
+    {
+      "portPointId": "ce7145_pp1_z3::3",
+      "x": 7.49825,
+      "y": 14.901,
+      "z": 3,
+      "connectionName": "source_trace_63__source_net_63_mst5",
+      "rootConnectionName": "connectivity_net11",
+      "nextPortPointId": "ce7147_pp0_z3::3"
+    },
+    {
+      "portPointId": "ce7147_pp0_z3::3",
+      "x": 8.169874999999998,
+      "y": 14.901,
+      "z": 3,
+      "connectionName": "source_trace_63__source_net_63_mst5",
+      "rootConnectionName": "connectivity_net11",
+      "prevPortPointId": "ce7145_pp1_z3::3"
+    }
+  ],
+  "portPointsInPairs": [
+    [
+      {
+        "portPointId": "ce5449_pp0_z3::3",
+        "x": 7.046999999999999,
+        "y": 14.710499500000001,
+        "z": 3,
+        "connectionName": "source_trace_17__source_net_17_mst55",
+        "rootConnectionName": "connectivity_net43",
+        "nextPortPointId": "ce7147_pp2_z3::3"
+      },
+      {
+        "portPointId": "ce7147_pp2_z3::3",
+        "x": 8.610624999999999,
+        "y": 14.901,
+        "z": 3,
+        "connectionName": "source_trace_17__source_net_17_mst55",
+        "rootConnectionName": "connectivity_net43",
+        "prevPortPointId": "ce5449_pp0_z3::3"
+      }
+    ],
+    [
+      {
+        "portPointId": "ce7145_pp1_z3::3",
+        "x": 7.49825,
+        "y": 14.901,
+        "z": 3,
+        "connectionName": "source_trace_63__source_net_63_mst5",
+        "rootConnectionName": "connectivity_net11",
+        "nextPortPointId": "ce7147_pp0_z3::3"
+      },
+      {
+        "portPointId": "ce7147_pp0_z3::3",
+        "x": 8.169874999999998,
+        "y": 14.901,
+        "z": 3,
+        "connectionName": "source_trace_63__source_net_63_mst5",
+        "rootConnectionName": "connectivity_net11",
+        "prevPortPointId": "ce7145_pp1_z3::3"
+      }
+    ]
+  ],
+  "availableZ": [3]
+}

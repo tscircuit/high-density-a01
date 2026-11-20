@@ -11,7 +11,10 @@ test("A03 validates its emitted via landing when exact terminals replace grid po
       width: 2.2,
       height: 2.4,
       availableZ: [0, 7],
-      portPoints: [{ ...terminal, z: 0 }, { ...terminal, z: 7 }],
+      portPoints: [
+        { ...terminal, z: 0 },
+        { ...terminal, z: 7 },
+      ],
     },
     viaDiameter: 0.3,
     traceThickness: 0.1,
@@ -54,4 +57,3 @@ test("A03 validates its emitted via landing when exact terminals replace grid po
   expect(route!.vias).toHaveLength(1)
   expect(route!.vias[0]).not.toEqual({ x: terminal.x, y: terminal.y })
 })
-

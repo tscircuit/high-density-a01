@@ -90,4 +90,3 @@ test("A03 checks physical via landings in emitted coordinates without changing t
   expect(legacy.iterations).toBe(explicitUndefined.iterations)
   expect(guided.MAX_ITERATIONS).toBe(legacy.MAX_ITERATIONS)
 })
-

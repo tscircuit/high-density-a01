@@ -78,4 +78,3 @@ test("A03 checks exact terminal connectors and rejects a blocked single-cell sho
   expect(tiny.failed).toBe(true)
   expect(tiny.getOutput()).toEqual([])
 })
-

@@ -1,5 +1,6 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
+import { getVectorLength } from "../getVectorLength"
 import {
   type AffineTransform,
   applyAffineTransformToPoint,
@@ -42,18 +43,18 @@ interface ConnectionSeg {
   connId: ConnId
   startZ: number
   startCellId: number
-  startPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
   endZ: number
   endCellId: number
-  endPoint: { x: number; y: number; z: number }
+  endPoint: PortPoint
 }
 
 interface SolvedRouteInternal {
   connId: ConnId
   states: Int32Array
   viaCellIds: Int32Array
-  startPoint: { x: number; y: number; z: number }
-  endPoint: { x: number; y: number; z: number }
+  startPoint: PortPoint
+  endPoint: PortPoint
 }
 
 interface HyperParameters {
@@ -330,6 +331,8 @@ export interface HighDensitySolverA03Props {
   showUsedCellMap?: boolean
   effort?: number
   staticSegmentValidator?: StaticSegmentValidator
+  /** Enable diagonal edges within each of the five grid regions. */
+  enableDiagonalMoves?: boolean
   hyperParameters?: Partial<HyperParameters>
   initialPenaltyFn?: (params: {
     x: number
@@ -362,6 +365,7 @@ export class HighDensitySolverA03 extends BaseSolver {
   showUsedCellMap: boolean
   effort: number
   readonly staticSegmentValidator?: StaticSegmentValidator
+  enableDiagonalMoves: boolean
   stepMultiplier: number
   hyperParameters: HyperParameters
   initialPenaltyFn?: HighDensitySolverA03Props["initialPenaltyFn"]
@@ -527,6 +531,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.showPenaltyMap = props.showPenaltyMap ?? false
     this.showUsedCellMap = props.showUsedCellMap ?? false
     this.effort = props.effort ?? 1
+    this.enableDiagonalMoves = props.enableDiagonalMoves ?? false
     this.stepMultiplier = Math.max(1, Math.floor(props.stepMultiplier ?? 1))
     this.hyperParameters = {
       shuffleSeed: 0,
@@ -558,6 +563,7 @@ export class HighDensitySolverA03 extends BaseSolver {
         showPenaltyMap: this.showPenaltyMap,
         showUsedCellMap: this.showUsedCellMap,
         effort: this.effort,
+        enableDiagonalMoves: this.enableDiagonalMoves,
         hyperParameters: this.hyperParameters,
         initialPenaltyFn: this.initialPenaltyFn,
         staticSegmentValidator: this.staticSegmentValidator,
@@ -868,7 +874,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       if (a === b || a < 0 || b < 0) return
       const dx = this.cellCenterX[a]! - this.cellCenterX[b]!
       const dy = this.cellCenterY[a]! - this.cellCenterY[b]!
-      const cost = Math.hypot(dx, dy)
+      const cost = getVectorLength(dx, dy)
       pushUniqueNeighbor(neighbors[a]!, { cellId: b, cost })
       pushUniqueNeighbor(neighbors[b]!, { cellId: a, cost })
     }
@@ -889,6 +895,20 @@ export class HighDensitySolverA03 extends BaseSolver {
               cellId,
               this.cellIdFor(region.id, row, col + 1),
             )
+          }
+          if (this.enableDiagonalMoves && row + 1 < region.rows) {
+            if (col + 1 < region.cols) {
+              addBidirectionalEdge(
+                cellId,
+                this.cellIdFor(region.id, row + 1, col + 1),
+              )
+            }
+            if (col > 0) {
+              addBidirectionalEdge(
+                cellId,
+                this.cellIdFor(region.id, row + 1, col - 1),
+              )
+            }
           }
         }
       }
@@ -1613,7 +1633,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     toZ: number,
     toCellId: number,
   ): number {
-    const dist = Math.hypot(
+    const dist = getVectorLength(
       this.cellCenterX[cellId]! - this.cellCenterX[toCellId]!,
       this.cellCenterY[cellId]! - this.cellCenterY[toCellId]!,
     )
@@ -2261,7 +2281,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       circles,
       rects,
       coordinateSystem: "cartesian" as const,
-      title: `HighDensityA03 [${this.getSolvedRouteCount()} solved, ${this.unsolvedSegs?.length ?? 0} remaining]`,
+      title: `${this.getSolverName()} [${this.getSolvedRouteCount()} solved, ${this.unsolvedSegs?.length ?? 0} remaining]`,
     }
   }
 
