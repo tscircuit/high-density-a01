@@ -14,7 +14,6 @@ import type {
 
 // --- Interned connection ID ---
 type ConnId = number
-type GridCellIndex = number
 
 // --- Persistent ripped-trace linked list ---
 interface RippedNode {
@@ -33,6 +32,7 @@ interface SearchNode {
   row: number
   col: number
   g: number
+  f: number
   parentIdx: number // -1 = root
   ripped: RippedNode | null
 }
@@ -227,7 +227,6 @@ export class HighDensitySolverA01 extends BaseSolver {
   private usedDiagFlat!: Int32Array // layers * (rows-1) * (cols-1) * 2; -1 = empty
   private penalty2d!: Float64Array // planeSize
   private visitedStamp!: Uint32Array // layers * planeSize
-  private bestQueuedCost!: Float64Array
   private sharedCrossRootPortCells!: Set<number>
   private stamp = 0
 
@@ -260,7 +259,6 @@ export class HighDensitySolverA01 extends BaseSolver {
 
   // --- Reusable scratch for via occupant scan ---
   private _viaOccs: ConnId[] = []
-  private viaOccupantsByCell = new Map<GridCellIndex, readonly ConnId[]>()
 
   // --- Convergence state ---
   private ripCount!: number[]
@@ -429,7 +427,6 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // Visited stamp array (Uint32Array is zero-initialized)
     this.visitedStamp = new Uint32Array(totalCells)
-    this.bestQueuedCost = new Float64Array(totalCells)
     this.stamp = 0
 
     // Precompute via footprint offsets
@@ -531,14 +528,9 @@ export class HighDensitySolverA01 extends BaseSolver {
       this.activeConnId = next.connId
       this.crossLayerSearch = next.startZ !== next.endZ
 
-      // Occupancy and the active net stay fixed until this search finishes.
-      // A new connection must see newly routed or ripped copper.
-      this.viaOccupantsByCell.clear()
-
       // Reset A* state for this connection
       this.nodePool = []
       this.heap.clear()
-      this.bestQueuedCost.fill(Number.NaN)
       this.seqCounter = 0
       this.searchIterations = 0
       this.nextStamp()
@@ -558,12 +550,10 @@ export class HighDensitySolverA01 extends BaseSolver {
         row: next.startRow,
         col: next.startCol,
         g: 0,
+        f,
         parentIdx: -1,
         ripped: null,
       })
-      const startCell =
-        (next.startZ * this.rows + next.startRow) * this.cols + next.startCol
-      this.bestQueuedCost[startCell] = f
       this.heap.push(f, this.seqCounter++, 0)
       return
     }
@@ -603,8 +593,6 @@ export class HighDensitySolverA01 extends BaseSolver {
 
     // 3. Pop best node (O(log n))
     const nodeIdx = this.heap.pop()
-    // Retain a dominated entry's priority and iteration slot without its path.
-    if (nodeIdx === -1) return
     const node = this.nodePool[nodeIdx]!
     const { z, row, col, g, ripped } = node
 
@@ -650,17 +638,13 @@ export class HighDensitySolverA01 extends BaseSolver {
         this.computeH(z, nr, nc, endZ, endRow, endCol) *
           this.hyperParameters.greedyMultiplier
 
-      if (f2 >= this.bestQueuedCost[nIdx]!) {
-        this.heap.push(f2, this.seqCounter++, -1)
-        continue
-      }
-      this.bestQueuedCost[nIdx] = f2
       const newNodeIdx = this.nodePool.length
       this.nodePool.push({
         z,
         row: nr,
         col: nc,
         g: g2,
+        f: f2,
         parentIdx: nodeIdx,
         ripped: this._moveRipped,
       })
@@ -698,17 +682,13 @@ export class HighDensitySolverA01 extends BaseSolver {
           this.computeH(nz, row, col, endZ, endRow, endCol) *
             this.hyperParameters.greedyMultiplier
 
-        if (f2 >= this.bestQueuedCost[nIdx]!) {
-          this.heap.push(f2, this.seqCounter++, -1)
-          continue
-        }
-        this.bestQueuedCost[nIdx] = f2
         const newNodeIdx = this.nodePool.length
         this.nodePool.push({
           z: nz,
           row,
           col,
           g: g2,
+          f: f2,
           parentIdx: nodeIdx,
           ripped: this._moveRipped,
         })
@@ -856,12 +836,6 @@ export class HighDensitySolverA01 extends BaseSolver {
   private fillViaOccupants(row: number, col: number, activeConn: ConnId): void {
     const occs = this._viaOccs
     occs.length = 0
-    const cellIndex = row * this.cols + col
-    const cachedOccupants = this.viaOccupantsByCell.get(cellIndex)
-    if (cachedOccupants) {
-      for (const connId of cachedOccupants) occs.push(connId)
-      return
-    }
     const rows = this.rows
     const cols = this.cols
     const offDr = this.viaOffsetsDr
@@ -896,7 +870,6 @@ export class HighDensitySolverA01 extends BaseSolver {
         if (!seen) occs.push(occ)
       }
     }
-    this.viaOccupantsByCell.set(cellIndex, occs.slice())
   }
 
   private shouldSkipFixedPortHalo(flatIdx: number, connId: ConnId) {
