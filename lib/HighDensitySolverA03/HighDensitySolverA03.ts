@@ -1,6 +1,5 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
-import { getVectorLength } from "../getVectorLength"
 import {
   type AffineTransform,
   applyAffineTransformToPoint,
@@ -874,7 +873,7 @@ export class HighDensitySolverA03 extends BaseSolver {
       if (a === b || a < 0 || b < 0) return
       const dx = this.cellCenterX[a]! - this.cellCenterX[b]!
       const dy = this.cellCenterY[a]! - this.cellCenterY[b]!
-      const cost = getVectorLength(dx, dy)
+      const cost = Math.hypot(dx, dy)
       pushUniqueNeighbor(neighbors[a]!, { cellId: b, cost })
       pushUniqueNeighbor(neighbors[b]!, { cellId: a, cost })
     }
@@ -1633,7 +1632,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     toZ: number,
     toCellId: number,
   ): number {
-    const dist = getVectorLength(
+    const dist = Math.hypot(
       this.cellCenterX[cellId]! - this.cellCenterX[toCellId]!,
       this.cellCenterY[cellId]! - this.cellCenterY[toCellId]!,
     )
