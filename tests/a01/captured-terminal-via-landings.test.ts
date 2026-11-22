@@ -63,9 +63,7 @@ test("captured regional route loses its via landings during export", async (): P
   const routes = solver.getOutput()
   expect(routes).toHaveLength(5)
   const route = routes.find((route) => route.connectionName === "signal_1")!
-  expect(route.route[0]).toMatchObject(
-    solver.nodeWithPortPoints.portPoints[2]!,
-  )
+  expect(route.route[0]).toMatchObject(solver.nodeWithPortPoints.portPoints[2]!)
   expect(route.route.at(-1)).toMatchObject(
     solver.nodeWithPortPoints.portPoints[3]!,
   )
