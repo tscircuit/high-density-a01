@@ -36,7 +36,7 @@ test("A01 drops via landings when restoring off-grid terminals", async (): Promi
 
     if (startZ === 0) {
       await expect(
-        getSvgFromGraphicsObject(solver.visualize(), {
+        getSvgFromGraphicsObject(solver.visualize({ showViaLandings: true }), {
           backgroundColor: "white",
         }),
       ).toMatchSvgSnapshot(import.meta.path)

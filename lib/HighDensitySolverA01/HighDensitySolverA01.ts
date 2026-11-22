@@ -1,4 +1,5 @@
 import { BaseSolver } from "@tscircuit/solver-utils"
+import type { GraphicsObject, Text } from "graphics-debug"
 import { getConnectionPortPointPairs } from "../getConnectionPortPointPairs"
 import {
   type AffineTransform,
@@ -1556,8 +1557,11 @@ export class HighDensitySolverA01 extends BaseSolver {
     }
   }
 
-  override visualize() {
+  override visualize({
+    showViaLandings = false,
+  }: { showViaLandings?: boolean } = {}): GraphicsObject {
     const LAYER_COLORS = ["red", "blue", "orange", "green"]
+    const texts: Text[] = []
 
     const points: Array<{
       x: number
@@ -1699,9 +1703,27 @@ export class HighDensitySolverA01 extends BaseSolver {
         circles.push({
           center: { x: via.x, y: via.y },
           radius: this.viaDiameter / 2,
-          fill: "rgba(0,0,0,0.3)",
+          fill: "rgba(0,0,255,0.08)",
           stroke: "black",
         })
+        if (showViaLandings) {
+          // The copper pad can hide missing vertices in the exported route.
+          const landingLayers = [
+            ...new Set(
+              route.route
+                .filter((p) => Math.hypot(p.x - via.x, p.y - via.y) < 1e-9)
+                .map((p) => `z${p.z}`),
+            ),
+          ]
+          const fontSize = Math.max(width, height) * 0.025
+          texts.push({
+            x: via.x,
+            y: via.y - this.viaDiameter / 2 - fontSize,
+            text: `via landings: ${landingLayers.join(", ") || "none"}`,
+            fontSize,
+            color: landingLayers.length < 2 ? "red" : "blue",
+          })
+        }
       }
     }
 
@@ -1735,6 +1757,7 @@ export class HighDensitySolverA01 extends BaseSolver {
       lines,
       circles,
       rects,
+      texts,
       coordinateSystem: "cartesian" as const,
       title: `HighDensityA01 [${this.solvedRoutes?.size ?? 0} solved, ${this.unsolvedSegs?.length ?? 0} remaining]`,
     }
