@@ -4,7 +4,7 @@ import { getSvgFromGraphicsObject } from "graphics-debug"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 import input from "./fixtures/through-via-terminal-window.json"
 
-test("the complete captured region exposes through vias covering foreign terminals", async (): Promise<void> => {
+test("the complete captured region keeps through vias clear of foreign terminals", async (): Promise<void> => {
   // Unreduced 52-terminal candidate captured from a physical regional repair.
   const solver = new HighDensitySolverA01(input)
   solver.solve()
@@ -21,7 +21,7 @@ test("the complete captured region exposes through vias covering foreign termina
         ),
     ),
   )
-  expect(blockedTerminals).toHaveLength(4)
+  expect(blockedTerminals).toHaveLength(0)
   await expect(
     getSvgFromGraphicsObject(solver.visualize({ showViaLandings: true }), {
       backgroundColor: "white",
