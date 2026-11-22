@@ -3,7 +3,7 @@ import "bun-match-svg"
 import { getSvgFromGraphicsObject } from "graphics-debug"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 
-test("A01 drops via landings when restoring off-grid terminals", async (): Promise<void> => {
+test("A01 preserves via landings when restoring off-grid terminals", async (): Promise<void> => {
   for (const startZ of [0, 1]) {
     const start = { x: 0.12, y: 0.12, z: startZ, connectionName: "link" }
     const end = { x: 0.12, y: 0.13, z: 1 - startZ, connectionName: "link" }
@@ -32,7 +32,8 @@ test("A01 drops via landings when restoring off-grid terminals", async (): Promi
     const landingLayers = route.route
       .filter((point) => Math.hypot(point.x - via.x, point.y - via.y) < 1e-9)
       .map((point) => point.z)
-    expect(landingLayers).toEqual([])
+    expect(landingLayers).toContain(0)
+    expect(landingLayers).toContain(1)
 
     if (startZ === 0) {
       await expect(
