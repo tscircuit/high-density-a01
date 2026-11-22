@@ -204,6 +204,8 @@ export interface HighDensitySolverA01Props {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   viaDiameter: number
+  /** Minimum through-via center distance from another net's fixed port. */
+  viaMinDistFromPort?: number
   maxCellCount?: number
   stepMultiplier?: number
   traceThickness?: number
@@ -235,6 +237,7 @@ export class HighDensitySolverA01 extends BaseSolver {
   nodeWithPortPoints: NodeWithPortPoints
   cellSizeMm: number
   viaDiameter: number
+  viaMinDistFromPort?: number
   MAX_RIPS: number
   maxCellCount?: number
   traceThickness: number
@@ -358,6 +361,7 @@ export class HighDensitySolverA01 extends BaseSolver {
     this.nodeWithPortPoints = props.nodeWithPortPoints
     this.cellSizeMm = props.cellSizeMm
     this.viaDiameter = props.viaDiameter
+    this.viaMinDistFromPort = props.viaMinDistFromPort
     this.maxCellCount = props.maxCellCount
     this.traceThickness = props.traceThickness ?? 0.1
     this.traceMargin = props.traceMargin ?? 0.15
@@ -386,6 +390,7 @@ export class HighDensitySolverA01 extends BaseSolver {
         nodeWithPortPoints: this.nodeWithPortPoints,
         cellSizeMm: this.cellSizeMm,
         viaDiameter: this.viaDiameter,
+        viaMinDistFromPort: this.viaMinDistFromPort,
         maxCellCount: this.maxCellCount,
         stepMultiplier: this.stepMultiplier,
         traceThickness: this.traceThickness,
@@ -723,7 +728,8 @@ export class HighDensitySolverA01 extends BaseSolver {
       row >= this.minViaRow &&
       row <= this.maxViaRow &&
       col >= this.minViaCol &&
-      col <= this.maxViaCol
+      col <= this.maxViaCol &&
+      !this.isViaBlockedByPort({ row, col, activeConn })
 
     if (canVia) {
       for (let nz = 0; nz < this.layers; nz++) {
@@ -773,6 +779,24 @@ export class HighDensitySolverA01 extends BaseSolver {
     return (
       this.hyperParameters.ripCost *
       (1 + this.ripHistoryCostMultiplier * (this.ripCount[connId] ?? 0))
+    )
+  }
+
+  private isViaBlockedByPort({ row, col, activeConn }: {
+    row: number
+    col: number
+    activeConn: ConnId
+  }): boolean {
+    if (this.viaMinDistFromPort === undefined) return false
+    const center = applyAffineTransformToPoint(this.gridToBoundsTransform, {
+      x: this.gridOrigin.x + (col + 0.5) * this.cellSizeMm,
+      y: this.gridOrigin.y + (row + 0.5) * this.cellSizeMm,
+    })
+    const requiredDistance = this.viaMinDistFromPort
+    const root = this.connIdToRootNet[activeConn]
+    return this.nodeWithPortPoints.portPoints.some((port) =>
+      toRootNetName(port.connectionName, port.rootConnectionName) !== root &&
+      (port.x - center.x) ** 2 + (port.y - center.y) ** 2 < requiredDistance ** 2,
     )
   }
 
