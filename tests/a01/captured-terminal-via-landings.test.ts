@@ -75,7 +75,7 @@ test("captured regional route loses its via landings during export", async (): P
   expect(landingLayers).toEqual([])
 
   await expect(
-    getSvgFromGraphicsObject(solver.visualize(), {
+    getSvgFromGraphicsObject(solver.visualize({ showViaLandings: true }), {
       backgroundColor: "white",
     }),
   ).toMatchSvgSnapshot(import.meta.path)
