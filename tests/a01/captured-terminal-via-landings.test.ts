@@ -3,7 +3,7 @@ import "bun-match-svg"
 import { getSvgFromGraphicsObject } from "graphics-debug"
 import { HighDensitySolverA01 } from "../../lib/HighDensitySolverA01/HighDensitySolverA01"
 
-test("captured regional route loses its via landings during export", async (): Promise<void> => {
+test("captured regional route retains its via landings during export", async (): Promise<void> => {
   // Minimized from a captured regional solve: five connection pairs, six
   // layers, grid size and copper dimensions retained. Identities are
   // anonymized and coordinates are translated to the local origin.
@@ -72,7 +72,8 @@ test("captured regional route loses its via landings during export", async (): P
   const landingLayers = route.route
     .filter((point) => Math.hypot(point.x - via.x, point.y - via.y) < 1e-9)
     .map((point) => point.z)
-  expect(landingLayers).toEqual([])
+  expect(landingLayers).toContain(0)
+  expect(landingLayers).toContain(5)
 
   await expect(
     getSvgFromGraphicsObject(solver.visualize({ showViaLandings: true }), {
