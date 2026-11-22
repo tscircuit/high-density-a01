@@ -1777,9 +1777,26 @@ export class HighDensitySolverA01 extends BaseSolver {
           return { x: tp.x, y: tp.y, z: this.layerToZ.get(cell.z) ?? cell.z }
         })
         if (points.length > 0) {
-          points[0] = { ...route.startPoint }
+          const first = points[0]!
+          if (
+            points.length > 1 &&
+            first.z !== points[1]!.z &&
+            (first.x !== route.startPoint.x || first.y !== route.startPoint.y)
+          ) {
+            points.unshift({ ...route.startPoint })
+          } else {
+            points[0] = { ...route.startPoint }
+          }
           if (points.length > 1) {
-            points[points.length - 1] = { ...route.endPoint }
+            const last = points.at(-1)!
+            if (
+              last.z !== points[points.length - 2]!.z &&
+              (last.x !== route.endPoint.x || last.y !== route.endPoint.y)
+            ) {
+              points.push({ ...route.endPoint })
+            } else {
+              points[points.length - 1] = { ...route.endPoint }
+            }
           }
         }
         result.push({
