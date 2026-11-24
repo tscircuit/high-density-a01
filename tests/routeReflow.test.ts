@@ -37,6 +37,27 @@ test("normalizeRouteToTotalSegmentCount counts vias toward the target total", ()
   )
 })
 
+test("normalizeRouteToTotalSegmentCount preserves endpoint port point ids", () => {
+  const route: HighDensityIntraNodeRoute = {
+    connectionName: "conn-port-ids",
+    traceThickness: 0.1,
+    viaDiameter: 0.3,
+    vias: [],
+    route: [
+      { x: -1, y: 0, z: 0, portPointId: "start-port" },
+      { x: 0, y: 0.5, z: 0 },
+      { x: 1, y: 0, z: 0, portPointId: "end-port" },
+    ],
+  }
+
+  const normalized = normalizeRouteToTotalSegmentCount(route, 4)
+
+  expect(normalized.route[0]?.portPointId).toBe("start-port")
+  expect(normalized.route[normalized.route.length - 1]?.portPointId).toBe(
+    "end-port",
+  )
+})
+
 test("runForceDirectedRouteReflow keeps routes inside node bounds", () => {
   const nodeWithPortPoints: NodeWithPortPoints = {
     capacityMeshNodeId: "route-reflow-bounds",
