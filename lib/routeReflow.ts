@@ -134,6 +134,9 @@ const copyPoint = (point: RoutePoint): RoutePoint => ({
   ...(point.insideJumperPad === undefined
     ? {}
     : { insideJumperPad: point.insideJumperPad }),
+  ...(point.portPointId === undefined
+    ? {}
+    : { portPointId: point.portPointId }),
 })
 
 const isSamePosition = (left: RoutePoint, right: RoutePoint) =>
