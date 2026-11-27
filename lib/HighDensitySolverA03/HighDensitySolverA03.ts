@@ -1827,7 +1827,9 @@ export class HighDensitySolverA03 extends BaseSolver {
       this.usedIndicesByConn.push(undefined)
     }
     const usedIndices = this.usedIndicesByConn[connId] ?? []
-    usedIndices.push(...indices)
+    for (const index of indices) {
+      usedIndices.push(index)
+    }
     this.usedIndicesByConn[connId] = usedIndices
     while (this.solvedRoutes.length <= connId) {
       this.solvedRoutes.push(undefined)
