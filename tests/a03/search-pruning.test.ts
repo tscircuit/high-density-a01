@@ -5,7 +5,7 @@ import { defaultA03Params } from "../../lib/default-params"
 import cases from "./search-pruning-cases.json"
 
 test("A03 pruning preserves routes and completion across ordinary and unusual costs", () => {
-  // Unoptimized 2998f35 with restored net metadata and original routing limits.
+  // Pin deterministic routes after applying physical clearance footprints.
   // Include negative and nonfinite costs, where a nonnegative lower bound
   // cannot justify discarding an OPEN destination.
   for (const entry of cases) {
