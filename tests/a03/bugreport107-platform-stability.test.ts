@@ -18,8 +18,8 @@ test("A03 routes the bugreport107 tie consistently across platforms", () => {
     .find((r) => r.connectionName === "source_trace_73__source_net_73")
   expect(route).toBeDefined()
   expect(route!.route[4]).toEqual({
-    x: -12.292792792792792,
-    y: 6.113370888059204,
-    z: 2,
+    x: -12.090990990990992,
+    y: 6.006710444029601,
+    z: 1,
   })
 })

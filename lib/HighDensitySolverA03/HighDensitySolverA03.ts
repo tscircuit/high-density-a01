@@ -610,7 +610,7 @@ export class HighDensitySolverA03 extends BaseSolver {
     this.boundsMaxY = center.y + height / 2
 
     this.traceKeepoutRadius = this.traceMargin + this.traceThickness / 2
-    this.viaKeepoutRadius = this.viaDiameter / 2 + this.traceKeepoutRadius
+    this.viaKeepoutRadius = this.viaDiameter / 2 + this.traceMargin
 
     this.buildFiveRegionGrid(width, height)
     this.gridToBoundsTransform = this.computeGridToBoundsTransform()
@@ -1504,12 +1504,18 @@ export class HighDensitySolverA03 extends BaseSolver {
     }
     const cx = this.cellCenterX[cellId]!
     const cy = this.cellCenterY[cellId]!
-    this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (occCellId) => {
+    // Occupied cells already include the trace radius and clearance. A via
+    // needs only its additional radius when querying those occupied cells.
+    const extraViaRadius = Math.max(
+      0,
+      (this.viaDiameter - this.traceThickness) / 2,
+    )
+    this.forEachCellNearCircle(cx, cy, extraViaRadius, (occCellId) => {
       if (
         !circleIntersectsRect(
           cx,
           cy,
-          this.viaKeepoutRadius,
+          extraViaRadius,
           this.cellMinX[occCellId]!,
           this.cellMinY[occCellId]!,
           this.cellMaxX[occCellId]!,
@@ -1810,6 +1816,8 @@ export class HighDensitySolverA03 extends BaseSolver {
       if (this.failed) return
     }
 
+    // Ripping changes occupancy; commit-time via checks must see the new masks.
+    this.viaOccupantsByCell.clear()
     const indices: number[] = []
     for (let i = 0; i < states.length; i++) {
       const state = states[i]!
@@ -1910,10 +1918,6 @@ export class HighDensitySolverA03 extends BaseSolver {
         return
       }
       const existing = this.usedCellsFlat[flatIdx]!
-      const allowSameRootOverlap = this.allowSharedUse(connId, existing)
-      if (existing !== -1 && existing !== connId && !allowSameRootOverlap) {
-        return
-      }
       if (existing !== -1 && existing !== connId) {
         this.addSharedOccupant(flatIdx, connId)
       } else {
@@ -1931,6 +1935,10 @@ export class HighDensitySolverA03 extends BaseSolver {
   ) {
     const cx = this.cellCenterX[sourceCellId]!
     const cy = this.cellCenterY[sourceCellId]!
+    this.fillViaOccupants(sourceCellId, connId)
+    for (const occupant of this._viaOccs) pushUnique(displacedByVias, occupant)
+    // Clearance footprints can overlap without the conductors conflicting.
+    // Preserve every owner so removing one route retains its neighbors' masks.
     this.forEachCellNearCircle(cx, cy, this.viaKeepoutRadius, (cellId) => {
       if (
         !circleIntersectsRect(
@@ -1951,15 +1959,6 @@ export class HighDensitySolverA03 extends BaseSolver {
           cellId !== sourceCellId &&
           this.shouldSkipFixedPortHalo(flatIdx, connId)
         ) {
-          continue
-        }
-        this.fillTraceOccupants(flatIdx, connId, this._cellOccs)
-        if (this._cellOccs.length > 0) {
-          for (let i = 0; i < this._cellOccs.length; i++) {
-            pushUnique(displacedByVias, this._cellOccs[i]!)
-          }
-          this.replaceOccupants(flatIdx, connId)
-          indices.push(flatIdx)
           continue
         }
         const existing = this.usedCellsFlat[flatIdx]!
